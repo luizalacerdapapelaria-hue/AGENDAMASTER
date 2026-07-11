@@ -1,6 +1,76 @@
-const { app, BrowserWindow, shell, dialog } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
+
+// Configuração do IPC para salvar PDF nativamente no Electron
+ipcMain.handle('print-to-pdf', async (event, options) => {
+  const webContents = event.sender;
+  const win = BrowserWindow.fromWebContents(webContents);
+  
+  try {
+    const pdfOptions = {
+      printBackground: true,
+      margins: {
+        marginType: 'none'
+      },
+      marginsType: 1, // Fallback para versões mais antigas do Electron
+      landscape: options.landscape || false,
+      scale: options.scale || 1.0
+    };
+
+    if (options.widthMicrons && options.heightMicrons) {
+      pdfOptions.pageSize = {
+        width: options.widthMicrons,
+        height: options.heightMicrons
+      };
+    } else {
+      pdfOptions.pageSize = options.pageSize || 'A4';
+    }
+
+    // Tentar gerar o PDF com as configurações ideais (tamanho customizado e sem margens)
+    let data;
+    try {
+      data = await webContents.printToPDF(pdfOptions);
+    } catch (printErr) {
+      console.warn('[Electron PDF] Falha na primeira tentativa com tamanho customizado, tentando fallback simplificado:', printErr);
+      
+      // Tentativa de Fallback: Usar o padrão A4 (que é universalmente suportado) e margens em branco
+      const fallbackOptions = {
+        printBackground: true,
+        margins: {
+          marginType: 'none'
+        },
+        marginsType: 1,
+        landscape: options.landscape || false,
+        pageSize: 'A4'
+      };
+      
+      try {
+        data = await webContents.printToPDF(fallbackOptions);
+      } catch (secondErr) {
+        console.error('[Electron PDF] Falha em ambas as tentativas de PDF nativo:', secondErr);
+        throw new Error(`Erro de renderização do Chromium: ${secondErr.message || secondErr}`);
+      }
+    }
+
+    // Show native Windows Save File dialog
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: 'Salvar PDF Vetorial',
+      defaultPath: options.defaultName || 'Agenda_Master.pdf',
+      filters: [{ name: 'Arquivos PDF', extensions: ['pdf'] }]
+    });
+
+    if (filePath) {
+      await fs.promises.writeFile(filePath, data);
+      return { success: true, filePath };
+    }
+    return { success: false, cancelled: true };
+  } catch (err) {
+    console.error('Erro na geração do PDF nativo:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
 
 // Configuração do Auto-Updater para atualizações binárias (.exe)
 autoUpdater.autoDownload = true;

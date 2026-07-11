@@ -20,7 +20,7 @@ const App: React.FC = () => {
   const [initialConfig, setInitialConfig] = useState<Partial<AgendaConfig> | undefined>(undefined);
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
-    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.0.4/Agenda.Master.Setup.1.0.4.exe';
+    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.0.5/Agenda.Master.Setup.1.0.4.exe';
   });
 
   const verifiedEmailRef = React.useRef<string | null>(null);

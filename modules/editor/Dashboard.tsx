@@ -5345,7 +5345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
   }, [actualTotalPagesCount, config, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, pdfScaleMode]);
 
-  const executeVectorPrint = useCallback(() => {
+  const executeVectorPrint = useCallback(async () => {
       const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
         config.year !== 2026 && 
         config.year !== 2027 && 
@@ -5355,8 +5355,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
           return;
       }
-      window.print();
-  }, [config.projectType, config.year]);
+      
+      // Se estiver rodando no Electron desktop, usar o fluxo nativo extremamente seguro e polido
+      // @ts-ignore
+      if (window.electronAPI && typeof window.electronAPI.printToPDF === 'function') {
+          setPdfExporting(true);
+          try {
+              const widthMicrons = Math.round(PAGE_WIDTH_MM * 1000);
+              const heightMicrons = Math.round(PAGE_HEIGHT_MM * 1000);
+              const landscape = config.orientation !== 'portrait';
+
+              // @ts-ignore
+              const result = await window.electronAPI.printToPDF({
+                  widthMicrons,
+                  heightMicrons,
+                  landscape,
+                  defaultName: `${config.name || 'Agenda_Master'}.pdf`
+              });
+
+              if (result && result.success) {
+                  setPrintStatus('idle');
+                  alert(`PDF Vetorial gerado e salvo com sucesso em:\n${result.filePath}`);
+              } else if (result && result.cancelled) {
+                  // O usuário apenas cancelou a caixa de diálogo de salvamento, não faz nada
+              } else {
+                  alert(`Ocorreu um erro ao salvar o PDF: ${result ? result.error : 'Erro desconhecido'}`);
+              }
+          } catch (err: any) {
+              console.error('Erro na exportação de PDF nativo:', err);
+              alert(`Erro na exportação de PDF nativo: ${err.message || err}`);
+          } finally {
+              setPdfExporting(false);
+          }
+      } else {
+          window.print();
+      }
+  }, [config.projectType, config.year, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, config.orientation, config.name, user.plan]);
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900 ${isMobile ? 'pb-safe' : ''}`}>
