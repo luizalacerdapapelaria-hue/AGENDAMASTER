@@ -1,0 +1,8 @@
+{
+  "name": "Agenda Master 02/07",
+  "description": "Uma aplicação avançada para criação de miolos de agendas datadas, com integração de IA para conteúdo criativo e gerenciamento de dados anuais.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
