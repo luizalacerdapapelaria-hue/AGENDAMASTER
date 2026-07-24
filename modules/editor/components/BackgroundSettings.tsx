@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { BackgroundConfig } from '../../../types';
-import { Palmtree, Trash2, Upload, Minus, Palette, Layers, Eye, EyeOff, AlertTriangle, X, ChevronLeft, ChevronRight, Loader2, FileText } from 'lucide-react';
+import { Palmtree, Trash2, Upload, Minus, Palette, Layers, Eye, EyeOff, AlertTriangle, X, ChevronLeft, ChevronRight, Loader2, FileText, FlipHorizontal, FlipVertical, RotateCw, BookOpen } from 'lucide-react';
 import { compressImage } from '../utils/imageCompressor';
+import { ImageManager, useImageSrc } from '../utils/imageManager';
 
 const loadPdfJs = (): Promise<any> => {
     return new Promise((resolve, reject) => {
@@ -52,6 +53,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
     };
 
     const current = config || defaultBg;
+    const bgUrl = useImageSrc(current.image?.url);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const pdfPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -169,11 +171,12 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
             await page.render(renderContext).promise;
 
             const dataUrl = canvas.toDataURL('image/png');
+            const registeredUrl = await ImageManager.registerImage(dataUrl);
             
             onChange({ 
                 type: 'image', 
                 image: { 
-                    url: dataUrl, 
+                    url: registeredUrl, 
                     opacity: current.image?.opacity ?? 1, 
                     fit: 'fill'
                 } 
@@ -200,13 +203,14 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
         }
 
         try {
-            const dataUrl = await compressImage(file);
-            if (!dataUrl) return;
+            const rawDataUrl = await compressImage(file);
+            if (!rawDataUrl) return;
+            const registeredUrl = await ImageManager.registerImage(rawDataUrl);
             
             onChange({ 
                 type: 'image', 
                 image: { 
-                    url: dataUrl, 
+                    url: registeredUrl, 
                     opacity: current.image?.opacity ?? 1, 
                     fit: current.image?.fit ?? 'cover' 
                 } 
@@ -343,23 +347,30 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
 
             {current.type === 'image' && current.image && (
                 <div className="space-y-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    <div className="relative group aspect-[3/4] max-h-48 overflow-hidden rounded-md border border-gray-200 bg-gray-100">
+                    <div className="relative group aspect-[3/4] max-h-48 overflow-hidden rounded-md border border-gray-200 bg-gray-100 flex items-center justify-center">
                         <img 
-                            src={current.image.url} 
+                            src={bgUrl} 
                             alt="Background" 
-                            className="w-full h-full object-contain"
+                            className="w-full h-full object-contain transition-transform duration-200"
+                            style={{
+                                transform: [
+                                    current.image.rotation ? `rotate(${current.image.rotation}deg)` : '',
+                                    current.image.flipHorizontal ? 'scaleX(-1)' : '',
+                                    current.image.flipVertical ? 'scaleY(-1)' : '',
+                                ].filter(Boolean).join(' ') || undefined
+                            }}
                         />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                             <button 
                                 onClick={triggerImageUpload}
-                                className="p-2 bg-white rounded-full hover:bg-gray-100 text-gray-700 shadow-lg"
+                                className="p-2 bg-white rounded-full hover:bg-gray-100 text-gray-700 shadow-lg cursor-pointer"
                                 title="Alterar Imagem"
                             >
                                 <Upload className="w-5 h-5" />
                             </button>
                             <button 
                                 onClick={() => onChange({ type: 'none' })}
-                                className="p-2 bg-red-500 rounded-full hover:bg-red-600 text-white shadow-lg"
+                                className="p-2 bg-red-500 rounded-full hover:bg-red-600 text-white shadow-lg cursor-pointer"
                                 title="Remover"
                             >
                                 <Trash2 className="w-5 h-5" />
@@ -372,12 +383,113 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         <select 
                             value={current.image.fit}
                             onChange={(e) => onChange({ image: { ...current.image!, fit: e.target.value as any } })}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white"
+                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white select-none"
                         >
                             <option value="cover">Cobrir Totalmente (Crop)</option>
                             <option value="contain">Conter Inteira (Bordas)</option>
                             <option value="fill">Esticar para Preencher</option>
                         </select>
+                    </div>
+
+                    {/* Orientação e Sentido (Inverter/Espelhar) */}
+                    <div className="space-y-3 pt-3 border-t border-gray-200">
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                            Inverter e Espelhar Fundo
+                        </label>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => onChange({
+                                    image: {
+                                        ...current.image!,
+                                        flipHorizontal: !current.image?.flipHorizontal
+                                    }
+                                })}
+                                className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                                    current.image.flipHorizontal 
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                                title="Espelhar Horizontalmente (Esquerda/Direita)"
+                            >
+                                <FlipHorizontal className="w-3.5 h-3.5" />
+                                <span>Inverter H (Espelhar)</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => onChange({
+                                    image: {
+                                        ...current.image!,
+                                        flipVertical: !current.image?.flipVertical
+                                    }
+                                })}
+                                className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                                    current.image.flipVertical 
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                                title="Espelhar Verticalmente (Ponta-cabeça)"
+                            >
+                                <FlipVertical className="w-3.5 h-3.5" />
+                                <span>Inverter V</span>
+                            </button>
+                        </div>
+
+                        {/* Alternar em Páginas Pares (Simetria do Miolo) */}
+                        <button
+                            type="button"
+                            onClick={() => onChange({
+                                image: {
+                                    ...current.image!,
+                                    flipOnEvenPages: !current.image?.flipOnEvenPages
+                                }
+                            })}
+                            className={`w-full flex items-center justify-between p-2.5 rounded-lg border text-[10px] font-medium transition-all text-left cursor-pointer ${
+                                current.image.flipOnEvenPages 
+                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-800' 
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            <div className="flex items-center gap-2">
+                                <BookOpen className={`w-4 h-4 flex-shrink-0 ${current.image.flipOnEvenPages ? 'text-indigo-600' : 'text-gray-400'}`} />
+                                <div>
+                                    <p className="font-bold leading-tight">Alternar em Páginas Pares</p>
+                                    <p className="text-[9px] opacity-75 font-normal leading-tight">Inverte o sentido nas páginas da esquerda (miolo duplex)</p>
+                                </div>
+                            </div>
+                            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${current.image.flipOnEvenPages ? 'bg-indigo-600' : 'bg-gray-300'}`} />
+                        </button>
+
+                        {/* Rotation selector */}
+                        <div className="space-y-1.5 pt-1">
+                            <div className="flex items-center justify-between">
+                                <label className="block text-[9px] font-bold text-gray-400 uppercase">Girar Imagem (Rotação)</label>
+                                <span className="text-[9px] font-bold text-indigo-600">{current.image?.rotation || 0}°</span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-1.5">
+                                {[0, 90, 180, 270].map((deg) => (
+                                    <button
+                                        key={deg}
+                                        type="button"
+                                        onClick={() => onChange({
+                                            image: {
+                                                ...current.image!,
+                                                rotation: deg
+                                            }
+                                        })}
+                                        className={`py-1.5 px-1 rounded text-[10px] font-bold border transition-all text-center cursor-pointer ${
+                                            (current.image?.rotation || 0) === deg 
+                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
+                                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        {deg}°
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

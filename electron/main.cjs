@@ -11,21 +11,21 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
   try {
     const pdfOptions = {
       printBackground: true,
-      margins: {
-        marginType: 'none'
-      },
-      marginsType: 1, // Fallback para versões mais antigas do Electron
+      preferCSSPageSize: options.preferCSSPageSize !== false, // Habilitar por padrão para usar as dimensões exatas do CSS @page
+      marginsType: 1, // 1 = no margins (sem margens)
       landscape: options.landscape || false,
       scale: options.scale || 1.0
     };
 
-    if (options.widthMicrons && options.heightMicrons) {
+    if (options.pageSize) {
+      pdfOptions.pageSize = options.pageSize;
+    } else if (options.widthMicrons && options.heightMicrons) {
       pdfOptions.pageSize = {
         width: options.widthMicrons,
         height: options.heightMicrons
       };
     } else {
-      pdfOptions.pageSize = options.pageSize || 'A4';
+      pdfOptions.pageSize = 'A4';
     }
 
     // Tentar gerar o PDF com as configurações ideais (tamanho customizado e sem margens)
@@ -35,15 +35,12 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
     } catch (printErr) {
       console.warn('[Electron PDF] Falha na primeira tentativa com tamanho customizado, tentando fallback simplificado:', printErr);
       
-      // Tentativa de Fallback: Usar o padrão A4 (que é universalmente suportado) e margens em branco
+      // Tentativa de Fallback: Usar o padrão A5/A4 e margens em branco com marginsType
       const fallbackOptions = {
         printBackground: true,
-        margins: {
-          marginType: 'none'
-        },
         marginsType: 1,
         landscape: options.landscape || false,
-        pageSize: 'A4'
+        pageSize: options.pageSize || 'A4'
       };
       
       try {
@@ -63,11 +60,38 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
 
     if (filePath) {
       await fs.promises.writeFile(filePath, data);
+      shell.openPath(filePath); // Abrir o PDF automaticamente após salvar
       return { success: true, filePath };
     }
     return { success: false, cancelled: true };
   } catch (err) {
     console.error('Erro na geração do PDF nativo:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// IPC para salvar PDF de imagem (jsPDF) em Base64 e abrir automaticamente
+ipcMain.handle('save-pdf-base64', async (event, { base64String, defaultName }) => {
+  const webContents = event.sender;
+  const win = BrowserWindow.fromWebContents(webContents);
+  
+  try {
+    const buffer = Buffer.from(base64String, 'base64');
+    
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: 'Salvar PDF',
+      defaultPath: defaultName || 'Agenda_Master.pdf',
+      filters: [{ name: 'Arquivos PDF', extensions: ['pdf'] }]
+    });
+
+    if (filePath) {
+      await fs.promises.writeFile(filePath, buffer);
+      shell.openPath(filePath); // Abrir o PDF automaticamente após salvar
+      return { success: true, filePath };
+    }
+    return { success: false, cancelled: true };
+  } catch (err) {
+    console.error('Erro ao salvar o PDF via base64:', err);
     return { success: false, error: err.message || String(err) };
   }
 });

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { localStorage } from '../../services/safeStorage';
 import { User } from '../../types';
 import { Lock, Mail, ArrowRight, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings } from 'lucide-react';
 import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from '../../services/supabase';
@@ -338,7 +339,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           errMsg.toLowerCase().includes('invalid')
         ) {
           // Clear stale localstorage keys of Supabase
-          if (typeof window !== 'undefined' && window.localStorage) {
+          if (localStorage) {
             const keysToRemove: string[] = [];
             for (let i = 0; i < localStorage.length; i++) {
               const key = localStorage.key(i);

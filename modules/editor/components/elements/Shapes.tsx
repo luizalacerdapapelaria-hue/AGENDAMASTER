@@ -70,9 +70,13 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                     >
                         {style.showTimes && timesList[i] && (
                             <span 
-                                className="shrink-0 text-gray-500 font-mono pr-2 select-none" 
+                                className="shrink-0 pr-2 select-none" 
                                 style={{ 
-                                    fontSize: (style.fontSize ? style.fontSize * 0.7 : 10),
+                                    fontFamily: style.fontFamily || 'monospace',
+                                    fontSize: style.fontSize || 10,
+                                    fontWeight: style.fontWeight || 'normal',
+                                    color: style.color || '#6b7280',
+                                    letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
                                     lineHeight: 1,
                                     marginBottom: `-${borderWidthVal / 2}px`
                                 }}

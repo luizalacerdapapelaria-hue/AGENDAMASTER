@@ -3,6 +3,7 @@ import { jsPDF } from "jspdf";
 import { AgendaConfig, DayData, LayoutElement } from "../types";
 import { getMonthName, getDayName } from "../core/backend/calendar";
 import { getVerseForDay } from "../core/constants/verses";
+import { ImageManager } from "../modules/editor/utils/imageManager";
 
 const hexToRgb = (hex: string): { r: number, g: number, b: number } | null => {
   if (!hex || hex === 'transparent') return null;
@@ -197,14 +198,22 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             const imgW = style.flipX ? -absW : absW;
             const imgH = style.flipY ? -absH : absH;
 
-            doc.addImage(
-                style.imageUrl,
-                'JPEG',
-                imgX,
-                imgY,
-                imgW,
-                imgH
-            );
+            let resolvedUrl = style.imageUrl;
+            if (style.imageUrl.startsWith('image-id:')) {
+                const id = style.imageUrl.substring('image-id:'.length);
+                resolvedUrl = ImageManager.getCachedBase64(id) || '';
+            }
+
+            if (resolvedUrl) {
+                doc.addImage(
+                    resolvedUrl,
+                    'JPEG',
+                    imgX,
+                    imgY,
+                    imgW,
+                    imgH
+                );
+            }
         } catch (e) {
             console.error("Error adding image to PDF:", e);
         }
@@ -265,6 +274,9 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
 };
 
 export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays: DayData[], quotes: string[], onProgress: (progress: number) => void) => {
+    // Ensure all referenced images are loaded before generating PDF
+    await ImageManager.preloadConfigImages(config);
+    
     const format = config.pageSize.toLowerCase();
     const orientation = config.orientation === 'portrait' ? 'p' : 'l';
     const doc = new jsPDF({ orientation, unit: "mm", format, compress: true });

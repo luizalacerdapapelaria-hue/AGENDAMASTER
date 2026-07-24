@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { localStorage, sessionStorage } from '../../services/safeStorage';
+import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
 import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, IntroPage, BackgroundConfig } from '../../types';
 import { generateCalendarYear, getMonthName, generatePlannerDays, generateGenericPages } from '../../core/backend/calendar';
@@ -10,6 +12,7 @@ import { ElementRenderer } from './components/ElementRenderer';
 import { BackgroundSettings } from './components/BackgroundSettings';
 import { OpenTypeEditor } from './components/OpenTypeEditor';
 import { compressImage } from './utils/imageCompressor';
+import { ImageManager, useImageSrc } from './utils/imageManager';
 import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
 import * as icons from 'lucide-react';
 
@@ -599,6 +602,48 @@ const RulerWrapper: React.FC<RulerWrapperProps> = ({
   );
 };
 
+interface PageBackgroundProps {
+  bg: BackgroundConfig;
+  style: React.CSSProperties;
+  pageNumber?: number;
+}
+
+const PageBackground: React.FC<PageBackgroundProps> = ({ bg, style, pageNumber }) => {
+  const imageUrl = useImageSrc(bg.image?.url);
+
+  if (bg.type === 'image' && bg.image) {
+    const isEvenPage = pageNumber !== undefined ? pageNumber % 2 === 0 : false;
+    const baseFlipX = !!bg.image.flipHorizontal;
+    const flipOnEven = !!bg.image.flipOnEvenPages && isEvenPage;
+    const shouldFlipX = baseFlipX !== flipOnEven;
+    const shouldFlipY = !!bg.image.flipVertical;
+    const rotation = bg.image.rotation || 0;
+
+    const transformParts: string[] = [];
+    if (shouldFlipX) transformParts.push('scaleX(-1)');
+    if (shouldFlipY) transformParts.push('scaleY(-1)');
+    if (rotation) transformParts.push(`rotate(${rotation}deg)`);
+
+    return (
+      <div style={style}>
+        <img 
+          src={imageUrl} 
+          alt="Page Background" 
+          style={{ 
+              width: '100%', 
+              height: '100%', 
+              objectFit: bg.image.fit || 'cover',
+              opacity: bg.image.opacity ?? 1,
+              transform: transformParts.length > 0 ? transformParts.join(' ') : undefined,
+          }} 
+        />
+      </div>
+    );
+  }
+
+  return <div style={style} />;
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLogout, onConfigure }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState<'none' | 'sidebar' | 'properties' | 'layers' | 'elements'>('none');
@@ -708,10 +753,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
   });
   const [versesModalOpen, setVersesModalOpen] = useState(false);
+  const [reqModalOpen, setReqModalOpen] = useState(false);
   const [customVerses, setCustomVerses] = useState<string[]>(() => {
       try {
-          if (typeof window !== 'undefined' && window.localStorage) {
-              const saved = window.localStorage.getItem('agendamaster_custom_verses');
+          if (localStorage) {
+              const saved = localStorage.getItem('agendamaster_custom_verses');
               return saved ? JSON.parse(saved) : [];
           }
       } catch (e) {
@@ -734,6 +780,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [pdfExportProgress, setPdfExportProgress] = useState(0);
   const [pdfScaleMode, setPdfScaleMode] = useState<'fast' | 'standard' | 'high'>('standard');
   const [pdfExportMethod, setPdfExportMethod] = useState<'vector' | 'canvas'>('vector');
+  const [previewPageIndex, setPreviewPageIndex] = useState<number>(0);
 
   // PWA (Progressive Web Application) Installation States
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -1052,8 +1099,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     };
   }, []);
 
-  const handleExport = () => {
-    exportProject(config);
+  const handleExport = async () => {
+    try {
+      const exportable = await ImageManager.prepareConfigForExport(config);
+      exportProject(exportable);
+    } catch (e) {
+      console.error('Error preparing export', e);
+      exportProject(config);
+    }
   };
 
   const handleImportClick = () => {
@@ -1090,6 +1143,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     loadStoredFonts();
   }, []);
 
+  // -- PRELOAD AND MIGRATE IMAGES ON MOUNT --
+  useEffect(() => {
+    const initializeImages = async () => {
+      try {
+        await ImageManager.preloadConfigImages(config);
+        const migrated = await ImageManager.migrateConfigImages(config);
+        if (JSON.stringify(migrated) !== JSON.stringify(config)) {
+          setConfigSilent(migrated);
+        }
+      } catch (err) {
+        console.error('Erro ao inicializar e migrar imagens:', err);
+      }
+    };
+    initializeImages();
+  }, []);
+
   // -- LOCAL STORAGE PERSISTENCE --
   useEffect(() => {
     const savedConfig = localStorage.getItem('agendamaster_current_project');
@@ -1122,7 +1191,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!pendingFile) return;
     try {
       const importedConfig = await importProject(pendingFile);
-      setConfig(importedConfig);
+      const migratedConfig = await ImageManager.migrateConfigImages(importedConfig);
+      setConfig(migratedConfig);
       // Reset state based on new config
       setSelectedIds([]);
       setEditMode('daily');
@@ -1346,9 +1416,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!file) return;
 
     try {
-      const dataUrl = await compressImage(file);
-      if (!dataUrl) return;
-      updateElementStyle(elementId, { imageUrl: dataUrl });
+      const rawDataUrl = await compressImage(file);
+      if (!rawDataUrl) return;
+      const registeredUrl = await ImageManager.registerImage(rawDataUrl);
+      updateElementStyle(elementId, { imageUrl: registeredUrl });
     } catch (error) {
       console.error('Erro ao comprimir imagem de elemento:', error);
     }
@@ -1515,6 +1586,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     return false;
   };
 
+  const getEffectiveBg = (pageBg?: BackgroundConfig, fallbackBg?: BackgroundConfig) => {
+    if (pageBg && pageBg.type) {
+      if (pageBg.type === 'none') return undefined;
+      return pageBg;
+    }
+    return fallbackBg;
+  };
+
   const renderBackground = (bg?: BackgroundConfig, pageNumber?: number) => {
     if (!bg || bg.type === 'none') return null;
 
@@ -1542,24 +1621,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       } else {
         style.background = `radial-gradient(circle at center, ${colors[0]}, ${colors[1]})`;
       }
-    } else if (bg.type === 'image' && bg.image) {
-      return (
-        <div style={style}>
-          <img 
-            src={bg.image.url} 
-            alt="Page Background" 
-            style={{ 
-                width: '100%', 
-                height: '100%', 
-                objectFit: bg.image.fit || 'cover',
-                opacity: bg.image.opacity ?? 1
-            }} 
-          />
-        </div>
-      );
     }
 
-    return <div style={style} />;
+    return <PageBackground bg={bg} style={style} pageNumber={pageNumber} />;
   };
 
   const cancelPrint = () => {
@@ -3946,13 +4010,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const introPage = config.introPages.find(p => p.id === currentIntroPageId);
     const monthlyPage = config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId);
     const dividerStyle = config.monthlyDividerStyle || {};
+    const introBg = (config.background && config.background.type !== 'none' && config.background.showOnIntroPages !== false) ? config.background : undefined;
+    const dailyBg = (config.background && config.background.type !== 'none' && config.background.showOnDailyPages !== false) ? config.background : undefined;
     const editorBg = editMode === 'intro' 
-        ? (introPage?.background || (config.background?.showOnIntroPages ? config.background : undefined))
+        ? getEffectiveBg(introPage?.background, introBg)
         : editMode === 'monthly_intro'
-        ? (monthlyPage?.background || (config.background?.showOnIntroPages ? config.background : undefined))
+        ? getEffectiveBg(monthlyPage?.background, introBg)
         : editMode === 'divider'
-        ? (dividerStyle.background || { type: 'solid', color: dividerStyle.backgroundColor || '#ffffff', showOnIntroPages: true, showOnDailyPages: true })
-        : (config.background?.showOnDailyPages ? config.background : undefined);
+        ? getEffectiveBg(dividerStyle.background, introBg)
+        : dailyBg;
 
     const paddingStyle = { 
         paddingTop: `${config.margins.top * EDITOR_SCALE}px`, 
@@ -3999,10 +4065,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     };
 
+    const editorPageNum = editorViewMode === 'weekly_left' ? 2 : 1;
+
     if (editMode === 'intro') {
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg)}
+                {renderBackground(editorBg, editorPageNum)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(getActiveElements(), null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentIntroPageId || undefined)}
                 </div>
@@ -4022,7 +4090,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg)}
+                {renderBackground(editorBg, editorPageNum)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentMonthlyIntroPageId || undefined)}
                 </div>
@@ -4042,7 +4110,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg)}
+                {renderBackground(editorBg, editorPageNum)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider')}
                 </div>
@@ -4065,7 +4133,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg)}
+                {renderBackground(editorBg, editorPageNum)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(activeElements, mockBatch[0], true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockBatch)}
                 </div>
@@ -4080,7 +4148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (editorViewMode === 'standard') {
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
-                    {renderBackground(editorBg)}
+                    {renderBackground(editorBg, editorPageNum)}
                     <div className={`${usefulAreaClass} flex flex-col`}>
                         <div className="flex-1 border-b border-dashed border-indigo-200 relative overflow-visible">
                             {renderTemplate(config.elements, mockDay1, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
@@ -4098,7 +4166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg)}
+                {renderBackground(editorBg, editorPageNum)}
                 <div className={`${usefulAreaClass} flex flex-col`}>
                     <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${editorViewMode === 'bottom' ? 'opacity-40 bg-gray-50' : ''}`}>
                         {renderTemplate(elementsTop, mockDay1, true, editorViewMode === 'top', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'top')}
@@ -4121,7 +4189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const mockWeekday: DayData = { dayOfMonth: 20, month: 10, year: config.year, dayOfWeek: 2, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
-                    {renderBackground(editorBg)}
+                    {renderBackground(editorBg, editorPageNum)}
                     <div className={usefulAreaClass}>
                         {renderTemplate(config.elements, mockWeekday, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard')}
                     </div>
@@ -4134,7 +4202,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg)}
+                {renderBackground(editorBg, editorPageNum)}
                 <div className={`${usefulAreaClass} flex flex-col`}>
                     <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${editorViewMode === 'sunday' ? 'opacity-40 bg-gray-50' : ''}`}>
                         {renderTemplate(elementsSat, mockSat, true, editorViewMode === 'saturday', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'saturday')}
@@ -4186,7 +4254,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                     {wrapWithRuler(
                         <div className={`${containerClass} ${editorViewMode === 'weekly_right' ? 'ring-1 ring-gray-300 opacity-90' : 'ring-4 ring-indigo-500/30'}`} style={{ ...containerStyle, ...leftPaddingStyle }}>
-                            {renderBackground(editorBg)}
+                            {renderBackground(editorBg, 2)}
                             <div className={usefulAreaClass}>
                                 {renderTemplate(elementsLeft, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'weekly_left', undefined, mockWeek)}
                                 {editorViewMode === 'weekly_right' && (
@@ -4203,7 +4271,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                     {wrapWithRuler(
                         <div className={`${containerClass} ${editorViewMode === 'weekly_left' ? 'ring-1 ring-gray-300 opacity-90' : 'ring-4 ring-indigo-500/30'}`} style={{ ...containerStyle, ...rightPaddingStyle }}>
-                            {renderBackground(editorBg)}
+                            {renderBackground(editorBg, 1)}
                             <div className={usefulAreaClass}>
                                 {renderTemplate(elementsRight, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'weekly_right', undefined, mockWeek)}
                                 {editorViewMode === 'weekly_left' && (
@@ -4264,12 +4332,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     };
 
-    const dailyBg = config.background?.showOnDailyPages ? config.background : undefined;
+    const introBg = (config.background && config.background.type !== 'none' && config.background.showOnIntroPages !== false) ? config.background : undefined;
+    const dailyBg = (config.background && config.background.type !== 'none' && config.background.showOnDailyPages !== false) ? config.background : undefined;
 
     const renderMonthDivider = (month: number, year: number) => {
         const style = config.monthlyDividerStyle || {};
         const elements = style.elements || [];
-        const dividerBg = style.background || { type: 'solid', color: style.backgroundColor || '#ffffff', showOnIntroPages: true, showOnDailyPages: true };
+        const dividerBg = getEffectiveBg(style.background, introBg);
 
         const monthDummyDay: DayData = {
             dayOfMonth: 1,
@@ -4302,7 +4371,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     const renderDividerVersoPage = (month: number, year: number, pNum: number, content: string) => {
         let elements: LayoutElement[] = [];
-        let versoBg = dailyBg;
+        let versoBg = dailyBg || introBg;
         
         if (content === 'notes') {
             elements = [
@@ -4322,12 +4391,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const introPage = config.introPages.find(p => p.id === content);
             if (introPage) {
                 elements = introPage.elements;
-                versoBg = introPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                versoBg = getEffectiveBg(introPage.background, introBg);
             } else {
                 const mPage = config.monthlyIntroPages?.find(p => p.id === content);
                 if (mPage) {
                     elements = mPage.elements;
-                    versoBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                    versoBg = getEffectiveBg(mPage.background, introBg);
                 }
             }
         }
@@ -4357,7 +4426,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const renderFillerPage = (pNum: number) => {
         const content = config.fillerPageContent || 'blank';
         let elements: LayoutElement[] = [];
-        let fillerBg = dailyBg;
+        let fillerBg = dailyBg || introBg;
         
         if (content === 'notes') {
             elements = [
@@ -4377,7 +4446,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const introPage = config.introPages.find(p => p.id === content);
             if (introPage) {
                 elements = introPage.elements;
-                fillerBg = introPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                fillerBg = getEffectiveBg(introPage.background, introBg);
+            } else {
+                const mPage = config.monthlyIntroPages?.find(p => p.id === content);
+                if (mPage) {
+                    elements = mPage.elements;
+                    fillerBg = getEffectiveBg(mPage.background, introBg);
+                }
             }
         }
 
@@ -4395,7 +4470,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     config.introPages.forEach(page => {
         const isEven = (pageCount + 1) % 2 === 0;
         const elementsToRender = isEven ? getMirroredElements(page.elements) : page.elements;
-        const pageBg = page.background || (config.background?.showOnIntroPages ? config.background : undefined);
+        const pageBg = getEffectiveBg(page.background, introBg);
         const container = renderPageContainer(renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'intro', page.id), page.id, false, pageBg);
         if(container) pages.push(container);
     });
@@ -4470,7 +4545,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                const pageBg = getEffectiveBg(mPage.background, introBg);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4497,7 +4572,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                    const pageBg = getEffectiveBg(mPage.background, introBg);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4519,7 +4594,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                            const pageBg = getEffectiveBg(mPage.background, introBg);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4592,7 +4667,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                const pageBg = getEffectiveBg(mPage.background, introBg);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4619,7 +4694,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                    const pageBg = getEffectiveBg(mPage.background, introBg);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4641,7 +4716,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                            const pageBg = getEffectiveBg(mPage.background, introBg);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4780,7 +4855,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                const pageBg = getEffectiveBg(mPage.background, introBg);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4807,7 +4882,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                    const pageBg = getEffectiveBg(mPage.background, introBg);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4829,7 +4904,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                            const pageBg = getEffectiveBg(mPage.background, introBg);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4961,7 +5036,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                const pageBg = getEffectiveBg(mPage.background, introBg);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -4988,7 +5063,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                                    const pageBg = getEffectiveBg(mPage.background, introBg);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -5010,7 +5085,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = mPage.background || (config.background?.showOnIntroPages ? config.background : undefined);
+                            const pageBg = getEffectiveBg(mPage.background, introBg);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
@@ -5204,7 +5279,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
            </div>
            <div className="flex gap-2"><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tamanho</label><input type="number" min="4" max="100" value={values.fontSize || 12} onChange={(e) => onChange({ fontSize: parseInt(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Cor Texto</label><div className="flex h-[30px] border border-gray-200 rounded overflow-hidden"><input type="color" value={(values.color && values.color.startsWith('#')) ? values.color : '#000000'} onChange={(e) => onChange({ color: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" /><input type="text" value={values.color || '#000000'} onChange={(e) => onChange({ color: e.target.value })} className="w-full text-[10px] uppercase p-1 border-l" /></div></div></div>
            <div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Cor Fundo</label><div className="flex h-[30px] border border-gray-200 rounded overflow-hidden"><input type="color" value={(values.backgroundColor && values.backgroundColor.startsWith('#')) ? values.backgroundColor : '#ffffff'} onChange={(e) => onChange({ backgroundColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" /><div className="flex-1 flex items-center px-1"><button onClick={() => onChange({ backgroundColor: 'transparent' })} className="text-[10px] text-gray-500 hover:text-red-500 bg-transparent">Sem Fundo</button></div></div></div>
-           <div className="flex gap-2"><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Peso</label><select value={values.fontWeight || 'normal'} onChange={(e) => onChange({ fontWeight: e.target.value })} className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"><option value="normal">Normal</option><option value="bold">Bold</option><option value="300">Light</option><option value="900">Black</option></select></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tracking</label><input type="number" step="0.5" value={values.letterSpacing || 0} onChange={(e) => onChange({ letterSpacing: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div></div>
+           <div className="flex gap-2"><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Peso</label><select value={values.fontWeight || 'normal'} onChange={(e) => onChange({ fontWeight: e.target.value })} className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"><option value="normal">Normal</option><option value="bold">Bold</option><option value="300">Light</option><option value="900">Black</option></select></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tracking</label><input type="number" step="0.5" value={values.letterSpacing || 0} onChange={(e) => onChange({ letterSpacing: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Alt. Linha</label><input type="number" step="0.1" min="0.5" max="5" value={values.lineHeight || 1.5} onChange={(e) => onChange({ lineHeight: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div></div>
            <div className="space-y-2"><label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo & Alinhamento</label>
            <div className="flex flex-col gap-1">
                <div className="flex border border-gray-200 rounded overflow-hidden divide-x divide-gray-100">
@@ -5316,6 +5391,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   });
                   
                   const imgData = canvas.toDataURL('image/jpeg', jpegQuality);
+                  
+                  // Explicitly clear canvas dimensions to release GPU and hardware memory backing stores
+                  canvas.width = 0;
+                  canvas.height = 0;
+                  
                   return { pageNum, imgData };
               }));
               
@@ -5326,6 +5406,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       pdf.addPage([PAGE_WIDTH_MM, PAGE_HEIGHT_MM], orientation);
                   }
                   pdf.addImage(result.imgData, 'JPEG', 0, 0, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, undefined, 'FAST');
+                  
+                  // Explicitly nullify references to free up memory immediately
+                  result.imgData = '';
               }
               
               setPdfExportProgress(Math.min(totalPagesCount, i + batchSize - 1));
@@ -5334,8 +5417,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               await new Promise(resolve => setTimeout(resolve, 5));
           }
           
-          pdf.save(`${config.name || 'Agenda_Master'}.pdf`);
-          setPrintStatus('idle');
+          // Se estiver rodando no Electron desktop, usar o fluxo nativo extremamente seguro e polido
+          const winAny = window as any;
+          if (winAny.electronAPI && typeof winAny.electronAPI.savePDFBase64 === 'function') {
+              const pdfDataUri = pdf.output('datauristring');
+              const base64String = pdfDataUri.split(',')[1];
+              const result = await winAny.electronAPI.savePDFBase64(base64String, `${config.name || 'Agenda_Master'}.pdf`);
+              if (result && result.success) {
+                  setPrintStatus('idle');
+              } else if (result && result.cancelled) {
+                  // O usuário cancelou, não faz nada
+              } else {
+                  alert(`Ocorreu um erro ao salvar o PDF: ${result ? result.error : 'Erro desconhecido'}`);
+              }
+          } else {
+              pdf.save(`${config.name || 'Agenda_Master'}.pdf`);
+              setPrintStatus('idle');
+          }
       } catch (err) {
           console.error('Erro ao gerar o PDF:', err);
           alert('Erro ao processar as páginas do PDF. Por favor, feche as abas extras e tente de novo.');
@@ -5367,9 +5465,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
               // @ts-ignore
               const result = await window.electronAPI.printToPDF({
+                  pageSize: config.pageSize && config.pageSize !== 'Custom' ? config.pageSize : undefined,
                   widthMicrons,
                   heightMicrons,
                   landscape,
+                  preferCSSPageSize: true,
                   defaultName: `${config.name || 'Agenda_Master'}.pdf`
               });
 
@@ -5596,180 +5696,265 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         </button>
                   </div>
               ) : (
-                  <div className="w-full max-w-lg bg-white p-6 sm:p-8 rounded-2xl shadow-2xl flex flex-col items-center text-gray-800 animate-in zoom-in duration-300">
-                      <div className="bg-indigo-100 p-2.5 rounded-full mb-3">
-                          <CheckCircle2 className="w-7 h-7 text-indigo-600" />
-                      </div>
-                      
-                      <h2 className="text-xl font-black mb-1 text-center text-indigo-950">Seu arquivo está pronto!</h2>
-                      <p className="text-xs text-gray-500 mb-5 text-center max-w-xs">
-                          Escolha o melhor método de exportação para as suas {actualTotalPagesCount} páginas de acordo com a sua necessidade de uso.
-                      </p>
+                  <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl flex flex-col md:flex-row text-gray-800 animate-in zoom-in duration-300 overflow-hidden border border-gray-100">
+                      {/* Left Column: Premium Interactive Print Preview */}
+                      <div className="hidden md:flex md:w-[480px] lg:w-[540px] flex-shrink-0 flex-col bg-slate-950 text-white relative border-r border-slate-800">
+                          {(() => {
+                              const allPages = renderPrintLayout(undefined, undefined, undefined, true);
+                              const realPageArray = renderPrintLayout(previewPageIndex + 1, previewPageIndex + 1, undefined, false);
+                              const currentPageNode = realPageArray[0] || null;
+                              return (
+                                  <div className="flex-1 flex flex-col h-[650px]">
+                                      {/* Header with layout size indicator */}
+                                      <div className="h-14 border-b border-white/5 flex items-center justify-between px-5 bg-slate-900/60 backdrop-blur-md shrink-0">
+                                          <div className="flex items-center gap-2">
+                                              <Monitor className="w-4 h-4 text-emerald-400" />
+                                              <span className="text-[11px] font-black tracking-wider text-slate-300 uppercase">Pré-visualização do Miolo ({config.pageSize})</span>
+                                          </div>
+                                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 uppercase tracking-widest">Vetor 100% Preciso</span>
+                                      </div>
 
-                      {/* Seletor de Tecnologia / Método */}
-                      <div className="flex bg-gray-100 p-1 rounded-xl mb-5 w-full">
-                          <button
-                              type="button"
-                              onClick={() => setPdfExportMethod('vector')}
-                              className={`flex-1 py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${pdfExportMethod === 'vector' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-gray-500 hover:text-gray-700'}`}
-                          >
-                              <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" /> PDF Vetorial 💎
-                          </button>
-                          <button
-                              type="button"
-                              onClick={() => setPdfExportMethod('canvas')}
-                              className={`flex-1 py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${pdfExportMethod === 'canvas' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-gray-500 hover:text-gray-700'}`}
-                          >
-                              <FileImage className="w-3.5 h-3.5" /> PDF por Imagem
-                          </button>
-                      </div>
+                                      {/* Page Preview Canvas Container */}
+                                      <div className="flex-1 flex items-center justify-center p-6 bg-slate-950/40 relative overflow-hidden">
+                                          {currentPageNode ? (
+                                              <div 
+                                                  className="relative shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] border border-white/15 rounded-lg overflow-hidden bg-white transition-all duration-300"
+                                                  style={{
+                                                      width: `${PAGE_WIDTH_MM * 1.6}px`,
+                                                      height: `${PAGE_HEIGHT_MM * 1.6}px`,
+                                                  }}
+                                              >
+                                                  <div 
+                                                      style={{
+                                                          transform: `scale(${1.6 / 3.78})`,
+                                                          transformOrigin: 'top left',
+                                                          width: `${PAGE_WIDTH_MM * 3.78}px`,
+                                                          height: `${PAGE_HEIGHT_MM * 3.78}px`,
+                                                      }} 
+                                                      className="origin-top-left pointer-events-none select-none text-gray-900"
+                                                  >
+                                                      {currentPageNode}
+                                                  </div>
+                                              </div>
+                                          ) : (
+                                              <div className="text-slate-500 text-xs font-medium">Nenhuma página disponível para exibição</div>
+                                          )}
+                                      </div>
 
-                      {pdfExportMethod === 'vector' ? (
-                          <div className="w-full text-left space-y-4 mb-5">
-                              <div className="bg-emerald-50 border border-emerald-100/80 rounded-xl p-3.5 flex gap-3">
-                                  <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0 h-8 w-8 flex items-center justify-center">
-                                      <Sparkles className="w-4 h-4 fill-emerald-600 text-emerald-600" />
+                                      {/* Navigation controls footer */}
+                                      <div className="h-16 border-t border-white/5 flex items-center justify-between px-6 bg-slate-900/40 shrink-0">
+                                          <button
+                                              type="button"
+                                              onClick={() => setPreviewPageIndex(prev => Math.max(0, prev - 1))}
+                                              disabled={previewPageIndex === 0}
+                                              className="p-2.5 bg-white/5 hover:bg-white/10 active:bg-white/15 text-slate-300 rounded-xl transition-all disabled:opacity-20 disabled:pointer-events-none"
+                                              title="Página Anterior"
+                                          >
+                                              <ChevronLeft className="w-5 h-5" />
+                                          </button>
+                                          
+                                          <div className="flex flex-col items-center">
+                                              <span className="text-xs font-black text-slate-200 tracking-wider">
+                                                  PÁGINA {previewPageIndex + 1} DE {allPages.length}
+                                              </span>
+                                              <span className="text-[9px] font-bold text-slate-500 uppercase mt-0.5 tracking-widest">
+                                                  {previewPageIndex % 2 === 0 ? 'Margem Diferente (Lado Esquerdo)' : 'Margem Interna (Lado Direito)'} • {Math.round((previewPageIndex + 1) / allPages.length * 100)}% visualizado
+                                              </span>
+                                          </div>
+
+                                          <button
+                                              type="button"
+                                              onClick={() => setPreviewPageIndex(prev => Math.min(allPages.length - 1, prev + 1))}
+                                              disabled={previewPageIndex === allPages.length - 1}
+                                              className="p-2.5 bg-white/5 hover:bg-white/10 active:bg-white/15 text-slate-300 rounded-xl transition-all disabled:opacity-20 disabled:pointer-events-none"
+                                              title="Próxima Página"
+                                          >
+                                              <ChevronRight className="w-5 h-5" />
+                                          </button>
+                                      </div>
                                   </div>
-                                  <div>
-                                      <h3 className="text-xs font-bold text-emerald-900">Modo Vetorial (Vantagens Profissionais)</h3>
-                                      <p className="text-[10px] text-emerald-800/80 mt-0.5 leading-relaxed">
-                                          Gera o miolo inteiro em <strong>vetores nativos</strong>. Garante nitidez absoluta perfeita nas fontes e linhas (mesmo com zoom de 1000%), gera arquivos super leves (<strong>de 200MB vira ~5MB</strong>) e o processamento é <strong>instantâneo</strong>.
-                                      </p>
-                                  </div>
-                              </div>
+                              );
+                          })()}
+                      </div>
 
-                              <div className="border border-gray-100 bg-gray-50/50 rounded-xl p-4 space-y-3">
-                                  <h4 className="text-[9px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                                      <Info className="w-3.5 h-3.5 text-indigo-500" /> Passo a Passo para Salvar o PDF:
-                                  </h4>
-                                  
-                                  <ul className="space-y-2.5">
-                                      <li className="flex items-start gap-2.5">
-                                          <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">1</div>
-                                          <p className="text-[10px] text-gray-600 leading-relaxed">
-                                              No diálogo que abrir, selecione <strong>"Salvar como PDF"</strong> (ou "Exportar para PDF") no campo Destino.
-                                          </p>
-                                      </li>
-                                      <li className="flex items-start gap-2.5">
-                                          <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
-                                          <p className="text-[10px] text-gray-600 leading-relaxed">
-                                              Marque/Ative a opção <strong>"Gráficos de Fundo"</strong> (Background Graphics) nas configurações de cabeçalhos/rodapés de impressão.
-                                          </p>
-                                      </li>
-                                      <li className="flex items-start gap-2.5">
-                                          <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
-                                          <p className="text-[10px] text-gray-600 leading-relaxed">
-                                              Defina as Margens como <strong>"Nenhuma"</strong> (None) para preservar o alinhamento exato de refile e sangria.
-                                          </p>
-                                      </li>
-                                  </ul>
+                      {/* Right Column: Export Setup and Download Options */}
+                      <div className="flex-1 p-6 sm:p-8 flex flex-col justify-between overflow-y-auto max-h-[650px] min-h-[500px]">
+                          <div className="flex flex-col items-center flex-1">
+                              <div className="bg-indigo-100 p-2.5 rounded-full mb-3 shrink-0">
+                                  <CheckCircle2 className="w-7 h-7 text-indigo-600" />
                               </div>
                               
-                              <p className="text-[9px] text-gray-400/80 leading-normal text-center italic">
-                                  Dica: Se estiver no painel do AI Studio, abra em "Nova Guia" de antemão para ter total controle sobre o menu de impressão do seu navegador.
+                              <h2 className="text-xl font-black mb-1 text-center text-indigo-950">Seu arquivo está pronto!</h2>
+                              <p className="text-xs text-gray-500 mb-5 text-center max-w-xs">
+                                  Escolha o melhor método de exportação para as suas {actualTotalPagesCount} páginas de acordo com a sua necessidade de uso.
                               </p>
+
+                              {/* Seletor de Tecnologia / Método */}
+                              <div className="flex bg-gray-100 p-1 rounded-xl mb-5 w-full shrink-0">
+                                  <button
+                                      type="button"
+                                      onClick={() => setPdfExportMethod('vector')}
+                                      className={`flex-1 py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${pdfExportMethod === 'vector' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-gray-500 hover:text-gray-700'}`}
+                                  >
+                                      <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" /> PDF Vetorial 💎
+                                  </button>
+                                  <button
+                                      type="button"
+                                      onClick={() => setPdfExportMethod('canvas')}
+                                      className={`flex-1 py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${pdfExportMethod === 'canvas' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-gray-500 hover:text-gray-700'}`}
+                                  >
+                                      <FileImage className="w-3.5 h-3.5" /> PDF por Imagem
+                                  </button>
+                              </div>
+
+                              {pdfExportMethod === 'vector' ? (
+                                  <div className="w-full text-left space-y-4 mb-5 flex-1">
+                                      <div className="bg-emerald-50 border border-emerald-100/80 rounded-xl p-3.5 flex gap-3">
+                                          <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0 h-8 w-8 flex items-center justify-center">
+                                              <Sparkles className="w-4 h-4 fill-emerald-600 text-emerald-600" />
+                                          </div>
+                                          <div>
+                                              <h3 className="text-xs font-bold text-emerald-900">Modo Vetorial (Vantagens Profissionais)</h3>
+                                              <p className="text-[10px] text-emerald-800/80 mt-0.5 leading-relaxed">
+                                                  Gera o miolo inteiro em <strong>vetores nativos</strong>. Garante nitidez absoluta perfeita nas fontes e linhas (mesmo com zoom de 1000%), gera arquivos super leves (<strong>de 200MB vira ~5MB</strong>) e o processamento é <strong>instantâneo</strong>.
+                                              </p>
+                                          </div>
+                                      </div>
+
+                                      <div className="border border-gray-100 bg-gray-50/50 rounded-xl p-4 space-y-3">
+                                          <h4 className="text-[9px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                              <Info className="w-3.5 h-3.5 text-indigo-500" /> Passo a Passo para Salvar o PDF:
+                                          </h4>
+                                          
+                                          <ul className="space-y-2.5">
+                                              <li className="flex items-start gap-2.5">
+                                                  <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">1</div>
+                                                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                                                      No diálogo que abrir, selecione <strong>"Salvar como PDF"</strong> (ou "Exportar para PDF") no campo Destino.
+                                                  </p>
+                                              </li>
+                                              <li className="flex items-start gap-2.5">
+                                                  <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
+                                                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                                                      Marque/Ative a opção <strong>"Gráficos de Fundo"</strong> (Background Graphics) nas configurações de cabeçalhos/rodapés de impressão.
+                                                  </p>
+                                              </li>
+                                              <li className="flex items-start gap-2.5">
+                                                  <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
+                                                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                                                      Defina as Margens como <strong>"Nenhuma"</strong> (None) para preservar o alinhamento exato de refile e sangria.
+                                                  </p>
+                                              </li>
+                                          </ul>
+                                      </div>
+                                      
+                                      <p className="text-[9px] text-gray-400/80 leading-normal text-center italic">
+                                          Dica: Se estiver no painel do AI Studio, abra em "Nova Guia" de antemão para ter total controle sobre o menu de impressão do seu navegador.
+                                      </p>
+                                  </div>
+                              ) : (
+                                  <div className="w-full space-y-4 mb-5 flex-1">
+                                      <div className="w-full space-y-2.5 text-left">
+                                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">Opção de Velocidade & Qualidade:</label>
+                                  
+                                          {/* Fast choice */}
+                                          <button 
+                                              key="pdf-speed-fast"
+                                              type="button"
+                                              onClick={() => setPdfScaleMode('fast')}
+                                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'fast' ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
+                                          >
+                                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'fast' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
+                                                  <Clock className="w-4 h-4" />
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center justify-between">
+                                                      <span className="text-xs font-bold text-gray-900 block">⚡ Modo Relâmpago (Super Rápido)</span>
+                                                      <span className="text-[9px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded uppercase font-mono">Até 4x mais rápido</span>
+                                                  </div>
+                                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                      Gera o PDF em segundos com resolução padrão (Escala 1.0x). Perfeito para celulares, computadores básicos ou testes rápidos.
+                                                  </p>
+                                              </div>
+                                          </button>
+
+                                          {/* Standard choice */}
+                                          <button 
+                                              key="pdf-speed-standard"
+                                              type="button"
+                                              onClick={() => setPdfScaleMode('standard')}
+                                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'standard' ? 'border-indigo-500 bg-indigo-50/25 ring-2 ring-indigo-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
+                                          >
+                                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'standard' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
+                                                  <Smartphone className="w-4 h-4" />
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center justify-between">
+                                                      <span className="text-xs font-bold text-gray-900 block">🚀 Modo Equilibrado (Recomendado)</span>
+                                                      <span className="text-[9px] font-black text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded uppercase font-mono">Mais estável</span>
+                                                  </div>
+                                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                      Resolução otimizada para telas e leitura digital (Escala 1.5x) e arquivos mais leves. Rapidez combinada a uma excelente nitidez.
+                                                  </p>
+                                              </div>
+                                          </button>
+
+                                          {/* High quality choice */}
+                                          <button 
+                                              key="pdf-speed-high"
+                                              type="button"
+                                              onClick={() => setPdfScaleMode('high')}
+                                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'high' ? 'border-emerald-500 bg-emerald-50/20 ring-2 ring-emerald-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
+                                          >
+                                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
+                                                  <CheckSquare className="w-4 h-4" />
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center justify-between">
+                                                      <span className="text-xs font-bold text-gray-900 block">💎 Alta Fidelidade (Impressão Física)</span>
+                                                      <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded uppercase">Alta Resolução</span>
+                                                  </div>
+                                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                      Suporte de alta fidelidade e escala máxima (2.22x) idêntico ao original. O processamento consome mais recursos e tempo.
+                                                  </p>
+                                              </div>
+                                          </button>
+                                      </div>
+
+                                      <div className="w-full bg-indigo-50/50 border border-indigo-100/50 rounded-xl p-3 text-left flex items-start gap-2">
+                                          <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                                          <p className="text-[11px] text-indigo-900 leading-relaxed">
+                                              Nosso motor foi otimizado para renderizar em lotes simultâneos. Independente do modo acima, a compilação agora está <strong>até 4x mais rápida</strong> que antes!
+                                          </p>
+                                      </div>
+                                  </div>
+                              )}
                           </div>
-                      ) : (
-                          <>
-                              <div className="w-full space-y-2.5 mb-5 text-left">
-                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">Opção de Velocidade & Qualidade:</label>
-                          
-                          {/* Fast choice */}
-                          <button 
-                              key="pdf-speed-fast"
-                              type="button"
-                              onClick={() => setPdfScaleMode('fast')}
-                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'fast' ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
-                          >
-                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'fast' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
-                                  <Clock className="w-4 h-4" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between">
-                                      <span className="text-xs font-bold text-gray-900 block">⚡ Modo Relâmpago (Super Rápido)</span>
-                                      <span className="text-[9px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded uppercase">Até 4x mais rápido</span>
-                                  </div>
-                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
-                                      Gera o PDF em segundos com resolução padrão (Escala 1.0x). Perfeito para celulares, computadores básicos ou testes rápidos.
-                                  </p>
-                              </div>
-                          </button>
 
-                          {/* Standard choice */}
-                          <button 
-                              key="pdf-speed-standard"
-                              type="button"
-                              onClick={() => setPdfScaleMode('standard')}
-                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'standard' ? 'border-indigo-500 bg-indigo-50/25 ring-2 ring-indigo-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
-                          >
-                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'standard' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
-                                  <Smartphone className="w-4 h-4" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between">
-                                      <span className="text-xs font-bold text-gray-900 block">🚀 Modo Equilibrado (Recomendado)</span>
-                                      <span className="text-[9px] font-black text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded uppercase font-mono">Mais estável</span>
-                                  </div>
-                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
-                                      Resolução otimizada para telas e leitura digital (Escala 1.5x) e arquivos mais leves. Rapidez combinada a uma excelente nitidez.
-                                  </p>
-                              </div>
-                          </button>
-
-                          {/* High quality choice */}
-                          <button 
-                              key="pdf-speed-high"
-                              type="button"
-                              onClick={() => setPdfScaleMode('high')}
-                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'high' ? 'border-emerald-500 bg-emerald-50/20 ring-2 ring-emerald-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
-                          >
-                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
-                                  <CheckSquare className="w-4 h-4" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between">
-                                      <span className="text-xs font-bold text-gray-900 block">💎 Alta Fidelidade (Impressão Física)</span>
-                                      <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded uppercase">Alta Resolução</span>
-                                  </div>
-                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
-                                      Suporte de alta fidelidade e escala máxima (2.22x) idêntico ao original. O processamento consome mais recursos e tempo.
-                                  </p>
-                              </div>
-                          </button>
-                      </div>
-
-                      <div className="w-full bg-indigo-50/50 border border-indigo-100/50 rounded-xl p-3 mb-5 text-left flex items-start gap-2">
-                          <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-                          <p className="text-[11px] text-indigo-900 leading-relaxed">
-                              Nosso motor foi otimizado para renderizar em lotes simultâneos. Independente do modo acima, a compilação agora está <strong>até 4x mais rápida</strong> que antes!
-                          </p>
-                      </div>
-                          </>
-                      )}
- 
-                      <div className="flex gap-3 w-full">
-                          <button 
-                              onClick={cancelPrint} 
-                              className="flex-1 py-3 px-4 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors"
-                          >
-                              Cancelar
-                          </button>
-                          
-                          {pdfExportMethod === 'vector' ? (
+                          <div className="flex gap-3 w-full shrink-0 pt-4 border-t border-gray-100 mt-4">
                               <button 
-                                  onClick={executeVectorPrint}
-                                  className="flex-1 py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2"
+                                  onClick={cancelPrint} 
+                                  className="flex-1 py-3 px-4 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors"
                               >
-                                  <Printer className="w-4 h-4"/> Salvar Vetorial (Imprimir)
+                                  Cancelar
                               </button>
-                          ) : (
-                              <button 
-                                  onClick={executePrint}
-                                  className="flex-1 py-3 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2"
-                              >
-                                  <FileDown className="w-4 h-4"/> Baixar PDF Agora
-                              </button>
-                          )}
+                              
+                              {pdfExportMethod === 'vector' ? (
+                                  <button 
+                                      onClick={executeVectorPrint}
+                                      className="flex-1 py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2"
+                                  >
+                                      <Printer className="w-4 h-4"/> Salvar Vetorial (Imprimir)
+                                  </button>
+                              ) : (
+                                  <button 
+                                      onClick={executePrint}
+                                      className="flex-1 py-3 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2"
+                                  >
+                                      <FileDown className="w-4 h-4"/> Baixar PDF Agora
+                                  </button>
+                              )}
+                          </div>
                       </div>
                   </div>
               )}
@@ -6523,6 +6708,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           </div>
       )}
 
+      <SystemRequirementsModal 
+          isOpen={reqModalOpen}
+          onClose={() => setReqModalOpen(false)}
+          currentPageCount={renderPrintLayout ? renderPrintLayout(undefined, undefined, undefined, true).length : 150}
+      />
+
       <div className="flex-1 flex flex-col overflow-hidden no-print">
           <header className="bg-white border-b border-gray-200 h-14 flex items-center justify-between px-4 z-20 shrink-0">
             <div className="flex items-center space-x-3">
@@ -6645,6 +6836,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   </>
                 )}
                 <button onClick={handlePrintRequest} disabled={printStatus !== 'idle'} className="flex items-center text-xs font-medium text-white hover:bg-indigo-700 bg-indigo-600 px-3 py-1.5 rounded border border-indigo-600 disabled:opacity-50 shadow-sm transition-colors"><FileDown className="w-4 h-4 mr-1.5" /> Baixar PDF</button>
+                <button 
+                  onClick={() => setReqModalOpen(true)}
+                  className="flex items-center text-[11px] font-bold text-orange-600 hover:bg-orange-50 bg-orange-50/40 border border-orange-200/60 px-2.5 py-1.5 rounded-lg transition-colors gap-1 shadow-sm shrink-0"
+                  title="Requisitos do Sistema & Diagnóstico de Desempenho"
+                >
+                  <icons.Gauge className="w-3.5 h-3.5 text-orange-500" />
+                  <span className="hidden sm:inline">Diagnóstico</span>
+                </button>
                 <button 
                   onClick={async () => {
                     if (typeof window !== 'undefined' && (window as any).clearAppCache) {
@@ -8203,18 +8402,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </select>
                                                         </div>
                                                         {selectedElement.style.plannerDayBox?.contentStyle === 'timetable' && (
-                                                            <div className="flex items-center justify-between">
-                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Hora Inicial</label>
-                                                                <input 
-                                                                    type="number" 
-                                                                    min="0" 
-                                                                    max="23" 
-                                                                    value={selectedElement.style.plannerDayBox?.startHour ?? 7} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, startHour: parseInt(e.target.value) || 0 } 
-                                                                    })} 
-                                                                    className="w-16 text-xs p-1.5 border border-gray-200 rounded" 
-                                                                />
+                                                            <div className="space-y-3 pt-1 border-t border-gray-100/50 mt-1">
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Hora Inicial</label>
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="0" 
+                                                                        max="23" 
+                                                                        value={selectedElement.style.plannerDayBox?.startHour ?? 7} 
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, startHour: parseInt(e.target.value) || 0 } 
+                                                                        })} 
+                                                                        className="w-16 text-xs p-1.5 border border-gray-200 rounded" 
+                                                                    />
+                                                                </div>
+                                                                <div className="pt-2 border-t border-gray-100/50">
+                                                                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte dos Horários</label>
+                                                                    {renderTypographyControls({
+                                                                        fontFamily: selectedElement.style.plannerDayBox?.fontFamily || 'monospace',
+                                                                        fontSize: selectedElement.style.plannerDayBox?.fontSize || 8,
+                                                                        fontWeight: selectedElement.style.plannerDayBox?.fontWeight || 'normal',
+                                                                        color: selectedElement.style.plannerDayBox?.color || '#9ca3af',
+                                                                        textAlign: 'left',
+                                                                        verticalAlign: 'top',
+                                                                        textTransform: 'none',
+                                                                        letterSpacing: 0,
+                                                                        backgroundColor: 'transparent'
+                                                                    } as TextStyleConfig, (updates) => {
+                                                                        updateElementStyle(selectedElement.id, {
+                                                                            plannerDayBox: {
+                                                                                ...selectedElement.style.plannerDayBox,
+                                                                                fontFamily: updates.fontFamily,
+                                                                                fontSize: updates.fontSize,
+                                                                                fontWeight: updates.fontWeight,
+                                                                                color: updates.color
+                                                                            }
+                                                                        });
+                                                                    })}
+                                                                </div>
                                                             </div>
                                                         )}
                                                         <div className="flex flex-col gap-1.5 border-b border-gray-100/50 pb-2 mb-2 w-full">
@@ -9302,6 +9527,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         verticalAlign: selectedElement.style.verticalAlign || 'top',
                                                         textTransform: selectedElement.style.textTransform || 'none', 
                                                         letterSpacing: selectedElement.style.letterSpacing || 0,
+                                                        lineHeight: selectedElement.style.lineHeight || 1.5,
                                                         backgroundColor: selectedElement.style.backgroundColor
                                                     } as TextStyleConfig, (updates) => updateElementStyle(selectedElement.id, updates))}
                                                     {renderBorderControls(selectedElement.style, (updates) => updateElementStyle(selectedElement.id, updates))}
@@ -9469,6 +9695,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     <option value={60}>1 hora</option>
                                                                     <option value={120}>2 horas</option>
                                                                 </select>
+                                                            </div>
+                                                            <div className="pt-2 border-t border-gray-100/50 mt-2">
+                                                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte dos Horários</label>
+                                                                {renderTypographyControls({
+                                                                    fontFamily: selectedElement.style.fontFamily || 'monospace',
+                                                                    fontSize: selectedElement.style.fontSize || 10,
+                                                                    fontWeight: selectedElement.style.fontWeight || 'normal',
+                                                                    color: selectedElement.style.color || '#6b7280',
+                                                                    textAlign: selectedElement.style.textAlign || 'left',
+                                                                    verticalAlign: selectedElement.style.verticalAlign || 'top',
+                                                                    textTransform: selectedElement.style.textTransform || 'none', 
+                                                                    letterSpacing: selectedElement.style.letterSpacing || 0,
+                                                                    lineHeight: selectedElement.style.lineHeight || 1.5,
+                                                                    backgroundColor: selectedElement.style.backgroundColor
+                                                                } as TextStyleConfig, (updates) => updateElementStyle(selectedElement.id, updates))}
                                                             </div>
                                                         </div>
                                                     )}
@@ -9982,6 +10223,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         className="w-full py-2 px-3 bg-indigo-50 hover:bg-indigo-150 text-indigo-700 hover:text-indigo-800 rounded-lg text-[10px] font-bold transition-all border border-indigo-100 hover:border-indigo-200 flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-tight"
                                                     >
                                                         ✨ Aplicar este fundo no miolo todo (Global)
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            pushHistory();
+                                                            if (editMode === 'intro' && currentIntroPageId) {
+                                                                setConfig(prev => ({
+                                                                    ...prev,
+                                                                    introPages: prev.introPages.map(p => p.id === currentIntroPageId ? { ...p, background: undefined } : p)
+                                                                }));
+                                                            } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
+                                                                setConfig(prev => ({
+                                                                    ...prev,
+                                                                    monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId ? { ...p, background: undefined } : p)
+                                                                }));
+                                                            } else if (editMode === 'divider') {
+                                                                setConfig(prev => ({
+                                                                    ...prev,
+                                                                    monthlyDividerStyle: { ...(prev.monthlyDividerStyle || {}), background: undefined }
+                                                                }));
+                                                            }
+                                                        }}
+                                                        className="w-full py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-bold transition-all border border-gray-200 flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-tight"
+                                                    >
+                                                        🔄 Usar Fundo Geral (Herdar Dinamicamente)
                                                     </button>
                                                     
                                                     {config.background && config.background.type !== 'none' && (

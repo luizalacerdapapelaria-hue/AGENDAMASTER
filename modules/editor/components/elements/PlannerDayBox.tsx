@@ -143,8 +143,15 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                     labels.push(
                         <div 
                             key={`t-${i}`} 
-                            className="absolute left-0.5 font-mono text-gray-400 select-none pointer-events-none"
-                            style={{ top: `${y + 1}px`, transform: 'translateY(0%)', fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}
+                            className="absolute left-0.5 select-none pointer-events-none"
+                            style={{ 
+                                top: `${y + 1}px`, 
+                                transform: 'translateY(0%)', 
+                                fontFamily: plannerDayBox.fontFamily || 'monospace',
+                                fontSize: plannerDayBox.fontSize !== undefined ? `${plannerDayBox.fontSize * scaleFactor}px` : `${Math.max(4, 8 * scaleFactor)}px`,
+                                fontWeight: plannerDayBox.fontWeight || 'normal',
+                                color: plannerDayBox.color || '#9ca3af'
+                            }}
                         >
                             {String(startH + i).padStart(2, '0')}:00
                         </div>

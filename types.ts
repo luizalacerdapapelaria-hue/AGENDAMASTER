@@ -62,6 +62,7 @@ export interface TextStyleConfig {
     letterSpacing?: number; // Tracking
     backgroundColor?: string; // Usado para destaques
     fontStyle?: 'normal' | 'italic'; // Novo
+    lineHeight?: number; // Novo
 }
 
 export interface LayoutElement {
@@ -82,6 +83,7 @@ export interface LayoutElement {
     color?: string; // Cor do texto ou contorno (Stroke para vetores)
     backgroundColor?: string; // Preenchimento (Fill para vetores)
     fontStyle?: 'normal' | 'italic'; // Novo
+    lineHeight?: number; // Novo
     
     // Configurações Avançadas de Caixa
     backgroundType?: 'solid' | 'gradient';
@@ -227,6 +229,10 @@ export interface LayoutElement {
         strokeStyle?: 'solid' | 'dashed' | 'dotted';
         showMoonPhase?: boolean;
         startHour?: number;
+        fontFamily?: string;
+        fontSize?: number;
+        fontWeight?: string;
+        color?: string;
     };
   };
 }
@@ -243,6 +249,10 @@ export interface BackgroundConfig {
         url: string; // Base64 ou URL externa
         opacity: number;
         fit: 'cover' | 'contain' | 'fill';
+        flipHorizontal?: boolean;
+        flipVertical?: boolean;
+        flipOnEvenPages?: boolean;
+        rotation?: number;
     };
     opacity?: number; // Opacidade global do fundo
     showOnIntroPages?: boolean;

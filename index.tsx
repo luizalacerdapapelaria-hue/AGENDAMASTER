@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { localStorage, sessionStorage } from './services/safeStorage';
 
 // Global error handlers to capture and self-heal Supabase refresh token failures and cache corruption
 if (typeof window !== 'undefined') {
@@ -63,7 +64,7 @@ if (typeof window !== 'undefined') {
       } catch (_) {}
 
       // 4. Limpar chaves de sessão corrompidas e caches do Supabase do localStorage
-      if (window.localStorage) {
+      if (localStorage) {
         try {
           const keysToRemove: string[] = [];
           for (let i = 0; i < localStorage.length; i++) {
@@ -122,7 +123,7 @@ if (typeof window !== 'undefined') {
   const clearStaleSession = () => {
     try {
       console.warn('[Auth Global] Autocorreção: Removendo chaves de sessão corrompidas do Supabase...');
-      if (window.localStorage) {
+      if (localStorage) {
         const keysToRemove: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);

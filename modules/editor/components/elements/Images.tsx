@@ -1,10 +1,12 @@
 import React from 'react';
 import { LayoutElement } from '../../../../types';
+import { useImageSrc } from '../../utils/imageManager';
 
 import { BaseElementProps } from './types';
 
 export const ImageElement: React.FC<BaseElementProps> = ({ element, isEditor, pageHeight, pageWidth }) => {
   const { style } = element;
+  const imageSrc = useImageSrc(style.imageUrl);
   
   if (!style.imageUrl) {
     return (
@@ -20,7 +22,7 @@ export const ImageElement: React.FC<BaseElementProps> = ({ element, isEditor, pa
   return (
     <div className="w-full h-full overflow-visible flex items-center justify-center" style={{ opacity: style.opacity ?? 1 }}>
       <img 
-        src={style.imageUrl} 
+        src={imageSrc} 
         alt={element.name}
         referrerPolicy="no-referrer"
         className="max-w-full max-h-full object-contain"
@@ -28,3 +30,4 @@ export const ImageElement: React.FC<BaseElementProps> = ({ element, isEditor, pa
     </div>
   );
 };
+
