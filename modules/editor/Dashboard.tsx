@@ -5934,25 +5934,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       )}
 
       {isMobile && (
-          <header className={`h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-[100] no-print ${activeTab === 'preview' ? 'hidden' : ''}`}>
-              <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                    <Calendar className="w-5 h-5 text-white" />
+          <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-3 z-[100] no-print shrink-0 shadow-xs">
+              <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center shadow-xs">
+                    <Calendar className="w-4 h-4 text-white" />
                   </div>
-                  <span className="text-sm font-black text-gray-900 tracking-tight">AgendaMaster <span className="text-indigo-600">AI</span></span>
+                  <span className="text-xs font-black text-gray-900 tracking-tight hidden sm:inline">AgendaMaster</span>
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center bg-gray-100 p-1 rounded-xl gap-0.5 text-[10px]">
                   <button 
-                      onClick={() => setActiveTab(activeTab === 'editor' ? 'preview' : 'editor')}
-                      className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    onClick={() => setActiveTab('editor')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTab === 'editor' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500'}`}
                   >
-                      {activeTab === 'editor' ? <Eye className="w-5 h-5" /> : <Layout className="w-5 h-5" />}
+                    Editor
                   </button>
                   <button 
-                      onClick={() => executePrint()}
-                      className="p-2 bg-indigo-600 text-white rounded-lg shadow-md shadow-indigo-100"
+                    onClick={() => setActiveTab('preview')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTab === 'preview' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500'}`}
                   >
-                      <FileDown className="w-5 h-5" />
+                    Ver
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('opentype')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTab === 'opentype' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500'}`}
+                  >
+                    Glifos
+                  </button>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                  <button 
+                      onClick={() => executePrint()}
+                      className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-xs hover:bg-indigo-700 transition-colors"
+                      title="Exportar PDF"
+                  >
+                      <FileDown className="w-4 h-4" />
+                  </button>
+                  <button 
+                      onClick={onLogout}
+                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Sair"
+                  >
+                      <LogOut className="w-4 h-4" />
                   </button>
               </div>
           </header>
@@ -7943,9 +7967,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         </div>
                     )}
                 
-                    {!isMobile && (
-                        <div className="p-4">
-                            <div className="flex items-center mb-3 text-gray-400"><Layout className="w-4 h-4 mr-2" /><h3 className="text-xs font-semibold uppercase tracking-wider">Elementos</h3></div>
+                    <div className="p-4 border-t border-gray-100">
+                        <div className="flex items-center mb-3 text-gray-400"><Layout className="w-4 h-4 mr-2" /><h3 className="text-xs font-semibold uppercase tracking-wider">Elementos</h3></div>
                             <div className="grid grid-cols-4 gap-2">
                                 {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                     <>
@@ -7984,7 +8007,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 )}
                             </div>
                         </div>
-                    )}
                 </div>
             </motion.aside>
         )}
@@ -8031,40 +8053,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 {activeTab === 'editor' && (
                     <div className={`flex flex-col items-center w-full max-w-full h-full min-h-0 ${isMobile ? 'h-full flex-1 touch-none' : ''}`}>
-                        {!isMobile && (
-                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1 z-10 no-print border border-gray-100">
-                                <button onClick={() => handleUndo()} disabled={history.length === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 disabled:opacity-30 flex items-center gap-1" title="Desfazer (Ctrl+Z)"><Undo className="w-4 h-4" /><span className="text-[10px] font-bold">Undo</span></button>
-                                <div className="w-px h-4 bg-gray-200 mx-0.5"></div>
-                                <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600" title="Diminuir Zoom"><Minus className="w-4 h-4" /></button>
-                                <div className="flex flex-col items-center min-w-[40px] px-1"><span className="text-[8px] font-bold text-gray-400 uppercase leading-none">Zoom</span><span className="text-[10px] font-bold text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span></div>
-                                <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600" title="Aumentar Zoom"><Plus className="w-4 h-4" /></button>
-                                <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1" title="Resetar Zoom">Reset</button>
+                        <div className="mb-2 md:mb-4 bg-white p-1 rounded-xl shadow-sm flex items-center space-x-1 z-10 no-print border border-gray-100 max-w-full overflow-x-auto custom-scrollbar shrink-0">
+                            <button onClick={() => handleUndo()} disabled={history.length === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 disabled:opacity-30 flex items-center gap-1 shrink-0" title="Desfazer (Ctrl+Z)"><Undo className="w-4 h-4" /><span className="text-[10px] font-bold hidden sm:inline">Undo</span></button>
+                            
+                            <div className="w-px h-4 bg-gray-200 mx-0.5 shrink-0"></div>
 
-                                <div className="w-px h-4 bg-gray-200 mx-1"></div>
+                            <button onClick={() => setPanMode(false)} className={`p-1.5 rounded transition-all shrink-0 ${!panMode ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-400 hover:text-gray-600'}`} title="Seleção"><MousePointer2 className="w-4 h-4" /></button>
+                            <button onClick={() => setPanMode(true)} className={`p-1.5 rounded transition-all shrink-0 ${panMode ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-400 hover:text-gray-600'}`} title="Mão / Arrastar"><Hand className="w-4 h-4" /></button>
 
-                                {/* Controle de Deslocamento das Setas (CorelDraw) */}
-                                <div className="flex items-center gap-1.5 bg-gray-50/90 hover:bg-gray-50 border border-gray-200/80 rounded-md px-2 py-0.5" title="Controle de Deslocamento de Objetos com as Setas do Teclado (Atalho Estilo CorelDraw). Segurar Shift=5x, Alt/Ctrl=0.2x">
-                                    <Move className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                    <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tight hidden sm:inline">Deslocar:</span>
-                                    <input 
-                                        type="number" 
-                                        step={nudgeUnit === 'mm' ? '0.5' : '1'} 
-                                        min="0.01" 
-                                        max="500" 
-                                        value={nudgeValue} 
-                                        onChange={(e) => setNudgeValue(Math.max(0.01, parseFloat(e.target.value) || 0.1))} 
-                                        className="w-12 text-xs font-bold text-indigo-700 bg-white border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                    <button 
-                                        onClick={() => setNudgeUnit(nudgeUnit === 'mm' ? 'px' : 'mm')} 
-                                        className="text-[10px] font-black text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded transition-colors uppercase cursor-pointer"
-                                        title="Clique para alternar unidade entre milímetros (mm) e pixels (px)"
-                                    >
-                                        {nudgeUnit}
-                                    </button>
-                                </div>
+                            <div className="w-px h-4 bg-gray-200 mx-0.5 shrink-0"></div>
+
+                            <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 shrink-0" title="Diminuir Zoom"><Minus className="w-4 h-4" /></button>
+                            <div className="flex flex-col items-center min-w-[36px] px-1 shrink-0"><span className="text-[7px] font-bold text-gray-400 uppercase leading-none">Zoom</span><span className="text-[10px] font-bold text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span></div>
+                            <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 shrink-0" title="Aumentar Zoom"><Plus className="w-4 h-4" /></button>
+                            <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1 shrink-0" title="Resetar Zoom">100%</button>
+
+                            <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
+
+                            {/* Controle de Deslocamento das Setas */}
+                            <div className="flex items-center gap-1 bg-gray-50/90 border border-gray-200/80 rounded-md px-1.5 py-0.5 shrink-0" title="Controle de Deslocamento">
+                                <Move className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tight hidden sm:inline">Deslocar:</span>
+                                <input 
+                                    type="number" 
+                                    step={nudgeUnit === 'mm' ? '0.5' : '1'} 
+                                    min="0.01" 
+                                    max="500" 
+                                    value={nudgeValue} 
+                                    onChange={(e) => setNudgeValue(Math.max(0.01, parseFloat(e.target.value) || 0.1))} 
+                                    className="w-10 text-[10px] font-bold text-indigo-700 bg-white border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none"
+                                />
+                                <button 
+                                    onClick={() => setNudgeUnit(nudgeUnit === 'mm' ? 'px' : 'mm')} 
+                                    className="text-[9px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/60 px-1 py-0.5 rounded uppercase"
+                                >
+                                    {nudgeUnit}
+                                </button>
                             </div>
-                        )}
+                        </div>
 
                         {config.layoutType === '1_per_page_weekend_shared' && editMode === 'daily' && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex space-x-1 z-10">
@@ -11200,28 +11226,72 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         initial={{ y: '100%' }}
                         animate={{ y: 0 }}
                         exit={{ y: '100%' }}
-                        className="fixed inset-x-0 bottom-0 z-[2100] bg-white rounded-t-3xl shadow-2xl flex flex-col p-6 no-print h-[60vh] border-t border-indigo-100"
+                        className="fixed inset-x-0 bottom-0 z-[2100] bg-white rounded-t-3xl shadow-2xl flex flex-col p-5 no-print h-[75vh] border-t border-indigo-100"
                     >
-                        <div className="flex items-center justify-between mb-6">
-                            <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600">Incluir no Planner</h3>
-                            <button onClick={() => setMobileDrawer('none')} className="p-1"><X className="w-6 h-6 text-gray-400" /></button>
+                        <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-100 shrink-0">
+                            <div>
+                                <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600">Incluir no Layout</h3>
+                                <p className="text-[10px] text-gray-400">Toque em qualquer elemento para adicionar ao seu planner</p>
+                            </div>
+                            <button onClick={() => setMobileDrawer('none')} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X className="w-6 h-6 text-gray-400" /></button>
                         </div>
-                        <div className="grid grid-cols-3 gap-3 overflow-y-auto pb-10">
+
+                        <div className="flex-1 overflow-y-auto pb-16 space-y-4 custom-scrollbar">
+                            {/* Datas e Marcadores */}
                             {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
-                                <>
-                                    <button onClick={() => { addElement('date_placeholder', 'Dia', { variant: 'day_number' }); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-indigo-50/30 gap-2"><span className="font-bold text-lg text-indigo-600">24</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Dia</span></button>
-                                    <button onClick={() => { addElement('date_placeholder', 'Semana', { variant: 'day_name' }); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-indigo-50/30 gap-2"><span className="text-xs font-bold text-indigo-600 uppercase">Seg</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Semana</span></button>
-                                    <button onClick={() => { addElement('date_placeholder', 'Mês', { variant: 'month_name' }); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-indigo-50/30 gap-2"><span className="text-xs font-bold text-indigo-600 uppercase">Mês</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Mês</span></button>
-                                </>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-2">Datas e Marcadores</span>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button onClick={() => { addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="font-bold text-base text-indigo-600">24</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Dia</span></button>
+                                        <button onClick={() => { addElement('date_placeholder', 'Dia da Semana', { variant: 'day_name' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="text-xs font-bold text-indigo-600 uppercase">Seg</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Semana</span></button>
+                                        <button onClick={() => { addElement('date_placeholder', 'Nome do Mês', { variant: 'month_name' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="text-xs font-bold text-indigo-600 uppercase">Mês</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Mês</span></button>
+                                    </div>
+                                </div>
                             )}
-                            <button onClick={() => { addElement('text', 'Texto'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><Type className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Texto</span></button>
-                            <button onClick={() => { addElement('box', 'Caixa'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><Square className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Caixa</span></button>
-                            <button onClick={() => { addElement('vector_shape', 'Formas'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><Shapes className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Formas</span></button>
-                            <button onClick={() => { addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 }); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><ListTodo className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Linhas</span></button>
-                            <button onClick={() => { addElement('table', 'Tabela'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><TableIcon className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Tabela</span></button>
-                            <button onClick={() => { addElement('habit_tracker', 'Hábitos'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><CheckSquare className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Hábitos</span></button>
-                            <button onClick={() => { addElement('image', 'Imagem'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><Upload className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Imagem</span></button>
-                            <button onClick={() => { addElement('verse', 'Versículo'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-2xl bg-white gap-2 shadow-sm"><BookOpen className="w-6 h-6 text-indigo-600"/><span className="text-[9px] font-bold text-gray-500 uppercase">Versículo</span></button>
+
+                            {/* Formas e Textos Básicos */}
+                            <div>
+                                <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-2">Textos e Formas</span>
+                                <div className="grid grid-cols-4 gap-2">
+                                    <button onClick={() => { addElement('text', 'Texto'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Type className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Texto</span></button>
+                                    <button onClick={() => { addElement('box', 'Caixa'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Square className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Caixa</span></button>
+                                    <button onClick={() => { addElement('circle', 'Círculo'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Circle className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Círculo</span></button>
+                                    <button onClick={() => { addElement('vector_shape', 'Formas'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Shapes className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Formas</span></button>
+                                    <button onClick={() => { addElement('image', 'Imagem'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Upload className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Imagem</span></button>
+                                </div>
+                            </div>
+
+                            {/* Pautas, Tabelas e Estruturas */}
+                            <div>
+                                <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-2">Estrutura e Tabelas</span>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={() => { addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><ListTodo className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Pautas</span></button>
+                                    <button onClick={() => { addElement('lines', 'Horários', { showTimes: true, startHour: 7, lineSpacing: 28, color: '#e5e7eb' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Clock className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Horários</span></button>
+                                    <button onClick={() => { addElement('table', 'Tabela'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><TableIcon className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Tabela</span></button>
+                                    <button onClick={() => { addElement('note_grid', 'Grid', { variant: 'dots', color: '#ccc', opacity: 0.5 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Grid3X3 className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Grid Notas</span></button>
+                                    <button onClick={() => { addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Minus className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Divisória</span></button>
+                                </div>
+                            </div>
+
+                            {/* Widgets do Planner */}
+                            <div>
+                                <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-2">Widgets e Utilidades</span>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={() => { addElement('habit_tracker', 'Hábitos'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CheckSquare className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Hábitos</span></button>
+                                    <button onClick={() => { addElement('mini_calendar', 'Calendário'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CalendarDays className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Mini Cal.</span></button>
+                                    <button onClick={() => { addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Moon className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Lua</span></button>
+                                    <button onClick={() => { addElement('holiday', 'Feriado'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Flag className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Feriado</span></button>
+                                    <button onClick={() => { addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><BookOpen className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Versículo</span></button>
+                                    <button onClick={() => { addElement('permanent_day_header', 'Agenda Perm.', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><List className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Agenda Perm.</span></button>
+
+                                    {editMode === 'intro' && (
+                                        <>
+                                            <button onClick={() => { addElement('full_calendar', 'Cal. Anual'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CalendarRange className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Cal. Anual</span></button>
+                                            <button onClick={() => { addElement('holiday_list', 'Feriados'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Flag className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Lista Feriados</span></button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </motion.div>
                 )}

@@ -1070,7 +1070,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
         
         {/* LEFT SIDEBAR: Font Select & Glyph Directory */}
         {showLeftSidebar && (
-        <div className={`w-64 lg:w-72 flex flex-col border-r shrink-0 overflow-hidden ${
+        <div className={`w-full md:w-64 lg:w-72 flex flex-col border-r shrink-0 overflow-hidden absolute md:relative inset-y-0 left-0 z-30 shadow-2xl md:shadow-none ${
           workspaceTheme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
         }`}>
           {/* Active Font / Font Upload Area */}
@@ -1523,7 +1523,7 @@ Selecione qualquer letra para ver glifos alternativos!
 
         {/* RIGHT PANEL: OpenType Properties and Details Viewer */}
         {showRightSidebar && (
-        <div className={`w-64 lg:w-72 flex flex-col border-l shrink-0 overflow-y-auto ${
+        <div className={`w-full md:w-64 lg:w-72 flex flex-col border-l shrink-0 overflow-y-auto absolute md:relative inset-y-0 right-0 z-30 shadow-2xl md:shadow-none ${
           workspaceTheme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
         }`}>
           {/* Section: OpenType Features Switchboard */}
