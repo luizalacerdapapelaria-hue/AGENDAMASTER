@@ -4,7 +4,7 @@ import {
   Upload, Search, Type, Sliders, ChevronRight, Settings, 
   HelpCircle, Eye, EyeOff, Sparkles, RefreshCw, ZoomIn, 
   ZoomOut, Copy, Download, Trash2, ArrowRight, Check, CheckSquare, Square,
-  Moon, Sun, Info, Play, Palette, FileText, X
+  Moon, Sun, Info, Play, Palette, FileText, X, Monitor
 } from 'lucide-react';
 
 interface OpenTypeEditorProps {
@@ -125,6 +125,11 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
       setShowRightSidebar(false);
     }
   }, []);
+
+  // System local fonts modal state
+  const [showSystemFontsModal, setShowSystemFontsModal] = useState<boolean>(false);
+  const [systemFontsList, setSystemFontsList] = useState<any[]>([]);
+  const [systemFontSearch, setSystemFontSearch] = useState<string>('');
 
   // Font states
   const [fonts, setFonts] = useState<StoredFont[]>([]);
@@ -330,6 +335,91 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
     } catch (err: any) {
       console.error(err);
       setFontError(`Erro ao processar fonte: ${err.message || 'Formato inválido'}`);
+    } finally {
+      setLoadingFont(false);
+    }
+  };
+
+  // Open System Local Fonts Modal
+  const handleOpenSystemFontsModal = async () => {
+    if (!('queryLocalFonts' in window)) {
+      alert(
+        "⚠️ Leitura automática de fontes locais não suportada neste navegador.\n\n" +
+        "Para extrair os glifos de uma fonte do seu PC, clique no botão 'Enviar .OTF/.TTF' e selecione o arquivo da fonte (na pasta C:\\Windows\\Fonts no Windows ou Font Book no Mac)!"
+      );
+      return;
+    }
+    setLoadingFont(true);
+    try {
+      const localFonts = await (window as any).queryLocalFonts();
+      if (!localFonts || localFonts.length === 0) {
+        alert("Nenhuma fonte encontrada no computador.");
+        return;
+      }
+      setSystemFontsList(localFonts);
+      setShowSystemFontsModal(true);
+    } catch (err: any) {
+      console.error('Erro ao acessar fontes locais:', err);
+      if (err.name === 'SecurityError' || err.message?.includes('iframe') || err.message?.includes('frame')) {
+        alert(
+          "⚠️ Restrição de Privacidade do Navegador (Iframe)!\n\n" +
+          "Quando o aplicativo roda dentro do painel do AI Studio, o navegador bloqueia a busca automática de arquivos do disco por privacidade.\n\n" +
+          "Como carregar a fonte do seu PC no Editor de Glifos:\n" +
+          "1. Clique no botão 'Enviar .OTF/.TTF' e selecione o arquivo da fonte no seu PC (pasta C:\\Windows\\Fonts ou Font Book no Mac).\n" +
+          "2. Ou abra o aplicativo em uma nova aba usando o botão de visualização!"
+        );
+      } else {
+        alert("Erro ao buscar fontes do PC: " + err.message);
+      }
+    } finally {
+      setLoadingFont(false);
+    }
+  };
+
+  // Select System Font and Parse Binary
+  const handleSelectSystemFont = async (fontData: any) => {
+    setLoadingFont(true);
+    setFontError(null);
+    try {
+      const blob = await fontData.blob();
+      const buffer = await blob.arrayBuffer();
+      const parsedFont = opentype.parse(buffer);
+
+      const familyName = fontData.family || fontData.fullName;
+      const cleanName = familyName.replace(/\s+/g, '-');
+      const fontFamilyId = `local-${cleanName}-${Date.now()}`;
+
+      const fontFace = new FontFace(fontFamilyId, buffer);
+      await fontFace.load();
+      document.fonts.add(fontFace);
+
+      const fontId = `id-${fontFamilyId}`;
+      await saveFontToDB({
+        id: fontId,
+        name: `${familyName} (${fontData.style || 'PC'})`,
+        family: fontFamilyId,
+        buffer,
+        uploadedAt: Date.now()
+      });
+
+      const newFont: StoredFont = {
+        name: `${familyName} (${fontData.style || 'PC'})`,
+        family: fontFamilyId,
+        source: 'uploaded',
+        font: parsedFont,
+        buffer,
+      };
+
+      setFonts(prev => [newFont, ...prev]);
+      setActiveFontIndex(0);
+      setCurrentPage(1);
+      if (onRegisterFont) {
+        onRegisterFont(fontFamilyId);
+      }
+      setShowSystemFontsModal(false);
+    } catch (err: any) {
+      console.error(err);
+      setFontError(`Erro ao processar fonte do PC: ${err.message || 'Formato inválido'}`);
     } finally {
       setLoadingFont(false);
     }
@@ -1030,24 +1120,37 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
               })}
             </div>
 
-            {/* Custom File Upload Input */}
-            <label className={`flex items-center justify-center gap-2.5 p-3 rounded-xl border border-dashed cursor-pointer transition-all ${
-              workspaceTheme === 'dark' 
-                ? 'border-slate-700 hover:border-indigo-500 hover:bg-slate-850' 
-                : 'border-slate-350 hover:border-indigo-500 hover:bg-indigo-50/20'
-            }`}>
-              <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
-              <div className="text-left">
-                <p className="text-xs font-bold leading-none">Carregar Fonte (.ttf, .otf)</p>
-                <span className="text-[9px] opacity-65">Arraste ou clique para enviar</span>
-              </div>
-              <input 
-                type="file" 
-                accept=".ttf,.otf" 
-                onChange={handleFontUpload} 
-                className="hidden" 
-              />
-            </label>
+            {/* Custom File Upload & System Font Load Inputs */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleOpenSystemFontsModal}
+                className={`flex flex-col items-center justify-center p-2 rounded-xl border border-dashed transition-all cursor-pointer ${
+                  workspaceTheme === 'dark'
+                    ? 'border-slate-700 hover:border-indigo-500 hover:bg-slate-800'
+                    : 'border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/30'
+                }`}
+                title="Puxar fontes instaladas no seu computador"
+              >
+                <Monitor className="w-4 h-4 text-indigo-500 mb-1" />
+                <span className="text-[10px] font-bold text-center leading-tight">Puxar do PC</span>
+              </button>
+
+              <label className={`flex flex-col items-center justify-center p-2 rounded-xl border border-dashed cursor-pointer transition-all ${
+                workspaceTheme === 'dark' 
+                  ? 'border-slate-700 hover:border-indigo-500 hover:bg-slate-800' 
+                  : 'border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/30'
+              }`}>
+                <Upload className="w-4 h-4 text-indigo-500 mb-1 shrink-0" />
+                <span className="text-[10px] font-bold text-center leading-tight">Enviar .OTF/.TTF</span>
+                <input 
+                  type="file" 
+                  accept=".ttf,.otf" 
+                  onChange={handleFontUpload} 
+                  className="hidden" 
+                />
+              </label>
+            </div>
           </div>
 
           {/* Search and Category Filtering */}
@@ -1578,6 +1681,77 @@ Selecione qualquer letra para ver glifos alternativos!
         )}
 
       </div>
+
+      {/* Modal: System Local Fonts Explorer */}
+      {showSystemFontsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className={`w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl shadow-2xl border ${
+            workspaceTheme === 'dark' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'
+          }`}>
+            <div className="p-4 border-b dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Monitor className="w-5 h-5 text-indigo-500" />
+                <div>
+                  <h3 className="font-bold text-sm">Fontes Instaladas no Computador</h3>
+                  <p className="text-[10px] opacity-60">Selecione uma fonte do PC para extrair e inspecionar seus glifos OpenType</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowSystemFontsModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 border-b dark:border-slate-800">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar fonte no seu computador..."
+                  value={systemFontSearch}
+                  onChange={(e) => setSystemFontSearch(e.target.value)}
+                  className={`w-full pl-9 pr-3 py-1.5 rounded-lg text-xs outline-none border ${
+                    workspaceTheme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div className="p-3 overflow-y-auto flex-1 space-y-1 max-h-[50vh]">
+              {systemFontsList
+                .filter(f => {
+                  const search = systemFontSearch.toLowerCase();
+                  return (f.family && f.family.toLowerCase().includes(search)) ||
+                         (f.fullName && f.fullName.toLowerCase().includes(search));
+                })
+                .slice(0, 100)
+                .map((f, idx) => (
+                  <button
+                    key={`${f.family}-${f.fullName}-${idx}`}
+                    onClick={() => handleSelectSystemFont(f)}
+                    className={`w-full text-left p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
+                      workspaceTheme === 'dark' 
+                        ? 'border-slate-800 hover:border-indigo-500 hover:bg-slate-800/80 text-slate-200' 
+                        : 'border-slate-100 hover:border-indigo-500 hover:bg-indigo-50/50 text-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <p className="font-bold">{f.fullName || f.family}</p>
+                      <span className="text-[10px] opacity-60 font-mono">Família: {f.family} • Estilo: {f.style || 'Regular'}</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                  </button>
+                ))}
+            </div>
+
+            <div className="p-3 border-t dark:border-slate-800 text-center">
+              <p className="text-[10px] opacity-50">Clique em qualquer fonte para carregar a tabela completa de glifos no editor OpenType.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

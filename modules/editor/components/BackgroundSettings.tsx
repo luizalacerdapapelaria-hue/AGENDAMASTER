@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { BackgroundConfig } from '../../../types';
-import { Palmtree, Trash2, Upload, Minus, Palette, Layers, Eye, EyeOff, AlertTriangle, X, ChevronLeft, ChevronRight, Loader2, FileText, FlipHorizontal, FlipVertical, RotateCw, BookOpen } from 'lucide-react';
+import { Palmtree, Trash2, Upload, Minus, Palette, Layers, Eye, EyeOff, AlertTriangle, X, ChevronLeft, ChevronRight, Loader2, FileText, FlipHorizontal, FlipVertical, RotateCw, BookOpen, Plus, Sparkles } from 'lucide-react';
 import { compressImage } from '../utils/imageCompressor';
 import { ImageManager, useImageSrc } from '../utils/imageManager';
 
@@ -40,19 +40,146 @@ const loadPdfJs = (): Promise<any> => {
 };
 
 interface BackgroundSettingsProps {
-    config: BackgroundConfig | undefined;
+    config?: BackgroundConfig;
+    configs?: BackgroundConfig[];
     onChange: (updates: Partial<BackgroundConfig>) => void;
+    onConfigsChange?: (newConfigs: BackgroundConfig[]) => void;
 }
 
-export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, onChange }) => {
+export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, configs, onChange, onConfigsChange }) => {
     const defaultBg: BackgroundConfig = {
+        id: 'bg-default',
+        name: 'Fundo Padrão',
         type: 'none',
         opacity: 1,
         showOnIntroPages: true,
-        showOnDailyPages: true
+        showOnDailyPages: true,
+        pageFilter: 'all',
+        targetType: 'all'
     };
 
-    const current = config || defaultBg;
+    const isMultiMode = Boolean(onConfigsChange);
+    const bgList = (configs && configs.length > 0) ? configs : [config || defaultBg];
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    const safeIndex = activeIndex < bgList.length ? activeIndex : 0;
+    const current = bgList[safeIndex] || defaultBg;
+
+    const handleCurrentUpdate = (updates: Partial<BackgroundConfig>) => {
+        if (isMultiMode && onConfigsChange && configs) {
+            const nextList = [...bgList];
+            nextList[safeIndex] = {
+                ...nextList[safeIndex],
+                ...updates
+            };
+            onConfigsChange(nextList);
+        } else {
+            onChange(updates);
+        }
+    };
+
+    const addNewBgSlot = () => {
+        if (!onConfigsChange || !configs) return;
+        const newBg: BackgroundConfig = {
+            id: 'bg-' + Date.now(),
+            name: `Fundo ${configs.length + 1}`,
+            type: 'none',
+            opacity: 1,
+            showOnIntroPages: true,
+            showOnDailyPages: true,
+            pageFilter: 'all',
+            targetType: 'all'
+        };
+        const nextList = [...configs, newBg];
+        onConfigsChange(nextList);
+        setActiveIndex(nextList.length - 1);
+    };
+
+    const removeBgSlot = (indexToRemove: number) => {
+        if (!onConfigsChange || !configs || configs.length <= 1) return;
+        const nextList = configs.filter((_, idx) => idx !== indexToRemove);
+        onConfigsChange(nextList);
+        if (safeIndex >= nextList.length) {
+            setActiveIndex(Math.max(0, nextList.length - 1));
+        }
+    };
+
+    const applyEvenOddPreset = () => {
+        if (!onConfigsChange) return;
+        const oddBg: BackgroundConfig = {
+            id: 'bg-odd-' + Date.now(),
+            name: 'Fundo Páginas Ímpares (Direita)',
+            type: current.type !== 'none' ? current.type : 'solid',
+            color: current.color || '#ffffff',
+            gradient: current.gradient,
+            image: current.image ? { ...current.image } : undefined,
+            opacity: current.opacity ?? 1,
+            showOnIntroPages: true,
+            showOnDailyPages: true,
+            pageFilter: 'odd',
+            targetType: 'odd'
+        };
+        const evenBg: BackgroundConfig = {
+            id: 'bg-even-' + Date.now(),
+            name: 'Fundo Páginas Pares (Esquerda)',
+            type: current.type !== 'none' ? current.type : 'solid',
+            color: current.color || '#f9fafb',
+            gradient: current.gradient,
+            image: current.image ? { ...current.image } : undefined,
+            opacity: current.opacity ?? 1,
+            showOnIntroPages: true,
+            showOnDailyPages: true,
+            pageFilter: 'even',
+            targetType: 'even'
+        };
+        onConfigsChange([oddBg, evenBg]);
+        setActiveIndex(0);
+    };
+
+    const applyIntroDailyPreset = () => {
+        if (!onConfigsChange) return;
+        const introBg: BackgroundConfig = {
+            id: 'bg-intro-' + Date.now(),
+            name: 'Fundo Páginas Iniciais',
+            type: current.type !== 'none' ? current.type : 'solid',
+            color: current.color || '#ffffff',
+            gradient: current.gradient,
+            image: current.image ? { ...current.image } : undefined,
+            opacity: current.opacity ?? 1,
+            showOnIntroPages: true,
+            showOnDailyPages: false,
+            pageFilter: 'all',
+            targetType: 'intro'
+        };
+        const dailyBg: BackgroundConfig = {
+            id: 'bg-daily-' + Date.now(),
+            name: 'Fundo Páginas Diárias (Miolo)',
+            type: current.type !== 'none' ? current.type : 'solid',
+            color: current.color || '#ffffff',
+            gradient: current.gradient,
+            image: current.image ? { ...current.image } : undefined,
+            opacity: current.opacity ?? 1,
+            showOnIntroPages: false,
+            showOnDailyPages: true,
+            pageFilter: 'all',
+            targetType: 'daily'
+        };
+        onConfigsChange([introBg, dailyBg]);
+        setActiveIndex(0);
+    };
+
+    const getTargetLabel = (bg: BackgroundConfig) => {
+        if (bg.customPages && bg.customPages.trim() !== '') {
+            return `Páginas: ${bg.customPages}`;
+        }
+        const filter = bg.targetType || bg.pageFilter || 'all';
+        if (filter === 'even') return 'Páginas Pares (Esquerda)';
+        if (filter === 'odd') return 'Páginas Ímpares (Direita)';
+        if (filter === 'intro' || (bg.showOnIntroPages && !bg.showOnDailyPages)) return 'Páginas Iniciais';
+        if (filter === 'daily' || (bg.showOnDailyPages && !bg.showOnIntroPages)) return 'Páginas do Miolo';
+        return 'Todas as Páginas';
+    };
+
     const bgUrl = useImageSrc(current.image?.url);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const pdfPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -173,7 +300,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
             const dataUrl = canvas.toDataURL('image/png');
             const registeredUrl = await ImageManager.registerImage(dataUrl);
             
-            onChange({ 
+            handleCurrentUpdate({ 
                 type: 'image', 
                 image: { 
                     url: registeredUrl, 
@@ -207,7 +334,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
             if (!rawDataUrl) return;
             const registeredUrl = await ImageManager.registerImage(rawDataUrl);
             
-            onChange({ 
+            handleCurrentUpdate({ 
                 type: 'image', 
                 image: { 
                     url: registeredUrl, 
@@ -222,36 +349,218 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
 
     return (
         <div className="space-y-6">
+            {/* Gerenciador de Múltiplos Planos de Fundo */}
+            {isMultiMode && configs && (
+                <div className="space-y-3 p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-150 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                            Planos de Fundo ({configs.length})
+                        </span>
+                        <button
+                            type="button"
+                            onClick={addNewBgSlot}
+                            className="text-[10px] font-bold px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+                        >
+                            <Plus className="w-3 h-3" />
+                            <span>Adicionar Fundo</span>
+                        </button>
+                    </div>
+
+                    {/* Presets Rápidos */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                        <button
+                            type="button"
+                            onClick={applyEvenOddPreset}
+                            className="py-1.5 px-2 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg text-[9px] font-bold transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
+                            title="Cria automaticamente 1 fundo para páginas ímpares e 1 para páginas pares"
+                        >
+                            <Sparkles className="w-3 h-3 text-indigo-500" />
+                            <span>Pares vs. Ímpares</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={applyIntroDailyPreset}
+                            className="py-1.5 px-2 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg text-[9px] font-bold transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
+                            title="Cria automaticamente 1 fundo para páginas iniciais e 1 para o miolo diário"
+                        >
+                            <Sparkles className="w-3 h-3 text-indigo-500" />
+                            <span>Iniciais vs. Miolo</span>
+                        </button>
+                    </div>
+
+                    {/* Lista de Fundos Configurados */}
+                    <div className="space-y-1.5 pt-1">
+                        {configs.map((bgItem, idx) => (
+                            <div
+                                key={bgItem.id || idx}
+                                onClick={() => setActiveIndex(idx)}
+                                className={`p-2 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
+                                    safeIndex === idx
+                                        ? 'bg-white border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
+                                        : 'bg-white/70 hover:bg-white border-gray-200 text-gray-600'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${bgItem.type === 'none' ? 'bg-gray-300' : 'bg-indigo-500'}`} />
+                                    <div className="truncate">
+                                        <span className="font-bold text-[11px] block text-gray-800 truncate">
+                                            {bgItem.name || `Fundo ${idx + 1}`}
+                                        </span>
+                                        <span className="text-[9px] text-gray-500 block truncate font-medium">
+                                            {getTargetLabel(bgItem)}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                    {configs.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                removeBgSlot(idx);
+                                            }}
+                                            className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"
+                                            title="Excluir este fundo"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Configuração do Fundo Selecionado */}
+            {isMultiMode && (
+                <div className="space-y-2.5 p-3 bg-gray-50/80 rounded-xl border border-gray-200">
+                    <div className="space-y-1">
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                            Nome do Fundo ({safeIndex + 1}/{bgList.length})
+                        </label>
+                        <input
+                            type="text"
+                            value={current.name || `Fundo ${safeIndex + 1}`}
+                            onChange={(e) => handleCurrentUpdate({ name: e.target.value })}
+                            className="w-full text-xs p-2 border border-gray-200 rounded-lg font-bold text-gray-800 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="Ex: Fundo Páginas Ímpares"
+                        />
+                    </div>
+
+                    <div className="space-y-1.5 pt-1">
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                            Onde este fundo será exibido?
+                        </label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                                type="button"
+                                onClick={() => handleCurrentUpdate({ targetType: 'all', pageFilter: 'all', showOnIntroPages: true, showOnDailyPages: true })}
+                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
+                                    (!current.targetType || current.targetType === 'all') && (!current.pageFilter || current.pageFilter === 'all') && current.showOnIntroPages !== false && current.showOnDailyPages !== false
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                🌐 Todas as Páginas
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => handleCurrentUpdate({ targetType: 'odd', pageFilter: 'odd', showOnIntroPages: true, showOnDailyPages: true })}
+                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
+                                    current.targetType === 'odd' || current.pageFilter === 'odd'
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                📘 Páginas Ímpares (Direita)
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => handleCurrentUpdate({ targetType: 'even', pageFilter: 'even', showOnIntroPages: true, showOnDailyPages: true })}
+                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
+                                    current.targetType === 'even' || current.pageFilter === 'even'
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                📖 Páginas Pares (Esquerda)
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => handleCurrentUpdate({ targetType: 'intro', showOnIntroPages: true, showOnDailyPages: false, pageFilter: 'all' })}
+                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
+                                    current.targetType === 'intro' || (current.showOnIntroPages && !current.showOnDailyPages)
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                📑 Páginas Iniciais
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => handleCurrentUpdate({ targetType: 'daily', showOnIntroPages: false, showOnDailyPages: true, pageFilter: 'all' })}
+                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
+                                    current.targetType === 'daily' || (current.showOnDailyPages && !current.showOnIntroPages)
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                📅 Páginas do Miolo
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => handleCurrentUpdate({ targetType: 'custom' })}
+                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
+                                    current.targetType === 'custom' || (current.customPages && current.customPages.trim() !== '')
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                🔢 Páginas Específicas
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="space-y-3">
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Tipo de Fundo</label>
                 <div className="grid grid-cols-2 gap-2">
                     <button 
-                        onClick={() => onChange({ type: 'none' })}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all ${current.type === 'none' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                        onClick={() => handleCurrentUpdate({ type: 'none' })}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'none' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
                     >
                         <Minus className="w-4 h-4 mb-1" />
                         Nenhum
                     </button>
                     <button 
-                        onClick={() => onChange({ type: 'solid', color: current.color || '#ffffff' })}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all ${current.type === 'solid' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                        onClick={() => handleCurrentUpdate({ type: 'solid', color: current.color || '#ffffff' })}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'solid' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
                     >
                         <Palette className="w-4 h-4 mb-1" />
                         Cor Sólida
                     </button>
                     <button 
-                        onClick={() => onChange({ 
+                        onClick={() => handleCurrentUpdate({ 
                             type: 'gradient', 
                             gradient: current.gradient || { type: 'linear', colors: ['#ffffff', '#f3f4f6'], direction: 180 } 
                         })}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all ${current.type === 'gradient' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'gradient' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
                     >
                         <Layers className="w-4 h-4 mb-1" />
                         Gradiente
                     </button>
                     <button 
                         onClick={triggerImageUpload}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all ${current.type === 'image' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'image' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
                     >
                         <Upload className="w-4 h-4 mb-1" />
                         Imagem / PDF
@@ -266,13 +575,13 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         <input 
                             type="color" 
                             value={current.color || '#ffffff'} 
-                            onChange={(e) => onChange({ color: e.target.value })} 
+                            onChange={(e) => handleCurrentUpdate({ color: e.target.value })} 
                             className="w-12 h-full p-0 border-0 cursor-pointer" 
                         />
                         <input 
                             type="text" 
                             value={current.color || '#ffffff'} 
-                            onChange={(e) => onChange({ color: e.target.value })} 
+                            onChange={(e) => handleCurrentUpdate({ color: e.target.value })} 
                             className="flex-1 text-xs uppercase px-3 font-mono" 
                         />
                     </div>
@@ -298,7 +607,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                             <label className="block text-[10px] font-bold text-gray-500 uppercase">Tipo</label>
                             <select 
                                 value={current.gradient.type}
-                                onChange={(e) => onChange({ gradient: { ...current.gradient!, type: e.target.value as any } })}
+                                onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, type: e.target.value as any } })}
                                 className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white select-none"
                             >
                                 <option value="linear">Linear</option>
@@ -311,7 +620,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                                 <input 
                                     type="number" 
                                     value={current.gradient.direction}
-                                    onChange={(e) => onChange({ gradient: { ...current.gradient!, direction: parseInt(e.target.value) || 0 } })}
+                                    onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, direction: parseInt(e.target.value) || 0 } })}
                                     className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white"
                                 />
                             </div>
@@ -325,7 +634,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                                 <input 
                                     type="color" 
                                     value={current.gradient.colors[0]} 
-                                    onChange={(e) => onChange({ gradient: { ...current.gradient!, colors: [e.target.value, current.gradient!.colors[1]] } })} 
+                                    onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, colors: [e.target.value, current.gradient!.colors[1]] } })} 
                                     className="w-full h-full p-0 border-0 cursor-pointer" 
                                 />
                             </div>
@@ -336,7 +645,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                                 <input 
                                     type="color" 
                                     value={current.gradient.colors[1]} 
-                                    onChange={(e) => onChange({ gradient: { ...current.gradient!, colors: [current.gradient!.colors[0], e.target.value] } })} 
+                                    onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, colors: [current.gradient!.colors[0], e.target.value] } })} 
                                     className="w-full h-full p-0 border-0 cursor-pointer" 
                                 />
                             </div>
@@ -369,7 +678,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                                 <Upload className="w-5 h-5" />
                             </button>
                             <button 
-                                onClick={() => onChange({ type: 'none' })}
+                                onClick={() => handleCurrentUpdate({ type: 'none' })}
                                 className="p-2 bg-red-500 rounded-full hover:bg-red-600 text-white shadow-lg cursor-pointer"
                                 title="Remover"
                             >
@@ -382,7 +691,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         <label className="block text-[10px] font-bold text-gray-500 uppercase">Ajuste da Imagem</label>
                         <select 
                             value={current.image.fit}
-                            onChange={(e) => onChange({ image: { ...current.image!, fit: e.target.value as any } })}
+                            onChange={(e) => handleCurrentUpdate({ image: { ...current.image!, fit: e.target.value as any } })}
                             className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white select-none"
                         >
                             <option value="cover">Cobrir Totalmente (Crop)</option>
@@ -400,7 +709,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         <div className="grid grid-cols-2 gap-2">
                             <button
                                 type="button"
-                                onClick={() => onChange({
+                                onClick={() => handleCurrentUpdate({
                                     image: {
                                         ...current.image!,
                                         flipHorizontal: !current.image?.flipHorizontal
@@ -419,7 +728,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
 
                             <button
                                 type="button"
-                                onClick={() => onChange({
+                                onClick={() => handleCurrentUpdate({
                                     image: {
                                         ...current.image!,
                                         flipVertical: !current.image?.flipVertical
@@ -440,7 +749,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         {/* Alternar em Páginas Pares (Simetria do Miolo) */}
                         <button
                             type="button"
-                            onClick={() => onChange({
+                            onClick={() => handleCurrentUpdate({
                                 image: {
                                     ...current.image!,
                                     flipOnEvenPages: !current.image?.flipOnEvenPages
@@ -462,6 +771,55 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                             <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${current.image.flipOnEvenPages ? 'bg-indigo-600' : 'bg-gray-300'}`} />
                         </button>
 
+                        {/* Rotação e Seleção de Páginas Pares / Ímpares */}
+                        <div className="space-y-2 pt-2 border-t border-gray-200/60">
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                                Páginas de Exibição (Pares / Ímpares)
+                            </label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => handleCurrentUpdate({ pageFilter: 'all', targetType: 'all' })}
+                                    className={`py-2 px-1 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                        (!current.pageFilter || current.pageFilter === 'all')
+                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    <BookOpen className="w-3.5 h-3.5" />
+                                    <span>Todas</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => handleCurrentUpdate({ pageFilter: 'even', targetType: 'even' })}
+                                    className={`py-2 px-1 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                        current.pageFilter === 'even' || current.targetType === 'even'
+                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                    title="Apenas Páginas Pares (2, 4, 6... Lado Esquerdo)"
+                                >
+                                    <FileText className="w-3.5 h-3.5" />
+                                    <span>Páginas Pares</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => handleCurrentUpdate({ pageFilter: 'odd', targetType: 'odd' })}
+                                    className={`py-2 px-1 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                        current.pageFilter === 'odd' || current.targetType === 'odd'
+                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                    title="Apenas Páginas Ímpares (1, 3, 5... Lado Direito)"
+                                >
+                                    <FileText className="w-3.5 h-3.5" />
+                                    <span>Páginas Ímpares</span>
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Rotation selector */}
                         <div className="space-y-1.5 pt-1">
                             <div className="flex items-center justify-between">
@@ -473,7 +831,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                                     <button
                                         key={deg}
                                         type="button"
-                                        onClick={() => onChange({
+                                        onClick={() => handleCurrentUpdate({
                                             image: {
                                                 ...current.image!,
                                                 rotation: deg
@@ -504,16 +862,16 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                     max="1" 
                     step="0.05" 
                     value={current.opacity ?? 1} 
-                    onChange={(e) => onChange({ opacity: parseFloat(e.target.value) })} 
+                    onChange={(e) => handleCurrentUpdate({ opacity: parseFloat(e.target.value) })} 
                     className="w-full" 
                 />
             </div>
 
             <div className="space-y-3 pt-3 border-t border-gray-100">
-                <label className="block text-[10px] font-bold text-gray-500 uppercase">Visibilidade</label>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase">Visibilidade e Páginas</label>
                 <div className="space-y-2">
                     <button 
-                        onClick={() => onChange({ showOnIntroPages: !current.showOnIntroPages })}
+                        onClick={() => handleCurrentUpdate({ showOnIntroPages: !current.showOnIntroPages })}
                         className={`w-full flex items-center justify-between p-2 rounded-md border text-[10px] font-medium transition-all ${current.showOnIntroPages ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-100 text-gray-400'}`}
                     >
                         <span className="flex items-center">
@@ -523,7 +881,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         <div className={`w-2 h-2 rounded-full ${current.showOnIntroPages ? 'bg-indigo-500' : 'bg-gray-300'}`} />
                     </button>
                     <button 
-                        onClick={() => onChange({ showOnDailyPages: !current.showOnDailyPages })}
+                        onClick={() => handleCurrentUpdate({ showOnDailyPages: !current.showOnDailyPages })}
                         className={`w-full flex items-center justify-between p-2 rounded-md border text-[10px] font-medium transition-all ${current.showOnDailyPages ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-100 text-gray-400'}`}
                     >
                         <span className="flex items-center">
@@ -532,6 +890,47 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         </span>
                         <div className={`w-2 h-2 rounded-full ${current.showOnDailyPages ? 'bg-indigo-500' : 'bg-gray-300'}`} />
                     </button>
+                </div>
+
+                <div className="space-y-1.5 pt-2">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">
+                        Filtrar por Paridade de Página
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => handleCurrentUpdate({ pageFilter: 'all', targetType: 'all' })}
+                            className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
+                                (!current.pageFilter || current.pageFilter === 'all')
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            Todas
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleCurrentUpdate({ pageFilter: 'even', targetType: 'even' })}
+                            className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
+                                current.pageFilter === 'even' || current.targetType === 'even'
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            Páginas Pares
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleCurrentUpdate({ pageFilter: 'odd', targetType: 'odd' })}
+                            className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
+                                current.pageFilter === 'odd' || current.targetType === 'odd'
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            Páginas Ímpares
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -542,7 +941,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                         type="text"
                         placeholder="Ex: 1, 3, 5-10"
                         value={current.customPages || ''}
-                        onChange={(e) => onChange({ customPages: e.target.value })}
+                        onChange={(e) => handleCurrentUpdate({ customPages: e.target.value, targetType: e.target.value.trim() !== '' ? 'custom' : 'all' })}
                         className="w-full text-xs p-2.5 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
                     />
                     <p className="text-[9px] text-gray-400 italic px-1">Se preenchido, ignora as opções acima e exibe apenas nestas páginas.</p>

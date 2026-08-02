@@ -28,7 +28,28 @@ interface ElementRendererProps {
   activeTableCell?: { elementId: string; r: number; c: number } | null;
   globalCalendarStyle?: LayoutElement['style']['fullCalendar'];
   municipalHolidays?: Holiday[];
+  calendarIndex?: number;
 }
+
+const getShiftedDayData = (baseDay: DayData, offset: number): DayData => {
+    if (!offset || offset === 0 || !baseDay) return baseDay;
+    if (!baseDay.date) {
+        return {
+            ...baseDay,
+            dayOfMonth: baseDay.dayOfMonth ? baseDay.dayOfMonth + offset : offset
+        };
+    }
+    const targetDate = new Date(baseDay.date);
+    targetDate.setDate(targetDate.getDate() + offset);
+    return {
+        ...baseDay,
+        dayOfMonth: targetDate.getDate(),
+        month: targetDate.getMonth(),
+        year: targetDate.getFullYear(),
+        dayOfWeek: targetDate.getDay(),
+        date: targetDate
+    };
+};
 
 const scaleStyle = (style: any, scaleFactor: number) => {
     if (!style) return style;
@@ -198,7 +219,7 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
   }
 
   if (['mini_calendar', 'full_calendar'].includes(element.type)) {
-      return <CalendarElement {...scaledProps} week={props.weekDays} style={scaledElement.style} pageHeight={pageHeight} pageWidth={pageWidth} />;
+      return <CalendarElement {...scaledProps} week={props.weekDays} style={scaledElement.style} pageHeight={pageHeight} pageWidth={pageWidth} calendarIndex={props.calendarIndex} />;
   }
 
   if (['box', 'circle', 'lines', 'vector_shape'].includes(element.type)) {
@@ -213,11 +234,10 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
       const dayIndex = scaledElement.style.dayIndex;
       let targetDay: DayData | undefined;
       
-      if (dayIndex !== undefined && props.weekDays) {
-          // Se for layout semanal, buscar pelo dia da semana (0-6)
+      if (dayIndex !== undefined && props.weekDays && props.weekDays.length > 0) {
+          // Se for layout semanal (7 dias), buscar pelo dia da semana (0-6)
           // Se for outros layouts, usar como índice direto no array de dias da página
           const isWeekly = props.weekDays.length === 7 && props.weekDays.some(d => d.dayOfWeek !== 0); 
-          // Nota: a verificação acima é heurística. Se tivermos weekDays e não for semanal, tratamos como sequência.
           
           if (isWeekly && dayIndex >= 0 && dayIndex <= 6) {
               targetDay = props.weekDays.find(d => d.dayOfWeek === dayIndex);
@@ -225,10 +245,13 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
               targetDay = props.weekDays[dayIndex];
           }
 
-          if (!targetDay) {
-              // Day not in this batch, return blank dummy
+          if (!targetDay && props.dayData && dayIndex > 0) {
+              targetDay = getShiftedDayData(props.dayData, dayIndex);
+          } else if (!targetDay) {
               targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0) };
           }
+      } else if (dayIndex !== undefined && dayIndex > 0 && props.dayData) {
+          targetDay = getShiftedDayData(props.dayData, dayIndex);
       } else {
           targetDay = props.dayData;
       }

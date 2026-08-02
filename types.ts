@@ -125,6 +125,8 @@ export interface LayoutElement {
     strokeOpacity?: number; // Transparência da borda (0 a 1)
     shapeType?: 'rectangle' | 'circle' | 'triangle' | 'star' | 'heart' | 'arrow' | 'diamond' | 'hexagon' | 'octagon' | 'pentagon' | 'parallelogram' | 'trapezoid' | 'cloud' | 'shield'; // Tipos de formas vetoriais
     calendarOffset?: number; // -1 (mês anterior), 0 (atual), 1 (próximo)
+    calendarMonthMode?: 'relative' | 'sequence' | 'fixed'; // Modo do mês exibido
+    calendarFixedMonth?: number; // 0 (Janeiro) a 11 (Dezembro) para Mês Fixo
     shapeScale?: number; // Escala para formas (Agenda Permanente)
     monthsPerRow?: number; // Para full_calendar: quantos meses por linha
     gap?: number; // Espaçamento entre meses
@@ -181,6 +183,7 @@ export interface LayoutElement {
         showYearInTitle?: boolean; // Nova propriedade: Mostrar ano no título do mês
         weekdayFormat?: 'initial' | 'short' | 'medium'; // Formato dos cabeçalhos dos dias da semana
         startOfWeekOnMonday?: boolean;
+        startOfWeekDay?: number; // Dia de início da semana (0 = Domingo, 1 = Segunda, 2 = Terça, 3 = Quarta, 4 = Quinta, 5 = Sexta, 6 = Sábado)
         splitMode?: 'all' | 'left' | 'right';
         splitWeekend?: 'none' | 'horizontal' | 'vertical'; // Configuração para sabado/domingo dividirem coluna
         // Estilo de Tabela (Grid)
@@ -230,6 +233,7 @@ export interface LayoutElement {
         showMoonPhase?: boolean;
         startHour?: number;
         fontFamily?: string;
+        headerFontFamily?: string;
         fontSize?: number;
         fontWeight?: string;
         color?: string;
@@ -238,6 +242,8 @@ export interface LayoutElement {
 }
 
 export interface BackgroundConfig {
+    id?: string;
+    name?: string;
     type: 'none' | 'solid' | 'gradient' | 'image';
     color?: string;
     gradient?: {
@@ -257,6 +263,8 @@ export interface BackgroundConfig {
     opacity?: number; // Opacidade global do fundo
     showOnIntroPages?: boolean;
     showOnDailyPages?: boolean;
+    pageFilter?: 'all' | 'even' | 'odd'; // Filtro de exibição por paridade: 'all' (todas), 'even' (pares), 'odd' (ímpares)
+    targetType?: 'all' | 'intro' | 'daily' | 'even' | 'odd' | 'custom'; // Alvo específico de exibição
     customPages?: string; // Intervalo de páginas manual (ex: "1, 3, 5-10")
 }
 
@@ -274,7 +282,7 @@ export interface PageMargins {
   outside: number;// mm (Corte) - Substitui Right em páginas ímpares
 }
 
-export type PageLayoutType = '1_per_page' | '2_per_page' | '1_per_page_weekend_shared' | 'weekly_vertical' | 'weekly_horizontal' | 'notebook' | 'devotional';
+export type PageLayoutType = '1_per_page' | '2_per_page' | '1_per_page_weekend_shared' | 'weekly_vertical' | 'weekly_horizontal' | 'weekly_one_page_vertical' | 'weekly_one_page_horizontal' | 'notebook' | 'devotional';
 export type PageSize = 'A4' | 'A5' | 'Letter' | 'Custom';
 export type PageOrientation = 'portrait' | 'landscape';
 export type ProjectType = 'agenda' | 'planner' | 'notebook' | 'devotional';
@@ -315,7 +323,9 @@ export interface AgendaConfig {
   margins: PageMargins;
   startMonth?: number; // Mês inicial (0-11)
   durationMonths?: number; // Duração em meses
-  background?: BackgroundConfig; // Fundo global padrão
+  startOfWeekDay?: number; // Dia de início da semana para calendários (0-6)
+  background?: BackgroundConfig; // Fundo global padrão (legado)
+  backgrounds?: BackgroundConfig[]; // Lista de múltiplos planos de fundo globais
   elements: LayoutElement[]; // Lista de elementos que compõem o template do dia (MIOLO)
   elementsSaturday?: LayoutElement[]; // Template específico para Sábado (opcional)
   elementsSunday?: LayoutElement[]; // Template específico para Domingo (opcional)

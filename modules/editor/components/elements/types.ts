@@ -28,6 +28,7 @@ export interface TableElementProps extends BaseElementProps {
 
 export interface CalendarElementProps extends BaseElementProps {
     globalCalendarStyle?: LayoutElement['style']['fullCalendar'];
+    calendarIndex?: number;
 }
 
 export interface TextElementProps extends EditableElementProps {

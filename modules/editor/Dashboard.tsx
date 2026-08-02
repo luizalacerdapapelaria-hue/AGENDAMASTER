@@ -18,7 +18,7 @@ import * as icons from 'lucide-react';
 
 import { exportProject, importProject } from '../../core/logic/fileSystem';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
-import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT } from './templates/plannerTemplates';
+import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
 import { LAYOUT_LIBRARY } from './templates/layoutLibrary';
 import { 
@@ -493,7 +493,7 @@ const RulerWrapper: React.FC<RulerWrapperProps> = ({
     );
   };
 
-  const rulersNode = portalTarget ? createPortal(
+  const rulersNode = (portalTarget && enabled) ? createPortal(
     <>
       <div 
         className="absolute top-0 left-0 bg-slate-100 border-r border-b border-slate-200 flex items-center justify-center text-[8px] font-bold text-slate-500 select-none cursor-pointer hover:bg-red-50 hover:text-red-600 transition-colors z-[110]"
@@ -771,6 +771,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     : 'standard'
   );
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
+
+  // --- COREL DRAW NUDGE STATE ---
+  const [nudgeValue, setNudgeValue] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('agendamaster_nudge_value');
+      return saved ? parseFloat(saved) : 1;
+    } catch (e) {
+      return 1;
+    }
+  });
+  const [nudgeUnit, setNudgeUnit] = useState<'mm' | 'px'>(() => {
+    try {
+      const saved = localStorage.getItem('agendamaster_nudge_unit');
+      return (saved === 'px' || saved === 'mm') ? saved : 'mm';
+    } catch (e) {
+      return 'mm';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('agendamaster_nudge_value', nudgeValue.toString());
+    } catch (e) {}
+  }, [nudgeValue]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('agendamaster_nudge_unit', nudgeUnit);
+    } catch (e) {}
+  }, [nudgeUnit]);
   
   // --- RENDERING STATE (Batching System) ---
   const [renderedPreviewCount, setRenderedPreviewCount] = useState(0); 
@@ -976,25 +1006,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef<{ x: number, y: number, scrollLeft: number, scrollTop: number } | null>(null);
 
+  const isClickTargetInteractiveOrElement = (target: HTMLElement | null): boolean => {
+    if (!target) return false;
+    if (target.closest('.layout-element-wrapper')) return true;
+    if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('textarea') || target.closest('label')) return true;
+    if (target.closest('aside') || target.closest('header') || target.closest('nav') || target.closest('[role="dialog"]')) return true;
+    if (target.closest('#context-menu') || target.closest('.no-print-interactive')) return true;
+    return false;
+  };
+
   const handlePanMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     // We pan if:
     // 1. panMode is active
     // 2. Spacebar is held down
     // 3. Middle mouse button is clicked (e.button === 1)
     const shouldPan = panMode || isSpacePressed || e.button === 1;
-    if (!shouldPan) return;
+    if (shouldPan) {
+      e.preventDefault();
+      const container = editorContainerRef.current;
+      if (!container) return;
 
-    e.preventDefault();
-    const container = editorContainerRef.current;
-    if (!container) return;
+      setIsPanning(true);
+      panStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop
+      };
+      return;
+    }
 
-    setIsPanning(true);
-    panStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      scrollLeft: container.scrollLeft,
-      scrollTop: container.scrollTop
-    };
+    if (e.button === 0) {
+      const targetEl = e.target as HTMLElement;
+      if (!isClickTargetInteractiveOrElement(targetEl)) {
+        if (!e.shiftKey && selectedIds.length > 0) {
+          setSelectedIds([]);
+        }
+        if (contextMenu) setContextMenu(null);
+      }
+    }
   };
 
   const handlePanMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1594,11 +1644,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     return fallbackBg;
   };
 
-  const renderBackground = (bg?: BackgroundConfig, pageNumber?: number) => {
+  const isBgMatchingPage = (
+      bg: BackgroundConfig, 
+      pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard', 
+      pageNumber?: number
+  ): boolean => {
+      if (!bg || bg.type === 'none') return false;
+
+      const isIntroType = pageType === 'intro' || pageType === 'monthly_intro' || pageType === 'divider';
+      const isDailyType = pageType === 'daily' || pageType === 'standard';
+
+      // Scope filtering (Intro vs Daily)
+      if (isIntroType) {
+          if (bg.targetType === 'daily') return false;
+          if (bg.showOnIntroPages === false) return false;
+      }
+      if (isDailyType) {
+          if (bg.targetType === 'intro') return false;
+          if (bg.showOnDailyPages === false) return false;
+      }
+
+      // Parity & custom range filtering
+      if (pageNumber !== undefined) {
+          const target = bg.targetType || 'all';
+          const filter = bg.pageFilter || 'all';
+
+          if (target === 'even' || filter === 'even') {
+              if (pageNumber % 2 !== 0) return false;
+          }
+          if (target === 'odd' || filter === 'odd') {
+              if (pageNumber % 2 === 0) return false;
+          }
+          if (target === 'custom' || (bg.customPages && bg.customPages.trim() !== '')) {
+              if (bg.customPages && bg.customPages.trim() !== '') {
+                  if (!isPageInRange(pageNumber, bg.customPages)) return false;
+              }
+          }
+      }
+
+      return true;
+  };
+
+  const renderSingleBackground = (bg?: BackgroundConfig, pageNumber?: number, keyPrefix?: string) => {
     if (!bg || bg.type === 'none') return null;
 
-    if (pageNumber !== undefined && bg.customPages && bg.customPages.trim() !== '') {
-       if (!isPageInRange(pageNumber, bg.customPages)) return null;
+    if (pageNumber !== undefined) {
+       if ((bg.pageFilter === 'even' || bg.targetType === 'even') && pageNumber % 2 !== 0) return null;
+       if ((bg.pageFilter === 'odd' || bg.targetType === 'odd') && pageNumber % 2 === 0) return null;
+       if ((bg.targetType === 'custom' || (bg.customPages && bg.customPages.trim() !== '')) && bg.customPages) {
+          if (!isPageInRange(pageNumber, bg.customPages)) return null;
+       }
     }
 
     const style: React.CSSProperties = {
@@ -1623,7 +1718,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
     }
 
-    return <PageBackground bg={bg} style={style} pageNumber={pageNumber} />;
+    return <PageBackground key={keyPrefix ? `${keyPrefix}_${bg.id || 'bg'}` : bg.id} bg={bg} style={style} pageNumber={pageNumber} />;
+  };
+
+  const renderBackground = (bg?: BackgroundConfig, pageNumber?: number) => {
+    return renderSingleBackground(bg, pageNumber);
+  };
+
+  const renderBackgroundsForPage = (
+      pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard',
+      pageNumber?: number,
+      pageSpecificBg?: BackgroundConfig
+  ) => {
+      // 1. If pageSpecificBg is provided and not 'none', it overrides global backgrounds for this page
+      if (pageSpecificBg && pageSpecificBg.type && pageSpecificBg.type !== 'none') {
+          return renderSingleBackground(pageSpecificBg, pageNumber, 'page_specific');
+      }
+
+      // 2. Resolve global backgrounds array
+      const globalBgs = (config.backgrounds && config.backgrounds.length > 0)
+          ? config.backgrounds
+          : (config.background ? [config.background] : []);
+
+      if (globalBgs.length === 0) return null;
+
+      // 3. Filter all backgrounds that match this page context
+      const matchingBgs = globalBgs.filter(bg => isBgMatchingPage(bg, pageType, pageNumber));
+
+      if (matchingBgs.length === 0) return null;
+
+      return (
+          <>
+              {matchingBgs.map((bg, idx) => renderSingleBackground(bg, pageNumber, `global_${bg.id || idx}`))}
+          </>
+      );
   };
 
   const cancelPrint = () => {
@@ -1688,17 +1816,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         if (selectedIds.length > 0 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            const activeEl = document.activeElement;
+            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || (activeEl as HTMLElement).isContentEditable)) {
+                return;
+            }
+
             e.preventDefault();
             const activeList = getActiveElements();
-            
-            const step = e.shiftKey ? 5 : 1; 
+
+            let multiplier = 1;
+            if (e.shiftKey) multiplier = 5; // Super Nudge
+            else if (e.altKey || e.ctrlKey) multiplier = 0.2; // Micro Nudge
+
+            const val = nudgeValue > 0 ? nudgeValue : 1;
+            const effectiveNudge = val * multiplier;
+
+            const usableW = Math.max(1, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
+            const usableH = Math.max(1, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+
+            let stepX = 0;
+            let stepY = 0;
+
+            if (nudgeUnit === 'mm') {
+                stepX = (effectiveNudge / usableW) * 100;
+                stepY = (effectiveNudge / usableH) * 100;
+            } else { // 'px'
+                const baseCanvasWidthPx = 400;
+                const baseCanvasHeightPx = 400 * (PAGE_HEIGHT_MM / PAGE_WIDTH_MM);
+                stepX = (effectiveNudge / baseCanvasWidthPx) * 100;
+                stepY = (effectiveNudge / baseCanvasHeightPx) * 100;
+            }
+
             const newElements = activeList.map(el => {
                 if (!selectedIds.includes(el.id)) return el;
                 const newEl = { ...el };
-                if (e.key === 'ArrowUp') newEl.y = Math.max(0, newEl.y - step);
-                if (e.key === 'ArrowDown') newEl.y = Math.min(100 - newEl.h, newEl.y + step);
-                if (e.key === 'ArrowLeft') newEl.x = Math.max(0, newEl.x - step);
-                if (e.key === 'ArrowRight') newEl.x = Math.min(100 - newEl.w, newEl.x + step);
+                if (e.key === 'ArrowUp') newEl.y = Math.max(0, newEl.y - stepY);
+                if (e.key === 'ArrowDown') newEl.y = Math.min(100 - newEl.h, newEl.y + stepY);
+                if (e.key === 'ArrowLeft') newEl.x = Math.max(0, newEl.x - stepX);
+                if (e.key === 'ArrowRight') newEl.x = Math.min(100 - newEl.w, newEl.x + stepX);
                 return newEl;
             });
             updateActiveElements(newElements);
@@ -1824,7 +1979,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const responsiveScale = getResponsiveScale();
 
   useEffect(() => {
-    const isWeekly = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
+    const isWeekly = config.layoutType.startsWith('weekly');
     const isNotebookOrDevotional = config.projectType === 'notebook' || config.projectType === 'devotional';
     
     let data: DayData[] = [];
@@ -2198,9 +2353,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setTemplateModal(false);
   };
 
-  const applyPlannerTemplate = (type: 'weekly_vertical' | 'weekly_horizontal', style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
+  const applyPlannerTemplate = (type: 'weekly_vertical' | 'weekly_horizontal' | 'weekly_one_page_vertical' | 'weekly_one_page_horizontal', style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
       let left: LayoutElement[] = [];
       let right: LayoutElement[] = [];
+      let single: LayoutElement[] = [];
 
       const mapElements = (elements: LayoutElement[]) => elements.map(el => {
           const newEl = { ...el, id: Math.random().toString(36).substr(2, 9) };
@@ -2216,17 +2372,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (type === 'weekly_vertical') {
           left = mapElements(WEEKLY_VERTICAL_LEFT);
           right = mapElements(WEEKLY_VERTICAL_RIGHT);
-      } else {
+      } else if (type === 'weekly_horizontal') {
           left = mapElements(WEEKLY_HORIZONTAL_LEFT);
           right = mapElements(WEEKLY_HORIZONTAL_RIGHT);
+      } else if (type === 'weekly_one_page_vertical') {
+          single = mapElements(WEEKLY_ONE_PAGE_VERTICAL);
+      } else if (type === 'weekly_one_page_horizontal') {
+          single = mapElements(WEEKLY_ONE_PAGE_HORIZONTAL);
       }
 
       setConfig(prev => ({
           ...prev,
           layoutType: type,
-          elementsWeeklyLeft: left,
-          elementsWeeklyRight: right
+          elements: single.length > 0 ? single : prev.elements,
+          elementsWeeklyLeft: left.length > 0 ? left : prev.elementsWeeklyLeft,
+          elementsWeeklyRight: right.length > 0 ? right : prev.elementsWeeklyRight
       }));
+      if (type === 'weekly_one_page_vertical' || type === 'weekly_one_page_horizontal') {
+          setEditorViewMode('standard');
+      } else if (type === 'weekly_vertical' || type === 'weekly_horizontal') {
+          setEditorViewMode('weekly_left');
+      }
       setEditMode('daily');
       setTemplateModal(false);
   };
@@ -2385,7 +2551,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
       let pageNumber = config.introPages.length + 1;
       if (config.layoutType === '1_per_page') {
-          pageNumber += dayIndex;
+          const daysPerPage = getMaxDayIndex(config.elements) + 1;
+          pageNumber += Math.floor(dayIndex / daysPerPage);
       } else if (config.layoutType === '2_per_page') {
           pageNumber += Math.floor(dayIndex / 2);
       } else if (config.layoutType === '1_per_page_weekend_shared') {
@@ -3158,17 +3325,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const currentFullCalendar = (element.style.fullCalendar || {}) as any;
 
       if (section === 'highlight') {
+          const baseStyle = currentFullCalendar.specialDays?.style || (element.style.useGlobalStyle ? getGlobalCalendarStyle()?.specialDays?.style : null) || defaultCalendarStyle.specialDays.style;
           const newSpecialDays = {
               ...currentFullCalendar.specialDays,
-              style: { ...currentFullCalendar.specialDays?.style, ...styleUpdate }
+              style: { ...baseStyle, ...styleUpdate }
           };
           updateElementStyle(id, { fullCalendar: { ...currentFullCalendar, specialDays: newSpecialDays } });
           return;
       }
 
+      const baseSectionStyle = currentFullCalendar[section] 
+          || (element.style.useGlobalStyle ? getGlobalCalendarStyle()?.[section] : null) 
+          || (defaultCalendarStyle as any)[section] 
+          || {};
+
       const newFullCalendar = {
           ...currentFullCalendar,
-          [section]: { ...currentFullCalendar[section], ...styleUpdate }
+          [section]: { ...baseSectionStyle, ...styleUpdate }
       };
       updateElementStyle(id, { fullCalendar: newFullCalendar });
   };
@@ -3185,7 +3358,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, []);
 
   useEffect(() => {
-    const isWeekly = (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal');
+    const isWeekly = config.layoutType.startsWith('weekly');
     const isTwoPerPage = config.layoutType === '2_per_page';
     const isSharedWeekend = config.layoutType === '1_per_page_weekend_shared';
 
@@ -3606,19 +3779,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     for (const page of config.introPages) {
         const calendarEl = page.elements.find(el => el.type === 'full_calendar');
         if (calendarEl && calendarEl.style.fullCalendar) {
-            return calendarEl.style.fullCalendar;
+            return {
+                startOfWeekDay: config.startOfWeekDay ?? 0,
+                ...calendarEl.style.fullCalendar
+            };
         }
     }
     if (config.monthlyIntroPages) {
         for (const page of config.monthlyIntroPages) {
             const calendarEl = page.elements.find(el => el.type === 'full_calendar');
             if (calendarEl && calendarEl.style.fullCalendar) {
-                return calendarEl.style.fullCalendar;
+                return {
+                    startOfWeekDay: config.startOfWeekDay ?? 0,
+                    ...calendarEl.style.fullCalendar
+                };
             }
         }
     }
-    return undefined;
-  }, [config.introPages, config.monthlyIntroPages]);
+    return {
+        ...defaultCalendarStyle,
+        startOfWeekDay: config.startOfWeekDay ?? 0
+    };
+  }, [config.introPages, config.monthlyIntroPages, config.startOfWeekDay]);
 
   const renderTemplate = (
     elements: LayoutElement[], 
@@ -3637,6 +3819,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     
     // Obter índices calculados (auto ou explícitos)
     const effectiveIndices = getEffectiveDayIndices(elements);
+    const miniCalendarIndexMap = new Map<string, number>();
+    let miniCalCounter = 0;
+    elements.forEach(el => {
+        if (el.type === 'mini_calendar') {
+            miniCalendarIndexMap.set(el.id, miniCalCounter++);
+        }
+    });
+
     const elementsWithIndices = elements.map(el => {
         let finalStyle = {
             ...el.style,
@@ -3888,6 +4078,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             municipalHolidays={config.municipalHolidays}
                             pageWidth={pageWidth}
                             pageHeight={pageHeight}
+                            calendarIndex={miniCalendarIndexMap.get(el.id)}
                         />
                     ) : (
                         <span style={{ pointerEvents: isSelected ? 'auto' : 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'inherit', alignItems: 'inherit', justifyContent: 'inherit' }}>
@@ -3908,6 +4099,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 municipalHolidays={config.municipalHolidays}
                                 pageWidth={pageWidth}
                                 pageHeight={pageHeight}
+                                calendarIndex={miniCalendarIndexMap.get(el.id)}
                             />
                         </span>
                     )}
@@ -3940,29 +4132,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const getEffectiveDayIndices = useCallback((elements: LayoutElement[]) => {
     // Encontrar elementos que mostram partes da data
     const dateElements = elements.filter(el => 
-        ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'holiday', 'moon'].includes(el.type)
+        ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'holiday', 'moon', 'permanent_day_header', 'planner_day_box'].includes(el.type)
     );
 
     if (dateElements.length === 0) return {};
 
-    // Forçar dayIndex 0 em layouts de 1 dia por página ou sem sequenciamento de dias múltiplo por página
-    if (
-        config.layoutType === '1_per_page' || 
-        config.layoutType === '1_per_page_weekend_shared' || 
-        config.layoutType === 'notebook' || 
-        config.layoutType === 'devotional'
-    ) {
+    // Verificar se é layout semanal (que usa dayIndex como dia da semana 0-6)
+    const isWeekly = config.layoutType.startsWith('weekly');
+    if (isWeekly) {
         const mapping: Record<string, number> = {};
-        elements.forEach(el => mapping[el.id] = 0);
+        elements.forEach(el => mapping[el.id] = el.style.dayIndex ?? 0);
         return mapping;
     }
 
-    // Verificar se algum tem dayIndex explícito diferente de 0
-    // (Exceto se for layout semanal, que usa dayIndex como dia da semana 0-6)
-    const isWeekly = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
-    const hasExplicitIndices = !isWeekly && dateElements.some(el => (el.style.dayIndex ?? 0) !== 0);
-    
-    if (hasExplicitIndices || isWeekly) {
+    // Verificar se algum elemento tem dayIndex explícito diferente de 0
+    const hasExplicitIndices = dateElements.some(el => el.style.dayIndex !== undefined && el.style.dayIndex !== 0);
+    if (hasExplicitIndices) {
         const mapping: Record<string, number> = {};
         elements.forEach(el => mapping[el.id] = el.style.dayIndex ?? 0);
         return mapping;
@@ -4004,27 +4189,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       return maxIdx;
   };
 
-
-
   const renderEditorPage = () => {
+    let editorPageNum = editorViewMode === 'weekly_left' ? 2 : 1;
+    if (editorViewMode !== 'weekly_left') {
+        const globalBgs = config.backgrounds && config.backgrounds.length > 0 ? config.backgrounds : (config.background ? [config.background] : []);
+        const activeType = editMode === 'intro' ? 'intro' : editMode === 'monthly_intro' ? 'monthly_intro' : editMode === 'divider' ? 'divider' : 'daily';
+        const matchingForMode = globalBgs.filter(bg => isBgMatchingPage(bg, activeType));
+        if (matchingForMode.length === 1 && (matchingForMode[0].targetType === 'even' || matchingForMode[0].pageFilter === 'even')) {
+            editorPageNum = 2;
+        }
+    }
+
     const introPage = config.introPages.find(p => p.id === currentIntroPageId);
     const monthlyPage = config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId);
     const dividerStyle = config.monthlyDividerStyle || {};
-    const introBg = (config.background && config.background.type !== 'none' && config.background.showOnIntroPages !== false) ? config.background : undefined;
-    const dailyBg = (config.background && config.background.type !== 'none' && config.background.showOnDailyPages !== false) ? config.background : undefined;
-    const editorBg = editMode === 'intro' 
-        ? getEffectiveBg(introPage?.background, introBg)
-        : editMode === 'monthly_intro'
-        ? getEffectiveBg(monthlyPage?.background, introBg)
-        : editMode === 'divider'
-        ? getEffectiveBg(dividerStyle.background, introBg)
-        : dailyBg;
+
+    const isEditorEven = config.mirrorEvenPages && (editorPageNum % 2 === 0);
+    const editorMarginLeft = isEditorEven ? config.margins.outside : config.margins.inside;
+    const editorMarginRight = isEditorEven ? config.margins.inside : config.margins.outside;
 
     const paddingStyle = { 
         paddingTop: `${config.margins.top * EDITOR_SCALE}px`, 
         paddingBottom: `${config.margins.bottom * EDITOR_SCALE}px`, 
-        paddingLeft: `${config.margins.inside * EDITOR_SCALE}px`, 
-        paddingRight: `${config.margins.outside * EDITOR_SCALE}px` 
+        paddingLeft: `${editorMarginLeft * EDITOR_SCALE}px`, 
+        paddingRight: `${editorMarginRight * EDITOR_SCALE}px` 
     };
     const containerClass = `relative transition-all duration-300 ease-in-out flex flex-col overflow-hidden`;
     
@@ -4054,7 +4242,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 widthMm={PAGE_WIDTH_MM}
                 heightMm={PAGE_HEIGHT_MM}
                 scale={EDITOR_SCALE}
-                enabled={showRulers}
+                enabled={showRulers && printStatus === 'idle'}
                 guides={guides}
                 setGuides={setGuides}
                 responsiveScale={responsiveScale}
@@ -4065,12 +4253,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     };
 
-    const editorPageNum = editorViewMode === 'weekly_left' ? 2 : 1;
-
     if (editMode === 'intro') {
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg, editorPageNum)}
+                {renderBackgroundsForPage('intro', editorPageNum, introPage?.background)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(getActiveElements(), null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentIntroPageId || undefined)}
                 </div>
@@ -4090,7 +4276,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg, editorPageNum)}
+                {renderBackgroundsForPage('monthly_intro', editorPageNum, monthlyPage?.background)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentMonthlyIntroPageId || undefined)}
                 </div>
@@ -4110,7 +4296,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg, editorPageNum)}
+                {renderBackgroundsForPage('divider', editorPageNum, dividerStyle.background)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider')}
                 </div>
@@ -4133,7 +4319,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg, editorPageNum)}
+                {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
                     {renderTemplate(activeElements, mockBatch[0], true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockBatch)}
                 </div>
@@ -4148,7 +4334,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (editorViewMode === 'standard') {
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
-                    {renderBackground(editorBg, editorPageNum)}
+                    {renderBackgroundsForPage('daily', editorPageNum)}
                     <div className={`${usefulAreaClass} flex flex-col`}>
                         <div className="flex-1 border-b border-dashed border-indigo-200 relative overflow-visible">
                             {renderTemplate(config.elements, mockDay1, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
@@ -4166,7 +4352,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg, editorPageNum)}
+                {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={`${usefulAreaClass} flex flex-col`}>
                     <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${editorViewMode === 'bottom' ? 'opacity-40 bg-gray-50' : ''}`}>
                         {renderTemplate(elementsTop, mockDay1, true, editorViewMode === 'top', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'top')}
@@ -4189,7 +4375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const mockWeekday: DayData = { dayOfMonth: 20, month: 10, year: config.year, dayOfWeek: 2, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
-                    {renderBackground(editorBg, editorPageNum)}
+                    {renderBackgroundsForPage('daily', editorPageNum)}
                     <div className={usefulAreaClass}>
                         {renderTemplate(config.elements, mockWeekday, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard')}
                     </div>
@@ -4202,7 +4388,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
-                {renderBackground(editorBg, editorPageNum)}
+                {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={`${usefulAreaClass} flex flex-col`}>
                     <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${editorViewMode === 'sunday' ? 'opacity-40 bg-gray-50' : ''}`}>
                         {renderTemplate(elementsSat, mockSat, true, editorViewMode === 'saturday', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'saturday')}
@@ -4212,6 +4398,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         {renderTemplate(elementsSun, mockSun, true, editorViewMode === 'sunday', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'sunday')}
                         {editorViewMode === 'saturday' && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('sunday')} />}
                     </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
+        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => ({
+            dayOfMonth: 20 + i,
+            month: 10,
+            year: config.year,
+            dayOfWeek: (i + 1) % 7, // Mon-Sun
+            holiday: null,
+            moonPhase: 'Lua cheia',
+            date: new Date()
+        }));
+
+        return wrapWithRuler(
+            <div className={containerClass} style={containerStyle}>
+                {renderBackgroundsForPage('daily', editorPageNum)}
+                <div className={usefulAreaClass}>
+                    {renderTemplate(config.elements, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
                 </div>
             </div>
         );
@@ -4254,7 +4461,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                     {wrapWithRuler(
                         <div className={`${containerClass} ${editorViewMode === 'weekly_right' ? 'ring-1 ring-gray-300 opacity-90' : 'ring-4 ring-indigo-500/30'}`} style={{ ...containerStyle, ...leftPaddingStyle }}>
-                            {renderBackground(editorBg, 2)}
+                            {renderBackgroundsForPage('daily', 2)}
                             <div className={usefulAreaClass}>
                                 {renderTemplate(elementsLeft, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'weekly_left', undefined, mockWeek)}
                                 {editorViewMode === 'weekly_right' && (
@@ -4271,11 +4478,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                     {wrapWithRuler(
                         <div className={`${containerClass} ${editorViewMode === 'weekly_left' ? 'ring-1 ring-gray-300 opacity-90' : 'ring-4 ring-indigo-500/30'}`} style={{ ...containerStyle, ...rightPaddingStyle }}>
-                            {renderBackground(editorBg, 1)}
+                            {renderBackgroundsForPage('daily', 1)}
                             <div className={usefulAreaClass}>
                                 {renderTemplate(elementsRight, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'weekly_right', undefined, mockWeek)}
                                 {editorViewMode === 'weekly_left' && (
-                                    <div className="absolute inset-0 bg-white/5 cursor-pointer z-[60]" onClick={() => setEditorViewMode('weekly_right')} />
+                                    <div className="absolute inset-0 bg-white/5 cursor-pointer z-[60]" onClick={() => setEditorViewMode('weekly_left')} />
                                 )}
                             </div>
                         </div>
@@ -4293,7 +4500,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const borderStyle = showMargins ? 'border border-indigo-200 border-dashed' : '';
     let pageCount = 0;
 
-    const renderPageContainer = (children: React.ReactNode, key: string | number, hideNumbers = false, bgConfig?: BackgroundConfig, customPageStyle?: React.CSSProperties) => {
+    const renderPageContainer = (
+        children: React.ReactNode, 
+        key: string | number, 
+        hideNumbers = false, 
+        pageSpecificBg?: BackgroundConfig, 
+        customPageStyle?: React.CSSProperties,
+        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard' = 'daily'
+    ) => {
         pageCount++;
         if (countOnly) return <div key={key} />;
 
@@ -4302,13 +4516,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         const isEven = pageCount % 2 === 0;
-        const marginLeft = isEven ? config.margins.outside : config.margins.inside;
-        const marginRight = isEven ? config.margins.inside : config.margins.outside;
+        let marginLeft = config.margins.inside;
+        let marginRight = config.margins.outside;
+        if (config.mirrorEvenPages && isEven) {
+            marginLeft = config.margins.outside;
+            marginRight = config.margins.inside;
+        }
         const pagePadding = `${config.margins.top}mm ${marginRight}mm ${config.margins.bottom}mm ${marginLeft}mm`;
 
         return (
             <div id={`preview-page-${pageCount}`} key={key} className="bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 transition-transform hover:scale-[1.01]" style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
-                {renderBackground(bgConfig, pageCount)}
+                {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg)}
                 <div className="relative z-10 h-full w-full">
                     <div className="absolute -top-7 left-0 right-0 flex justify-between items-center no-print px-2 bg-indigo-900/5 py-1 rounded-t-lg">
                     <div className="flex items-center gap-1.5">
@@ -4470,8 +4688,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     config.introPages.forEach(page => {
         const isEven = (pageCount + 1) % 2 === 0;
         const elementsToRender = isEven ? getMirroredElements(page.elements) : page.elements;
-        const pageBg = getEffectiveBg(page.background, introBg);
-        const container = renderPageContainer(renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'intro', page.id), page.id, false, pageBg);
+        const container = renderPageContainer(renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'intro', page.id), page.id, false, page.background, undefined, 'intro');
         if(container) pages.push(container);
     });
 
@@ -4482,27 +4699,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     const { layoutType, projectType } = config;
 
-    if (projectType === 'notebook' || projectType === 'devotional') {
-        let i = 0;
-        const maxOffset = getMaxDayIndex(config.elements);
-        const daysPerPage = maxOffset + 1;
-
-        while (i < effectiveDays.length) {
-            const batch = effectiveDays.slice(i, i + daysPerPage);
-            const day = batch[0]; 
-            
-            const isEven = (pageCount + 1) % 2 === 0;
-            const elementsToRender = isEven ? getMirroredElements(config.elements) : config.elements;
-            const container = renderPageContainer(
-                renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
-                day.date.toISOString() + i, 
-                false, 
-                dailyBg
-            );
-            if(container) pages.push(container);
-            i += daysPerPage;
-        }
-    } else if (layoutType === '1_per_page') {
+    if (layoutType === '1_per_page' || layoutType === 'notebook' || projectType === 'notebook' || projectType === 'devotional') {
         let i = 0;
         const maxOffset = getMaxDayIndex(config.elements);
         const daysPerPage = maxOffset + 1;
@@ -4753,10 +4950,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     
                     const container = renderPageContainer(
                         <div className="flex flex-col h-full">
-                            <div className={`flex-1 relative border-b border-dashed border-gray-200 pb-2 mb-2 overflow-visible ${showMargins ? 'px-2' : ''}`}>
+                            <div className="flex-1 relative border-b border-dashed border-gray-200 overflow-visible">
                                 <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(topToRender, dayTop, false, false, pageCount + 1, printW, printH / 2, 'top')}</div>
                             </div>
-                            <div className="flex-1 relative pt-2 overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
+                            <div className="flex-1 relative overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
                                 Página de Transição
                             </div>
                         </div>
@@ -4776,10 +4973,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     
                     const container = renderPageContainer(
                         <div className="flex flex-col h-full">
-                            <div className={`flex-1 relative border-b border-dashed border-gray-200 pb-2 mb-2 overflow-visible ${showMargins ? 'px-2' : ''}`}>
+                            <div className="flex-1 relative border-b border-dashed border-gray-200 overflow-visible">
                                 <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(topToRender, dayTop, false, false, pageCount + 1, printW, printH / 2, 'top')}</div>
                             </div>
-                            <div className="flex-1 relative pt-2 overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
+                            <div className="flex-1 relative overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
                                 Página de Transição
                             </div>
                         </div>
@@ -4804,10 +5001,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             const container = renderPageContainer(
                 <div className="flex flex-col h-full">
-                    <div className={`flex-1 relative border-b border-dashed border-gray-200 pb-2 mb-2 overflow-visible ${showMargins ? 'px-2' : ''}`}>
+                    <div className="flex-1 relative border-b border-dashed border-gray-200 overflow-visible">
                         <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(topToRender, dayTop, false, false, pageCount + 1, printW, printH / 2, 'top')}</div>
                     </div>
-                    <div className={`flex-1 relative pt-2 overflow-visible ${showMargins ? 'px-2' : ''}`}>
+                    <div className="flex-1 relative overflow-visible">
                         {dayBottom ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(bottomToRender, dayBottom, false, false, pageCount + 1, printW, printH / 2, 'bottom')}</div>) : null}
                     </div>
                 </div>
@@ -4936,10 +5133,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                      
                      const container = renderPageContainer(
                         <div className="flex flex-col h-full">
-                            <div className="flex-1 relative border-b border-dashed border-gray-300 pb-2 mb-2 overflow-visible">
+                            <div className="flex-1 relative border-b border-dashed border-gray-300 overflow-visible">
                                 <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
                             </div>
-                            <div className="flex-1 relative pt-2 overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
+                            <div className="flex-1 relative overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
                                 Página de Transição
                             </div>
                         </div>
@@ -4965,10 +5162,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 const container = renderPageContainer(
                     <div className="flex flex-col h-full">
-                        <div className="flex-1 relative border-b border-dashed border-gray-300 pb-2 mb-2 overflow-visible">
+                        <div className="flex-1 relative border-b border-dashed border-gray-300 overflow-visible">
                             <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
                         </div>
-                        <div className="flex-1 relative pt-2 overflow-visible">
+                        <div className="flex-1 relative overflow-visible">
                             {effectiveDays[i+1] ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, effectiveDays[i+1], false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
                         </div>
                     </div>
@@ -4982,6 +5179,127 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 i += 1;
             }
         }
+    } else if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
+        const weeks: DayData[][] = [];
+        let currentWeek: DayData[] = [];
+        
+        effectiveDays.forEach((day, index) => {
+            currentWeek.push(day);
+            if (day.dayOfWeek === 0 || index === effectiveDays.length - 1) {
+                weeks.push(currentWeek);
+                currentWeek = [];
+            }
+        });
+
+        let lastMonth = -1;
+        weeks.forEach((week, weekIndex) => {
+            const firstValidDay = week.find(d => d.dayOfMonth > 0);
+            if (!firstValidDay) return;
+
+            const currentMonth = firstValidDay.month;
+            const currentYear = firstValidDay.year;
+            
+            if (currentMonth !== lastMonth) {
+                if (currentYear === config.year) {
+                    const hasDividers = config.includeMonthlyDividers ?? true;
+                    const hasIntroPages = config.includeMonthlyIntroPages ?? true;
+                    const hasIntroPagesData = config.monthlyIntroPages && config.monthlyIntroPages.length > 0;
+
+                    if (hasDividers) {
+                        if (pageCount % 2 !== 0) {
+                            const filler = renderFillerPage(pageCount + 1);
+                            if (filler) pages.push(filler);
+                        }
+                        const divider = renderMonthDivider(currentMonth, currentYear);
+                        if (divider) pages.push(divider);
+                        
+                        const versoContent = config.monthlyDividerVersoContent || (hasIntroPages && hasIntroPagesData ? 'monthly_intro_first' : 'blank');
+                        
+                        if (versoContent === 'monthly_intro_first' && hasIntroPages && hasIntroPagesData) {
+                            const monthDummyDay: DayData = {
+                                dayOfMonth: 1,
+                                month: currentMonth,
+                                year: currentYear,
+                                dayOfWeek: new Date(currentYear, currentMonth, 1).getDay(),
+                                date: new Date(currentYear, currentMonth, 1)
+                            };
+                            config.monthlyIntroPages.forEach(mPage => {
+                                const isEven = (pageCount + 1) % 2 === 0;
+                                const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
+                                const pageBg = getEffectiveBg(mPage.background, introBg);
+                                const container = renderPageContainer(
+                                    renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
+                                    `monthly-intro-${currentMonth}-${mPage.id}`,
+                                    false,
+                                    pageBg
+                                );
+                                if (container) pages.push(container);
+                            });
+                        } else {
+                            const versoContainer = renderDividerVersoPage(currentMonth, currentYear, pageCount + 1, versoContent);
+                            if (versoContainer) pages.push(versoContainer);
+
+                            if (hasIntroPages && hasIntroPagesData) {
+                                const monthDummyDay: DayData = {
+                                    dayOfMonth: 1,
+                                    month: currentMonth,
+                                    year: currentYear,
+                                    dayOfWeek: new Date(currentYear, currentMonth, 1).getDay(),
+                                    date: new Date(currentYear, currentMonth, 1)
+                                };
+                                config.monthlyIntroPages.forEach(mPage => {
+                                    if (mPage.id === versoContent) return;
+                                    const isEven = (pageCount + 1) % 2 === 0;
+                                    const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
+                                    const pageBg = getEffectiveBg(mPage.background, introBg);
+                                    const container = renderPageContainer(
+                                        renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
+                                        `monthly-intro-${currentMonth}-${mPage.id}`,
+                                        false,
+                                        pageBg
+                                    );
+                                    if (container) pages.push(container);
+                                });
+                            }
+                        }
+                    } else if (hasIntroPages && hasIntroPagesData) {
+                        const monthDummyDay: DayData = {
+                            dayOfMonth: 1,
+                            month: currentMonth,
+                            year: currentYear,
+                            dayOfWeek: new Date(currentYear, currentMonth, 1).getDay(),
+                            date: new Date(currentYear, currentMonth, 1)
+                        };
+                        config.monthlyIntroPages.forEach(mPage => {
+                            const isEven = (pageCount + 1) % 2 === 0;
+                            const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
+                            const pageBg = getEffectiveBg(mPage.background, introBg);
+                            const container = renderPageContainer(
+                                renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
+                                `monthly-intro-${currentMonth}-${mPage.id}`,
+                                false,
+                                pageBg
+                            );
+                            if (container) pages.push(container);
+                        });
+                    }
+                    
+                    lastMonth = currentMonth;
+                }
+            }
+
+            const isEven = (pageCount + 1) % 2 === 0;
+            const elementsToRender = isEven ? getMirroredElements(config.elements) : config.elements;
+            const container = renderPageContainer(
+                <div className="w-full h-full relative overflow-visible">
+                    {renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
+                </div>,
+                `week-single-${weekIndex}`,
+                false,
+                dailyBg
+            );
+            if (container) pages.push(container);
+        });
     } else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
         // Group effectiveDays into weeks (Mon-Sun)
         const weeks: DayData[][] = [];
@@ -5387,6 +5705,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                           if (clonedEl) {
                               clonedEl.style.boxShadow = 'none';
                           }
+                          clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
+                              el.style.display = 'none';
+                          });
                       }
                   });
                   
@@ -5644,7 +5965,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       )}
 
       {printStatus !== 'idle' && (
-          <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center flex-col text-white transition-opacity duration-300 no-print p-6 animate-fade-in">
+          <div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-md flex items-center justify-center flex-col text-white transition-opacity duration-300 no-print p-6 animate-fade-in">
               {printStatus === 'generating' ? (
                   <div className="w-full max-w-md bg-white/10 p-6 rounded-2xl border border-white/20 backdrop-blur-xl shadow-2xl flex flex-col items-center">
                         <Loader2 className="w-12 h-12 animate-spin mb-4 text-indigo-400" />
@@ -6507,7 +6828,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                           <div className="space-y-6">
                               <div className="grid grid-cols-2 gap-6">
                                   <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Vertical</h4>
+                                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Vertical (2 Páginas)</h4>
                                       <div className="grid grid-cols-2 gap-2">
                                           <button onClick={() => applyPlannerTemplate('weekly_vertical', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
                                               <div className="w-8 h-10 border border-gray-300 rounded bg-white"></div>
@@ -6536,7 +6857,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                       </div>
                                   </div>
                                   <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Horizontal</h4>
+                                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Horizontal (2 Páginas)</h4>
                                       <div className="grid grid-cols-2 gap-2">
                                           <button onClick={() => applyPlannerTemplate('weekly_horizontal', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
                                               <div className="w-10 h-8 border border-gray-300 rounded bg-white"></div>
@@ -6561,6 +6882,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                   {Array.from({length: 12}).map((_, i) => <div key={i} className="border-[0.2px] border-gray-100"></div>)}
                                               </div>
                                               <span className="text-[10px] font-bold text-gray-600">Quadriculado</span>
+                                          </button>
+                                      </div>
+                                  </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-6 pt-4 border-t border-gray-100">
+                                  <div className="space-y-3">
+                                      <h4 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest text-center">Semanal 1 Pág (Colunas)</h4>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_vertical', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all flex flex-col items-center gap-2">
+                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex p-0.5 gap-0.5">
+                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
+                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
+                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
+                                              </div>
+                                              <span className="text-[10px] font-bold text-gray-600">Padrão Colunas</span>
+                                          </button>
+                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_vertical', 'lines')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all flex flex-col items-center gap-2">
+                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex p-0.5 gap-0.5">
+                                                  <div className="flex-1 border border-gray-200 flex flex-col justify-around">
+                                                      <div className="h-px bg-gray-200 w-full"></div>
+                                                  </div>
+                                                  <div className="flex-1 border border-gray-200 flex flex-col justify-around">
+                                                      <div className="h-px bg-gray-200 w-full"></div>
+                                                  </div>
+                                              </div>
+                                              <span className="text-[10px] font-bold text-gray-600">Colunas Pautadas</span>
+                                          </button>
+                                      </div>
+                                  </div>
+                                  <div className="space-y-3">
+                                      <h4 className="text-[10px] font-bold text-purple-600 uppercase tracking-widest text-center">Semanal 1 Pág (Linhas)</h4>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_horizontal', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all flex flex-col items-center gap-2">
+                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex flex-col p-0.5 gap-0.5">
+                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
+                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
+                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
+                                              </div>
+                                              <span className="text-[10px] font-bold text-gray-600">Padrão Faixas</span>
+                                          </button>
+                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_horizontal', 'lines')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all flex flex-col items-center gap-2">
+                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex flex-col p-0.5 gap-0.5">
+                                                  <div className="flex-1 border border-gray-200 flex items-center justify-center">
+                                                      <div className="h-px bg-gray-200 w-full"></div>
+                                                  </div>
+                                                  <div className="flex-1 border border-gray-200 flex items-center justify-center">
+                                                      <div className="h-px bg-gray-200 w-full"></div>
+                                                  </div>
+                                              </div>
+                                              <span className="text-[10px] font-bold text-gray-600">Faixas Pautadas</span>
                                           </button>
                                       </div>
                                   </div>
@@ -6946,7 +7318,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     </div>
 
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Duração da Agenda</label>
+                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Início da Semana (Calendários)</label>
+                                         <select 
+                                             value={config.startOfWeekDay ?? 0} 
+                                             onChange={(e) => {
+                                                 const newStartDay = parseInt(e.target.value);
+                                                 setConfig(prev => {
+                                                     const updateEls = (els: LayoutElement[]) => els.map(el => {
+                                                         if (el.type === 'mini_calendar' || el.type === 'full_calendar') {
+                                                             return {
+                                                                 ...el,
+                                                                 style: {
+                                                                     ...el.style,
+                                                                     fullCalendar: {
+                                                                         ...el.style.fullCalendar,
+                                                                         startOfWeekDay: newStartDay,
+                                                                         startOfWeekOnMonday: newStartDay === 1
+                                                                     }
+                                                                 }
+                                                             };
+                                                         }
+                                                         return el;
+                                                     });
+
+                                                     return {
+                                                         ...prev,
+                                                         startOfWeekDay: newStartDay,
+                                                         elements: updateEls(prev.elements),
+                                                         elementsWeeklyLeft: prev.elementsWeeklyLeft ? updateEls(prev.elementsWeeklyLeft) : undefined,
+                                                         introPages: prev.introPages.map(p => ({ ...p, elements: updateEls(p.elements) })),
+                                                         monthlyIntroPages: prev.monthlyIntroPages ? prev.monthlyIntroPages.map(p => ({ ...p, elements: updateEls(p.elements) })) : undefined
+                                                     };
+                                                 });
+                                             }} 
+                                             className="w-full p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700 bg-white mb-3"
+                                         >
+                                             <option value={0}>Domingo</option>
+                                             <option value={1}>Segunda-feira</option>
+                                             <option value={2}>Terça-feira</option>
+                                             <option value={3}>Quarta-feira</option>
+                                             <option value={4}>Quinta-feira</option>
+                                             <option value={5}>Sexta-feira</option>
+                                             <option value={6}>Sábado</option>
+                                         </select>
+                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Duração da Agenda</label>
                                         <select 
                                             value={config.durationMonths ?? 12} 
                                             onChange={(e) => setConfig({ ...config, durationMonths: parseInt(e.target.value) })} 
@@ -6965,27 +7380,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             onChange={(e) => {
                                                 const newType = e.target.value as PageLayoutType;
                                                 
-                                                const isCurrentlyWeekly = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
-                                                const isNewWeekly = newType === 'weekly_vertical' || newType === 'weekly_horizontal';
+                                                const isNewWeeklyTwoPage = newType === 'weekly_vertical' || newType === 'weekly_horizontal';
+                                                const isNewWeeklyOnePage = newType === 'weekly_one_page_vertical' || newType === 'weekly_one_page_horizontal';
 
-                                                if (isCurrentlyWeekly && isNewWeekly && config.layoutType !== newType) {
-                                                    // Se estiver mudando entre os tipos de planner (vertical <-> horizontal)
-                                                    // Detectamos o estilo atual para tentar preservar
-                                                    const currentStyle = config.elementsWeeklyLeft?.find(el => el.type === 'planner_day_box')?.style?.plannerDayBox?.contentStyle || 'blank';
-                                                    applyPlannerTemplate(newType, currentStyle);
+                                                if (config.layoutType.startsWith('weekly') && newType.startsWith('weekly') && config.layoutType !== newType) {
+                                                    const currentStyle = (config.elementsWeeklyLeft || config.elements)?.find(el => el.type === 'planner_day_box')?.style?.plannerDayBox?.contentStyle || 'blank';
+                                                    if (isNewWeeklyTwoPage || isNewWeeklyOnePage) {
+                                                        applyPlannerTemplate(newType as any, currentStyle);
+                                                    }
                                                     return;
                                                 }
 
-                                                if (isNewWeekly && (!config.elementsWeeklyLeft || config.elementsWeeklyLeft.length === 0)) {
-                                                    setTemplateCategory('planner');
-                                                    setTemplateModal(true);
+                                                if (isNewWeeklyTwoPage && (!config.elementsWeeklyLeft || config.elementsWeeklyLeft.length === 0)) {
+                                                    applyPlannerTemplate(newType as any, 'lines');
+                                                    return;
+                                                } else if (isNewWeeklyOnePage && (!config.elements || config.elements.length === 0)) {
+                                                    applyPlannerTemplate(newType as any, 'lines');
+                                                    return;
                                                 }
                                                 
-                                                // Synchronize editorViewMode when switching to weekly
-                                                if (isNewWeekly) {
+                                                if (isNewWeeklyTwoPage) {
                                                     if (editorViewMode === 'standard' || editorViewMode === 'top' || editorViewMode === 'bottom' || editorViewMode === 'saturday' || editorViewMode === 'sunday') {
                                                         setEditorViewMode('weekly_left');
                                                     }
+                                                } else if (isNewWeeklyOnePage) {
+                                                    setEditorViewMode('standard');
                                                 } else if (editorViewMode === 'weekly_left' || editorViewMode === 'weekly_right') {
                                                      setEditorViewMode('standard');
                                                 }
@@ -6996,8 +7415,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         >
                                             {(config.projectType as string) === 'planner' || config.layoutType.startsWith('weekly') ? (
                                                 <>
-                                                    <option value="weekly_vertical">Semanal Vertical</option>
-                                                    <option value="weekly_horizontal">Semanal Horizontal</option>
+                                                    <option value="weekly_vertical">Semanal Vertical (2 Págs)</option>
+                                                    <option value="weekly_horizontal">Semanal Horizontal (2 Págs)</option>
+                                                    <option value="weekly_one_page_vertical">Semanal 1 Pág (Colunas)</option>
+                                                    <option value="weekly_one_page_horizontal">Semanal 1 Pág (Linhas)</option>
                                                 </>
                                             ) : ((config.projectType as string) === 'notebook' || config.layoutType === 'notebook') ? (
                                                 <option value="notebook">Caderno (Livre)</option>
@@ -7572,9 +7993,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             <main 
                 ref={workspaceRef} 
                 className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' ? 'bg-slate-900' : 'bg-gray-200 p-4 md:p-8'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'md:pr-[320px]' : ''}`}
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) {
-                    if (selectedIds.length > 0) setSelectedIds([]);
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  const targetEl = e.target as HTMLElement;
+                  if (!isClickTargetInteractiveOrElement(targetEl)) {
+                    if (!e.shiftKey && selectedIds.length > 0) {
+                      setSelectedIds([]);
+                    }
                     if (contextMenu) setContextMenu(null);
                   }
                 }}
@@ -7607,13 +8032,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 {activeTab === 'editor' && (
                     <div className={`flex flex-col items-center w-full max-w-full h-full min-h-0 ${isMobile ? 'h-full flex-1 touch-none' : ''}`}>
                         {!isMobile && (
-                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1 z-10 no-print">
-                                <button onClick={() => handleUndo()} disabled={history.length === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 disabled:opacity-30 flex items-center gap-1"><Undo className="w-4 h-4" /><span className="text-[10px] font-bold">Undo</span></button>
-                                <div className="w-px h-4 bg-gray-100 mx-1"></div>
-                                <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600"><Minus className="w-4 h-4" /></button>
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1 z-10 no-print border border-gray-100">
+                                <button onClick={() => handleUndo()} disabled={history.length === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 disabled:opacity-30 flex items-center gap-1" title="Desfazer (Ctrl+Z)"><Undo className="w-4 h-4" /><span className="text-[10px] font-bold">Undo</span></button>
+                                <div className="w-px h-4 bg-gray-200 mx-0.5"></div>
+                                <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600" title="Diminuir Zoom"><Minus className="w-4 h-4" /></button>
                                 <div className="flex flex-col items-center min-w-[40px] px-1"><span className="text-[8px] font-bold text-gray-400 uppercase leading-none">Zoom</span><span className="text-[10px] font-bold text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span></div>
-                                <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600"><Plus className="w-4 h-4" /></button>
-                                <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1">Reset</button>
+                                <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600" title="Aumentar Zoom"><Plus className="w-4 h-4" /></button>
+                                <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1" title="Resetar Zoom">Reset</button>
+
+                                <div className="w-px h-4 bg-gray-200 mx-1"></div>
+
+                                {/* Controle de Deslocamento das Setas (CorelDraw) */}
+                                <div className="flex items-center gap-1.5 bg-gray-50/90 hover:bg-gray-50 border border-gray-200/80 rounded-md px-2 py-0.5" title="Controle de Deslocamento de Objetos com as Setas do Teclado (Atalho Estilo CorelDraw). Segurar Shift=5x, Alt/Ctrl=0.2x">
+                                    <Move className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                    <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tight hidden sm:inline">Deslocar:</span>
+                                    <input 
+                                        type="number" 
+                                        step={nudgeUnit === 'mm' ? '0.5' : '1'} 
+                                        min="0.01" 
+                                        max="500" 
+                                        value={nudgeValue} 
+                                        onChange={(e) => setNudgeValue(Math.max(0.01, parseFloat(e.target.value) || 0.1))} 
+                                        className="w-12 text-xs font-bold text-indigo-700 bg-white border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                    <button 
+                                        onClick={() => setNudgeUnit(nudgeUnit === 'mm' ? 'px' : 'mm')} 
+                                        className="text-[10px] font-black text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded transition-colors uppercase cursor-pointer"
+                                        title="Clique para alternar unidade entre milímetros (mm) e pixels (px)"
+                                    >
+                                        {nudgeUnit}
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -7842,11 +8291,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 </div>
                                             </div>
 
-                                            <div className="h-px bg-gray-100"></div>
+                                            <div className="h-px bg-gray-100 mb-3"></div>
+
+
 
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição X (mm)</label>
+                                                    
+                                                 
+
+
+                                             <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição X (mm)</label>
                                                     <input 
                                                         type="number" 
                                                         step="1"
@@ -8550,6 +9005,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     />
                                                                 </div>
                                                             </div>
+                                                            <div className="space-y-1">
+                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase">Fonte do Cabeçalho</label>
+                                                                <select 
+                                                                    value={selectedElement.style.plannerDayBox?.headerFontFamily || 'Inter'} 
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, headerFontFamily: e.target.value } 
+                                                                    })} 
+                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"
+                                                                >
+                                                                    <optgroup label="Padrão">
+                                                                        {AVAILABLE_FONTS.map(font => (
+                                                                            <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                        ))}
+                                                                    </optgroup>
+                                                                    <optgroup label="Fontes do PC (Instaladas)">
+                                                                        {SYSTEM_FONTS.map(font => (
+                                                                            <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                        ))}
+                                                                    </optgroup>
+                                                                    {customFonts.length > 0 && (
+                                                                        <optgroup label="Minhas Fontes">
+                                                                            {customFonts.map(font => (
+                                                                                <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                            ))}
+                                                                        </optgroup>
+                                                                    )}
+                                                                </select>
+                                                            </div>
 
                                                             <div className="pt-2 border-t border-gray-50 space-y-2">
                                                                 <label className="flex items-center gap-2 cursor-pointer">
@@ -8948,14 +9431,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     </div>
 
                                                                     <div className="flex items-center justify-between">
-                                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Semana Começa na Segunda</label>
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Início da Semana</label>
+                                                                         <select 
+                                                                             value={
+                                                                                 selectedElement.style.fullCalendar?.startOfWeekDay !== undefined
+                                                                                     ? selectedElement.style.fullCalendar.startOfWeekDay
+                                                                                     : (selectedElement.style.fullCalendar?.startOfWeekOnMonday ? 1 : (config.startOfWeekDay ?? 0))
+                                                                             } 
+                                                                             onChange={(e) => {
+                                                                                 const val = parseInt(e.target.value);
+                                                                                 updateElementStyle(selectedElement.id, { 
+                                                                                     fullCalendar: { 
+                                                                                         ...selectedElement.style.fullCalendar, 
+                                                                                         startOfWeekDay: val,
+                                                                                         startOfWeekOnMonday: val === 1
+                                                                                     } 
+                                                                                 });
+                                                                             }} 
+                                                                             className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white"
+                                                                         >
+                                                                             <option value={0}>Domingo</option>
+                                                                             <option value={1}>Segunda-feira</option>
+                                                                             <option value={2}>Terça-feira</option>
+                                                                             <option value={3}>Quarta-feira</option>
+                                                                             <option value={4}>Quinta-feira</option>
+                                                                             <option value={5}>Sexta-feira</option>
+                                                                             <option value={6}>Sábado</option>
+                                                                         </select>
                                                                         <input 
                                                                             type="checkbox" 
-                                                                            checked={selectedElement.style.fullCalendar?.startOfWeekOnMonday ?? (selectedElement.style.fullCalendar?.splitMode === 'left' || selectedElement.style.fullCalendar?.splitMode === 'right' || false)} 
+                                                                            checked={false} style={{ display: 'none' }} 
                                                                             onChange={(e) => updateElementStyle(selectedElement.id, { 
                                                                                 fullCalendar: { 
                                                                                     ...selectedElement.style.fullCalendar, 
-                                                                                    startOfWeekOnMonday: e.target.checked 
+                                                                                    startOfWeekOnMonday: false 
                                                                                 } 
                                                                             })} 
                                                                             className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
@@ -8963,15 +9472,103 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     </div>
                                                                 </div>
 
-                                                                <div>
-                                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Mês Exibido</label>
-                                                                    <div className="flex rounded border border-gray-200 overflow-hidden">
-                                                                        <button onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: -1 })} className={`flex-1 py-1 text-[10px] ${selectedElement.style.calendarOffset === -1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'hover:bg-gray-50'}`}>Anterior</button>
-                                                                        <div className="w-px bg-gray-200"></div>
-                                                                        <button onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 0 })} className={`flex-1 py-1 text-[10px] ${selectedElement.style.calendarOffset === 0 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'hover:bg-gray-50'}`}>Atual</button>
-                                                                        <div className="w-px bg-gray-200"></div>
-                                                                        <button onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 1 })} className={`flex-1 py-1 text-[10px] ${selectedElement.style.calendarOffset === 1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'hover:bg-gray-50'}`}>Próximo</button>
-                                                                    </div>
+                                                                <div className="space-y-2 p-2.5 bg-gray-50/80 rounded-lg border border-gray-200/80">
+                                                                    <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wider">Definição do Mês Exibido</label>
+                                                                    <select
+                                                                        value={selectedElement.style.calendarMonthMode || 'sequence'}
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { calendarMonthMode: e.target.value as any })}
+                                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white shadow-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                                                                    >
+                                                                        <option value="relative">Mês Relativo (Mês da Página)</option>
+                                                                        <option value="sequence">Sequencial Automático na Página (+1 Mês)</option>
+                                                                        <option value="fixed">Mês Fixo (Específico)</option>
+                                                                    </select>
+
+                                                                    {selectedElement.style.calendarMonthMode === 'relative' && (
+                                                                        <div className="space-y-2 pt-1">
+                                                                            <div className="flex rounded border border-gray-200 overflow-hidden bg-white shadow-sm">
+                                                                                <button 
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: -1 })} 
+                                                                                    className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === -1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    Anterior
+                                                                                </button>
+                                                                                <div className="w-px bg-gray-200"></div>
+                                                                                <button 
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 0 })} 
+                                                                                    className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === 0 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    Atual
+                                                                                </button>
+                                                                                <div className="w-px bg-gray-200"></div>
+                                                                                <button 
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 1 })} 
+                                                                                    className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === 1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    Próximo
+                                                                                </button>
+                                                                            </div>
+
+                                                                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-200/60">
+                                                                                <span className="text-[10px] font-medium text-gray-500">Deslocamento:</span>
+                                                                                <div className="flex items-center gap-1">
+                                                                                    <input 
+                                                                                        type="number" 
+                                                                                        value={selectedElement.style.calendarOffset ?? 0}
+                                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { calendarOffset: parseInt(e.target.value) || 0 })}
+                                                                                        className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-bold text-gray-700 bg-white shadow-sm"
+                                                                                    />
+                                                                                    <span className="text-[10px] text-gray-400">meses</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {(!selectedElement.style.calendarMonthMode || selectedElement.style.calendarMonthMode === 'sequence') && (
+                                                                        <div className="space-y-2 pt-1">
+                                                                            <div className="p-2 bg-indigo-50/70 rounded border border-indigo-100">
+                                                                                <p className="text-[10px] text-indigo-800 leading-tight">
+                                                                                    <strong>Sequência Automática:</strong> Se houver múltiplos calendários na página, o 1º exibe o mês base, o 2º o mês + 1, o 3º o mês + 2, e assim sucessivamente.
+                                                                                </p>
+                                                                            </div>
+                                                                            <div className="flex items-center justify-between gap-2 pt-1">
+                                                                                <span className="text-[10px] font-medium text-gray-600">Ajuste de Início:</span>
+                                                                                <div className="flex items-center gap-1">
+                                                                                    <input 
+                                                                                        type="number" 
+                                                                                        value={selectedElement.style.calendarOffset ?? 0}
+                                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { calendarOffset: parseInt(e.target.value) || 0 })}
+                                                                                        className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-bold text-gray-700 bg-white shadow-sm"
+                                                                                    />
+                                                                                    <span className="text-[10px] text-gray-400">meses</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {selectedElement.style.calendarMonthMode === 'fixed' && (
+                                                                        <div className="space-y-1.5 pt-1">
+                                                                            <label className="block text-[10px] font-medium text-gray-500">Mês Específico</label>
+                                                                            <select
+                                                                                value={selectedElement.style.calendarFixedMonth ?? 0}
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { calendarFixedMonth: parseInt(e.target.value) })}
+                                                                                className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white shadow-sm"
+                                                                            >
+                                                                                <option value={0}>Janeiro</option>
+                                                                                <option value={1}>Fevereiro</option>
+                                                                                <option value={2}>Março</option>
+                                                                                <option value={3}>Abril</option>
+                                                                                <option value={4}>Maio</option>
+                                                                                <option value={5}>Junho</option>
+                                                                                <option value={6}>Julho</option>
+                                                                                <option value={7}>Agosto</option>
+                                                                                <option value={8}>Setembro</option>
+                                                                                <option value={9}>Outubro</option>
+                                                                                <option value={10}>Novembro</option>
+                                                                                <option value={11}>Dezembro</option>
+                                                                            </select>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         )}
@@ -9101,15 +9698,103 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </div>
                                                         )}
                                                         {selectedElement.type === 'mini_calendar' && (
-                                                            <div>
-                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Mês Exibido</label>
-                                                                <div className="flex rounded border border-gray-200 overflow-hidden bg-white">
-                                                                    <button onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: -1 })} className={`flex-1 py-1 text-[10px] ${selectedElement.style.calendarOffset === -1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'hover:bg-gray-50'}`}>Anterior</button>
-                                                                    <div className="w-px bg-gray-200"></div>
-                                                                    <button onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 0 })} className={`flex-1 py-1 text-[10px] ${selectedElement.style.calendarOffset === 0 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'hover:bg-gray-50'}`}>Atual</button>
-                                                                    <div className="w-px bg-gray-200"></div>
-                                                                    <button onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 1 })} className={`flex-1 py-1 text-[10px] ${selectedElement.style.calendarOffset === 1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'hover:bg-gray-50'}`}>Próximo</button>
-                                                                </div>
+                                                            <div className="space-y-2 p-2.5 bg-gray-50/80 rounded-lg border border-gray-200/80">
+                                                                <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wider">Definição do Mês Exibido</label>
+                                                                <select
+                                                                    value={selectedElement.style.calendarMonthMode || 'sequence'}
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { calendarMonthMode: e.target.value as any })}
+                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white shadow-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                                                                >
+                                                                    <option value="relative">Mês Relativo (Mês da Página)</option>
+                                                                    <option value="sequence">Sequencial Automático na Página (+1 Mês)</option>
+                                                                    <option value="fixed">Mês Fixo (Específico)</option>
+                                                                </select>
+
+                                                                {selectedElement.style.calendarMonthMode === 'relative' && (
+                                                                    <div className="space-y-2 pt-1">
+                                                                        <div className="flex rounded border border-gray-200 overflow-hidden bg-white shadow-sm">
+                                                                            <button 
+                                                                                onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: -1 })} 
+                                                                                className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === -1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                            >
+                                                                                Anterior
+                                                                            </button>
+                                                                            <div className="w-px bg-gray-200"></div>
+                                                                            <button 
+                                                                                onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 0 })} 
+                                                                                className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === 0 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                            >
+                                                                                Atual
+                                                                            </button>
+                                                                            <div className="w-px bg-gray-200"></div>
+                                                                            <button 
+                                                                                onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 1 })} 
+                                                                                className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === 1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                            >
+                                                                                Próximo
+                                                                            </button>
+                                                                        </div>
+
+                                                                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-200/60">
+                                                                            <span className="text-[10px] font-medium text-gray-500">Deslocamento:</span>
+                                                                            <div className="flex items-center gap-1">
+                                                                                <input 
+                                                                                    type="number" 
+                                                                                    value={selectedElement.style.calendarOffset ?? 0}
+                                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { calendarOffset: parseInt(e.target.value) || 0 })}
+                                                                                    className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-bold text-gray-700 bg-white shadow-sm"
+                                                                                />
+                                                                                <span className="text-[10px] text-gray-400">meses</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {(!selectedElement.style.calendarMonthMode || selectedElement.style.calendarMonthMode === 'sequence') && (
+                                                                    <div className="space-y-2 pt-1">
+                                                                        <div className="p-2 bg-indigo-50/70 rounded border border-indigo-100">
+                                                                            <p className="text-[10px] text-indigo-800 leading-tight">
+                                                                                <strong>Sequência Automática:</strong> Se houver múltiplos calendários na página, o 1º exibe o mês base, o 2º o mês + 1, o 3º o mês + 2, e assim sucessivamente.
+                                                                            </p>
+                                                                        </div>
+                                                                        <div className="flex items-center justify-between gap-2 pt-1">
+                                                                            <span className="text-[10px] font-medium text-gray-600">Ajuste de Início:</span>
+                                                                            <div className="flex items-center gap-1">
+                                                                                <input 
+                                                                                    type="number" 
+                                                                                    value={selectedElement.style.calendarOffset ?? 0}
+                                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { calendarOffset: parseInt(e.target.value) || 0 })}
+                                                                                    className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-bold text-gray-700 bg-white shadow-sm"
+                                                                                />
+                                                                                <span className="text-[10px] text-gray-400">meses</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {selectedElement.style.calendarMonthMode === 'fixed' && (
+                                                                    <div className="space-y-1.5 pt-1">
+                                                                        <label className="block text-[10px] font-medium text-gray-500">Mês Específico</label>
+                                                                        <select
+                                                                            value={selectedElement.style.calendarFixedMonth ?? 0}
+                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { calendarFixedMonth: parseInt(e.target.value) })}
+                                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white shadow-sm"
+                                                                        >
+                                                                            <option value={0}>Janeiro</option>
+                                                                            <option value={1}>Fevereiro</option>
+                                                                            <option value={2}>Março</option>
+                                                                            <option value={3}>Abril</option>
+                                                                            <option value={4}>Maio</option>
+                                                                            <option value={5}>Junho</option>
+                                                                            <option value={6}>Julho</option>
+                                                                            <option value={7}>Agosto</option>
+                                                                            <option value={8}>Setembro</option>
+                                                                            <option value={9}>Outubro</option>
+                                                                            <option value={10}>Novembro</option>
+                                                                            <option value={11}>Dezembro</option>
+                                                                        </select>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
@@ -10165,8 +10850,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     ? config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId)?.background || config.background
                                                     : editMode === 'divider'
                                                     ? config.monthlyDividerStyle?.background || config.background
-                                                    : config.background
+                                                    : (config.backgrounds?.[0] || config.background)
                                                 }
+                                                configs={editMode === 'daily' 
+                                                    ? (config.backgrounds && config.backgrounds.length > 0 
+                                                        ? config.backgrounds 
+                                                        : [config.background || { id: 'bg_default', type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true, targetType: 'all', pageFilter: 'all' }]) 
+                                                    : undefined
+                                                }
+                                                onConfigsChange={editMode === 'daily' ? (newConfigs) => {
+                                                    pushHistory();
+                                                    setConfig(prev => ({
+                                                        ...prev,
+                                                        backgrounds: newConfigs,
+                                                        background: newConfigs[0] || prev.background
+                                                    }));
+                                                } : undefined}
                                                 onChange={(updates) => {
                                                     pushHistory();
                                                     if (editMode === 'intro' && currentIntroPageId) {
@@ -10194,10 +10893,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             }
                                                         }));
                                                     } else {
-                                                        setConfig(prev => ({
-                                                            ...prev,
-                                                            background: { ...(prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates }
-                                                        }));
+                                                        setConfig(prev => {
+                                                            const currentBgs = prev.backgrounds && prev.backgrounds.length > 0 
+                                                                ? prev.backgrounds 
+                                                                : [prev.background || { id: 'bg_1', type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true, targetType: 'all', pageFilter: 'all' }];
+                                                            const updatedBgs = [...currentBgs];
+                                                            updatedBgs[0] = { ...updatedBgs[0], ...updates };
+                                                            return {
+                                                                ...prev,
+                                                                backgrounds: updatedBgs,
+                                                                background: updatedBgs[0]
+                                                            };
+                                                        });
                                                     }
                                                 }}
                                             />

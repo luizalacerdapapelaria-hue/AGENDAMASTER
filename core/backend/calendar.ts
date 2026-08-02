@@ -200,21 +200,26 @@ export const generateGenericPages = (count: number): DayData[] => {
     return pages;
 };
 
-export const generateMonthGrid = (year: number, month: number, startOnMonday: boolean = false): (number | null)[][] => {
+export const generateMonthGrid = (year: number, month: number, startOfWeekDay: number | boolean = 0): (number | null)[][] => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
     
-    let startDayOfWeek = firstDay.getDay();
-    if (startOnMonday) {
-        startDayOfWeek = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+    let startDayNumber = 0;
+    if (typeof startOfWeekDay === 'boolean') {
+        startDayNumber = startOfWeekDay ? 1 : 0;
+    } else {
+        startDayNumber = (typeof startOfWeekDay === 'number' && startOfWeekDay >= 0 && startOfWeekDay <= 6) ? startOfWeekDay : 0;
     }
+
+    const jsDay = firstDay.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const startOffset = (jsDay - startDayNumber + 7) % 7;
 
     const grid: (number | null)[][] = [];
     let currentWeek: (number | null)[] = Array(7).fill(null);
     let currentDay = 1;
 
-    for (let i = startDayOfWeek; i < 7; i++) currentWeek[i] = currentDay++;
+    for (let i = startOffset; i < 7; i++) currentWeek[i] = currentDay++;
     grid.push(currentWeek);
 
     while (currentDay <= daysInMonth) {

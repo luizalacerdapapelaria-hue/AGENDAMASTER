@@ -190,12 +190,12 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                 }}
             >
                 {showDayNumber && d.dayOfMonth > 0 && (
-                    <span className="font-bold text-lg" style={{ color: headerTextColor, fontSize: `${Math.max(6, 18 * scaleFactor)}px` }}>
+                    <span className="font-bold text-lg" style={{ color: headerTextColor, fontSize: `${Math.max(6, 18 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
                         {String(d.dayOfMonth).padStart(2, '0')}
                     </span>
                 )}
                 {showDayName && d.dayOfMonth > 0 && (
-                    <span className="font-medium opacity-70" style={{ color: headerTextColor, fontSize: `${Math.max(5, 10 * scaleFactor)}px` }}>
+                    <span className="font-medium opacity-70" style={{ color: headerTextColor, fontSize: `${Math.max(5, 10 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
                         {dayName}
                     </span>
                 )}

@@ -113,18 +113,27 @@ export const generateGenericPages = (count: number): DayData[] => {
 
 // Generates a grid for a specific month (used for mini calendars)
 // Returns array of 6 weeks, each week array of 7 days (or null)
-export const generateMonthGrid = (year: number, month: number): (number | null)[][] => {
+export const generateMonthGrid = (year: number, month: number, startOfWeekDay: number | boolean = 0): (number | null)[][] => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
-    const startDayOfWeek = firstDay.getDay(); // 0 = Sunday
+    
+    let startDayNumber = 0;
+    if (typeof startOfWeekDay === 'boolean') {
+        startDayNumber = startOfWeekDay ? 1 : 0;
+    } else {
+        startDayNumber = (typeof startOfWeekDay === 'number' && startOfWeekDay >= 0 && startOfWeekDay <= 6) ? startOfWeekDay : 0;
+    }
+
+    const jsDay = firstDay.getDay(); // 0 = Sunday
+    const startOffset = (jsDay - startDayNumber + 7) % 7;
 
     const grid: (number | null)[][] = [];
     let currentWeek: (number | null)[] = Array(7).fill(null);
     let currentDay = 1;
 
     // First week padding
-    for (let i = startDayOfWeek; i < 7; i++) {
+    for (let i = startOffset; i < 7; i++) {
         currentWeek[i] = currentDay++;
     }
     grid.push(currentWeek);

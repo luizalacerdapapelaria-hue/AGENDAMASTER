@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType } from '../../types';
 import { FileText, BookOpen, ArrowRight, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap } from 'lucide-react';
 import { importProject } from '../../core/logic/fileSystem';
-import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT } from './templates/plannerTemplates';
+import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
 
@@ -88,7 +88,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       }
   };
 
-  const handleTemplateSelect = (type: 'weekly_vertical' | 'weekly_horizontal', style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
+  const handleTemplateSelect = (type: PageLayoutType, style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
       setLayoutType(type);
       setPlannerStyle(style);
       setStep('config');
@@ -174,14 +174,26 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           }
       }
 
-      // Se for um novo projeto de planner, inicializa com os templates
-      if (!defaultValues && projectType === 'planner') {
+      // Se for planner, inicializa com os templates se a coleção correspondente estiver vazia ou se mudou de layout
+      if (projectType === 'planner' || layoutType.startsWith('weekly')) {
           if (layoutType === 'weekly_vertical') {
-              elementsWeeklyLeft = mapTemplateElements(WEEKLY_VERTICAL_LEFT, plannerStyle);
-              elementsWeeklyRight = mapTemplateElements(WEEKLY_VERTICAL_RIGHT, plannerStyle);
+              if (!elementsWeeklyLeft.length || !elementsWeeklyRight.length) {
+                  elementsWeeklyLeft = mapTemplateElements(WEEKLY_VERTICAL_LEFT, plannerStyle);
+                  elementsWeeklyRight = mapTemplateElements(WEEKLY_VERTICAL_RIGHT, plannerStyle);
+              }
           } else if (layoutType === 'weekly_horizontal') {
-              elementsWeeklyLeft = mapTemplateElements(WEEKLY_HORIZONTAL_LEFT, plannerStyle);
-              elementsWeeklyRight = mapTemplateElements(WEEKLY_HORIZONTAL_RIGHT, plannerStyle);
+              if (!elementsWeeklyLeft.length || !elementsWeeklyRight.length) {
+                  elementsWeeklyLeft = mapTemplateElements(WEEKLY_HORIZONTAL_LEFT, plannerStyle);
+                  elementsWeeklyRight = mapTemplateElements(WEEKLY_HORIZONTAL_RIGHT, plannerStyle);
+              }
+          } else if (layoutType === 'weekly_one_page_vertical') {
+              if (!elements.length) {
+                  elements = mapTemplateElements(WEEKLY_ONE_PAGE_VERTICAL, plannerStyle);
+              }
+          } else if (layoutType === 'weekly_one_page_horizontal') {
+              if (!elements.length) {
+                  elements = mapTemplateElements(WEEKLY_ONE_PAGE_HORIZONTAL, plannerStyle);
+              }
           }
       }
 
@@ -367,11 +379,11 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
           <div className="p-10 overflow-y-auto max-h-[70vh] bg-white">
             {isPlanner ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <div className="space-y-6">
                   <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
                     <Columns className="w-4 h-4 text-indigo-500" />
-                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Layout Vertical</h4>
+                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Semanal Vertical (2 Págs)</h4>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <button onClick={() => handleTemplateSelect('weekly_vertical', 'blank')} className="group p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4">
@@ -405,7 +417,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 <div className="space-y-6">
                   <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
                     <Grid className="w-4 h-4 text-amber-500" />
-                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Layout Horizontal</h4>
+                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Semanal Horizontal (2 Págs)</h4>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <button onClick={() => handleTemplateSelect('weekly_horizontal', 'blank')} className="group p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4">
@@ -431,6 +443,64 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                         {Array.from({length: 12}).map((_, i) => <div key={i} className="border-[0.5px] border-gray-200"></div>)}
                       </div>
                       <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Quadriculado</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
+                    <Columns className="w-4 h-4 text-emerald-500" />
+                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Semanal 1 Pág (Colunas)</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => handleTemplateSelect('weekly_one_page_vertical', 'blank')} className="group p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-50 transition-all flex flex-col items-center gap-4">
+                      <div className="w-16 h-20 border-2 border-gray-200 rounded-lg bg-gray-50 group-hover:bg-white transition-colors flex p-1 gap-1">
+                        <div className="flex-1 bg-gray-200 rounded-sm"></div>
+                        <div className="flex-1 bg-gray-200 rounded-sm"></div>
+                        <div className="flex-1 bg-gray-200 rounded-sm"></div>
+                      </div>
+                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Padrão Colunas</span>
+                    </button>
+                    <button onClick={() => handleTemplateSelect('weekly_one_page_vertical', 'lines')} className="group p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-50 transition-all flex flex-col items-center gap-4">
+                      <div className="w-16 h-20 border-2 border-gray-200 rounded-lg bg-gray-50 group-hover:bg-white transition-colors flex p-1 gap-1">
+                        <div className="flex-1 border border-gray-200 rounded-sm flex flex-col justify-around p-0.5">
+                          <div className="h-px bg-gray-300 w-full"></div>
+                          <div className="h-px bg-gray-300 w-full"></div>
+                        </div>
+                        <div className="flex-1 border border-gray-200 rounded-sm flex flex-col justify-around p-0.5">
+                          <div className="h-px bg-gray-300 w-full"></div>
+                          <div className="h-px bg-gray-300 w-full"></div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Colunas Pautadas</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
+                    <Grid className="w-4 h-4 text-purple-500" />
+                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Semanal 1 Pág (Linhas)</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => handleTemplateSelect('weekly_one_page_horizontal', 'blank')} className="group p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-purple-500 hover:shadow-xl hover:shadow-purple-50 transition-all flex flex-col items-center gap-4">
+                      <div className="w-16 h-20 border-2 border-gray-200 rounded-lg bg-gray-50 group-hover:bg-white transition-colors flex flex-col p-1 gap-1">
+                        <div className="flex-1 bg-gray-200 rounded-sm"></div>
+                        <div className="flex-1 bg-gray-200 rounded-sm"></div>
+                        <div className="flex-1 bg-gray-200 rounded-sm"></div>
+                      </div>
+                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Padrão Faixas</span>
+                    </button>
+                    <button onClick={() => handleTemplateSelect('weekly_one_page_horizontal', 'lines')} className="group p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-purple-500 hover:shadow-xl hover:shadow-purple-50 transition-all flex flex-col items-center gap-4">
+                      <div className="w-16 h-20 border-2 border-gray-200 rounded-lg bg-gray-50 group-hover:bg-white transition-colors flex flex-col p-1 gap-1">
+                        <div className="flex-1 border border-gray-200 rounded-sm flex flex-col justify-around px-0.5">
+                          <div className="h-px bg-gray-300 w-full"></div>
+                        </div>
+                        <div className="flex-1 border border-gray-200 rounded-sm flex flex-col justify-around px-0.5">
+                          <div className="h-px bg-gray-300 w-full"></div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Faixas Pautadas</span>
                     </button>
                   </div>
                 </div>
@@ -615,14 +685,28 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                         className={`p-3 border rounded-lg flex flex-col items-center gap-2 transition-all ${layoutType === 'weekly_vertical' ? 'bg-orange-50 border-orange-500 ring-1 ring-orange-500' : 'hover:border-orange-300'}`}
                                     >
                                         <div className="w-8 h-10 border border-gray-400 rounded bg-white flex p-0.5 gap-0.5"><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div></div>
-                                        <span className="text-xs font-bold text-gray-700 text-center">Semanal Vertical</span>
+                                        <span className="text-xs font-bold text-gray-700 text-center">Semanal Vertical (2 Págs)</span>
                                     </button>
                                     <button 
                                         onClick={() => setLayoutType('weekly_horizontal')}
                                         className={`p-3 border rounded-lg flex flex-col items-center gap-2 transition-all ${layoutType === 'weekly_horizontal' ? 'bg-orange-50 border-orange-500 ring-1 ring-orange-500' : 'hover:border-orange-300'}`}
                                     >
                                         <div className="w-8 h-10 border border-gray-400 rounded bg-white flex flex-col p-0.5 gap-0.5"><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div></div>
-                                        <span className="text-xs font-bold text-gray-700 text-center">Semanal Horizontal</span>
+                                        <span className="text-xs font-bold text-gray-700 text-center">Semanal Horizontal (2 Págs)</span>
+                                    </button>
+                                    <button 
+                                        onClick={() => setLayoutType('weekly_one_page_vertical')}
+                                        className={`p-3 border rounded-lg flex flex-col items-center gap-2 transition-all ${layoutType === 'weekly_one_page_vertical' ? 'bg-orange-50 border-orange-500 ring-1 ring-orange-500' : 'hover:border-orange-300'}`}
+                                    >
+                                        <div className="w-8 h-10 border border-gray-400 rounded bg-white flex p-0.5 gap-0.5"><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div></div>
+                                        <span className="text-xs font-bold text-gray-700 text-center">Semanal 1 Pág (Colunas)</span>
+                                    </button>
+                                    <button 
+                                        onClick={() => setLayoutType('weekly_one_page_horizontal')}
+                                        className={`p-3 border rounded-lg flex flex-col items-center gap-2 transition-all ${layoutType === 'weekly_one_page_horizontal' ? 'bg-orange-50 border-orange-500 ring-1 ring-orange-500' : 'hover:border-orange-300'}`}
+                                    >
+                                        <div className="w-8 h-10 border border-gray-400 rounded bg-white flex flex-col p-0.5 gap-0.5"><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div><div className="flex-1 bg-gray-200 rounded-sm"></div></div>
+                                        <span className="text-xs font-bold text-gray-700 text-center">Semanal 1 Pág (Linhas)</span>
                                     </button>
                                 </>
                             )}

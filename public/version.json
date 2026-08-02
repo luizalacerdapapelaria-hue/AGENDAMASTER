@@ -1,5 +1,5 @@
 {
-  "version": "1.0.7",
-  "releaseDate": "2026-07-23",
-  "notes": "Nova versão com novo layout laranja e correções."
+  "version": "1.0.8",
+  "releaseDate": "2026-07-30",
+  "notes": "Versão 1.0.8 com correções de margem, alinhamento espelhado e exportação PDF de páginas pares/ímpares."
 }

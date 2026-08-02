@@ -17,7 +17,7 @@ const applyTextTransform = (text: string, transform?: string) => {
     return text;
 };
 
-export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayData, style, globalCalendarStyle, municipalHolidays, pageHeight, pageWidth }) => {
+export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayData, style, globalCalendarStyle, municipalHolidays, pageHeight, pageWidth, calendarIndex }) => {
     const d = dayData;
     const highlightCurrentDay = style.highlightCurrentDay !== false;
     const currentDayHighlightColor = style.currentDayHighlightColor || '#4f46e5';
@@ -52,30 +52,35 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         const splitWeekend = effectiveStyle?.splitWeekend || 'none';
         const hasSplitWeekend = splitWeekend !== 'none';
         
-        // Split weekend usually requires startOfWeekOnMonday to align Sat & Sun correctly.
-        const startOnMonday = hasSplitWeekend ? true : (effectiveStyle?.startOfWeekOnMonday || (splitMode === 'left' || splitMode === 'right'));
+        // Determine startOfWeekDay (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+        let startOfWeekDay = 0;
+        if (effectiveStyle?.startOfWeekDay !== undefined) {
+            startOfWeekDay = effectiveStyle.startOfWeekDay;
+        } else if (hasSplitWeekend || splitMode === 'left' || splitMode === 'right' || effectiveStyle?.startOfWeekOnMonday) {
+            startOfWeekDay = 1;
+        }
         
-        const grid = generateMonthGrid(year, monthIndex, startOnMonday);
+        const grid = generateMonthGrid(year, monthIndex, startOfWeekDay);
         
         let colsToShow: (number | string)[] = [0, 1, 2, 3, 4, 5, 6];
         let gridColsClass = "grid-cols-7";
         if (hasSplitWeekend) {
             if (splitMode === 'left') {
-                colsToShow = [0, 1, 2]; // SEG, TER, QUA
+                colsToShow = [0, 1, 2]; // Cols 1..3
                 gridColsClass = "grid-cols-3";
             } else if (splitMode === 'right') {
-                colsToShow = [3, 4, 'weekend']; // QUI, SEX, SÁB_DOM
+                colsToShow = [3, 4, 'weekend']; // Cols 4..5, and combined 6/7
                 gridColsClass = "grid-cols-3";
             } else {
-                colsToShow = [0, 1, 2, 3, 4, 'weekend']; // SEG, TER, QUA, QUI, SEX, SÁB_DOM
+                colsToShow = [0, 1, 2, 3, 4, 'weekend'];
                 gridColsClass = "grid-cols-6";
             }
         } else {
             if (splitMode === 'left') {
-                colsToShow = [0, 1, 2]; // SEG, TER, QUA
+                colsToShow = [0, 1, 2];
                 gridColsClass = "grid-cols-3";
             } else if (splitMode === 'right') {
-                colsToShow = [3, 4, 5, 6]; // QUI, SEX, SÁB, DOM
+                colsToShow = [3, 4, 5, 6];
                 gridColsClass = "grid-cols-4";
             }
         }
@@ -148,23 +153,28 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         const isWeekSentenceOrCapitalize = weekTransform === 'sentence' || weekTransform === 'capitalize';
         const cssWeekTransform = isWeekSentenceOrCapitalize ? 'none' : weekTransform;
 
-        const standardHeaders = startOnMonday 
-            ? ['S','T','Q','Q','S','S','D']
-            : ['D','S','T','Q','Q','S','S'];
-        const shortHeaders = startOnMonday
-            ? ['SEG','TER','QUA','QUI','SEX','SÁB','DOM']
-            : ['DOM','SEG','TER','QUA','QUI','SEX','SÁB'];
-        const mediumHeaders = startOnMonday
-            ? ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']
-            : ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+        const baseStandardHeaders = ['D','S','T','Q','Q','S','S'];
+        const baseShortHeaders = ['DOM','SEG','TER','QUA','QUI','SEX','SÁB'];
+        const baseMediumHeaders = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+        const rotateArray = <T,>(arr: T[], n: number): T[] => {
+            const shift = ((n % arr.length) + arr.length) % arr.length;
+            return [...arr.slice(shift), ...arr.slice(0, shift)];
+        };
+
+        const standardHeaders = rotateArray(baseStandardHeaders, startOfWeekDay);
+        const shortHeaders = rotateArray(baseShortHeaders, startOfWeekDay);
+        const mediumHeaders = rotateArray(baseMediumHeaders, startOfWeekDay);
 
         let activeHeaders: string[] = [];
         if (hasSplitWeekend) {
             const getHeaderName = (col: number | string) => {
                 if (col === 'weekend') {
-                    if (effectiveStyle?.weekdayFormat === 'short') return 'SÁB/DOM';
-                    if (effectiveStyle?.weekdayFormat === 'medium') return 'Sáb/Dom';
-                    return 'S/D';
+                    const h5 = shortHeaders[5];
+                    const h6 = shortHeaders[6];
+                    if (effectiveStyle?.weekdayFormat === 'short') return `${h5}/${h6}`;
+                    if (effectiveStyle?.weekdayFormat === 'medium') return `${mediumHeaders[5]}/${mediumHeaders[6]}`;
+                    return `${standardHeaders[5]}/${standardHeaders[6]}`;
                 }
                 const headers = effectiveStyle?.weekdayFormat === 'short' 
                     ? shortHeaders 
@@ -348,9 +358,31 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
     };
 
     if (element.type === 'mini_calendar') {
-        let targetMonth = d.month + (style.calendarOffset || 0);
-        let targetYear = d.year;
-        if (targetMonth < 0) { targetMonth = 11; targetYear -= 1; } else if (targetMonth > 11) { targetMonth = 0; targetYear += 1; }
+        const baseMonth = d ? d.month : 0;
+        let targetMonth = baseMonth;
+        let targetYear = d ? d.year : new Date().getFullYear();
+
+        const monthMode = style.calendarMonthMode || 'sequence';
+
+        if (monthMode === 'fixed') {
+            targetMonth = style.calendarFixedMonth !== undefined ? style.calendarFixedMonth : 0;
+            targetYear = (d ? d.year : new Date().getFullYear()) + (style.yearOffset || 0);
+        } else if (monthMode === 'sequence') {
+            const seqOffset = calendarIndex || 0;
+            targetMonth = baseMonth + seqOffset + (style.calendarOffset || 0);
+        } else {
+            // 'relative'
+            targetMonth = baseMonth + (style.calendarOffset || 0);
+        }
+
+        while (targetMonth < 0) {
+            targetMonth += 12;
+            targetYear -= 1;
+        }
+        while (targetMonth > 11) {
+            targetMonth -= 12;
+            targetYear += 1;
+        }
         
         const containerStyle: React.CSSProperties = {
             backgroundColor: style.backgroundColor || 'transparent',

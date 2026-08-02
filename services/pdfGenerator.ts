@@ -136,9 +136,11 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
     // Text Rendering
     if (text) {
         const fontSize = style.fontSize || 12;
-        let ty = absY + fontSize/3; 
-        if (style.verticalAlign === 'middle' || !style.verticalAlign && (el.type === 'day_number' || el.type === 'box')) {
-             ty = absY + (absH / 2) + (fontSize * 0.352 / 2); 
+        let ty = absY;
+        if (style.verticalAlign === 'middle') {
+             ty = absY + (absH / 2) - (fontSize * 0.352 / 2); 
+        } else if (style.verticalAlign === 'bottom') {
+             ty = absY + absH - (fontSize * 0.352);
         }
 
         if (style.textTransform === 'uppercase') text = text.toUpperCase();
@@ -158,15 +160,13 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
                     const colText = chunk.join('\n');
                     const colX = absX + (c * (colWidth + colGap));
                     
-                    // Note: Justify doesn't work well with multiline splits, forcing left for lists usually looks better
-                    // But respecting user choice if possible.
                     let align: 'left' | 'center' | 'right' = 'left';
                     let tx = colX;
                     if (style.textAlign === 'center') { tx = colX + (colWidth / 2); align = 'center'; }
                     else if (style.textAlign === 'right') { tx = colX + colWidth; align = 'right'; }
 
                     const splitText = doc.splitTextToSize(colText, colWidth);
-                    doc.text(splitText, tx, ty + 4, { align, baseline: 'top' });
+                    doc.text(splitText, tx, ty, { align, baseline: 'top' });
                 }
             }
         } 
@@ -178,7 +178,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             else if (style.textAlign === 'right') { tx = absX + absW; align = 'right'; }
 
             const splitText = doc.splitTextToSize(text, absW);
-            doc.text(splitText, tx, ty + 4, { align, baseline: 'top' });
+            doc.text(splitText, tx, ty, { align, baseline: 'top' });
         } else {
             // Short labels (day numbers, etc)
             let tx = absX;
@@ -186,7 +186,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             if (style.textAlign === 'center') { tx = absX + (absW / 2); align = 'center'; } 
             else if (style.textAlign === 'right') { tx = absX + absW; align = 'right'; }
             
-            doc.text(text, tx, ty, { align });
+            doc.text(text, tx, ty + (fontSize * 0.352), { align });
         }
     }
 
@@ -320,7 +320,8 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
     };
 
     let globalPageCount = 0;
-    const totalPages = config.introPages.length + (config.layoutType === '1_per_page' ? generatedDays.length : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
+    const isSinglePageType = config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.projectType === 'notebook' || config.projectType === 'devotional';
+    const totalPages = config.introPages.length + (isSinglePageType ? generatedDays.length : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
 
     for (const page of config.introPages) {
         if (globalPageCount > 0) doc.addPage(format, orientation);
@@ -332,14 +333,15 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
         await new Promise(r => setTimeout(r, 0)); 
     }
 
-    if (config.layoutType === '1_per_page') {
+    if (isSinglePageType) {
         for (const day of generatedDays) {
             doc.addPage(format, orientation);
             globalPageCount++;
             const geo = getSafeGeometry(globalPageCount);
             const elements = getElementsForPage(config.elements, globalPageCount);
-            const verse = getVerseForDay(getDayOfYear(new Date(day.date)));
-            elements.forEach(el => renderElementToPDF(doc, el, day, quotes[day.month], verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+            const verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
+            const quote = day.month !== undefined && quotes ? quotes[day.month] : undefined;
+            elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
             if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
         }
     } 
