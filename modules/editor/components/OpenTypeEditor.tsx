@@ -181,6 +181,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
   const [selectedCharRange, setSelectedCharRange] = useState<{ start: number; end: number; text: string } | null>(null);
 
   const editorRef = useRef<HTMLDivElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
   const lastClickRef = useRef<{ time: number; index: number | null }>({ time: 0, index: null });
 
   const activeFont = useMemo(() => {
@@ -609,9 +610,58 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
     return list.join(', ');
   }, [features, stylisticSets]);
 
-  // Insert Glyph at cursor position
-  const insertGlyph = (glyph: opentype.Glyph) => {
-    if (!editorRef.current) return;
+  // Helper to extract a valid Unicode / character string from any opentype Glyph
+  const getGlyphCharacter = (glyph: opentype.Glyph): string => {
+    // 1. Direct unicode property if valid
+    if (glyph.unicode !== undefined && glyph.unicode !== null && glyph.unicode > 0) {
+      try {
+        return String.fromCodePoint(glyph.unicode);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // 2. Unicodes array
+    if (glyph.unicodes && glyph.unicodes.length > 0) {
+      const validCode = glyph.unicodes.find(u => u && u > 0);
+      if (validCode) {
+        try {
+          return String.fromCodePoint(validCode);
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    // 3. Hex Uni name (uni0041, u0041, u+0041, uE001)
+    if (glyph.name) {
+      const uniMatch = glyph.name.match(/^(?:uni|u|u\+)([0-9a-fA-F]{4,6})$/i);
+      if (uniMatch) {
+        const code = parseInt(uniMatch[1], 16);
+        if (code > 0) {
+          try {
+            return String.fromCodePoint(code);
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+    }
+
+    // 4. Private Use Area (PUA) code point: U+E000 + (glyph.index % 6400)
+    // Ensures EVERY glyph in the font gets inserted as a real character in the text string,
+    // which renders properly in contenteditable and transfers cleanly to the layout!
+    const puaCode = 0xE000 + (glyph.index % 6400);
+    try {
+      return String.fromCodePoint(puaCode);
+    } catch (e) {
+      return String.fromCharCode(puaCode);
+    }
+  };
+
+  // Insert Glyph at cursor position or replace active text selection
+  const insertGlyph = (glyph: opentype.Glyph): string => {
+    if (!editorRef.current) return editorText;
 
     let selection = window.getSelection();
     let range: Range | null = null;
@@ -624,7 +674,12 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
       }
     }
 
-    // If no active range inside the editor, focus the editor and put the cursor at the end
+    // Fallback to saved selection range if current range isn't inside editorRef
+    if (!range && savedRangeRef.current) {
+      range = savedRangeRef.current;
+    }
+
+    // If still no range, focus the editor and put the cursor at the end
     if (!range) {
       editorRef.current.focus();
       selection = window.getSelection();
@@ -644,61 +699,44 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
       console.warn("Failed to delete contents inside selection:", e);
     }
 
-    if (glyph.unicode !== undefined && glyph.unicode !== null) {
-      // Native unicode character insertion (using fromCodePoint to support all unicode planes!)
-      const textNode = document.createTextNode(String.fromCodePoint(glyph.unicode));
-      range.insertNode(textNode);
-      range.setStartAfter(textNode);
-      range.collapse(true);
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-    } else {
-      // Alternate Glyph or Ornament with no direct Unicode.
-      // Render as premium scalable inline SVG to maintain absolute fidelity!
-      const unitsPerEm = activeFont ? activeFont.font.unitsPerEm : 1000;
-      const advanceWidth = glyph.advanceWidth || unitsPerEm * 0.6;
-      const ascender = activeFont ? activeFont.font.ascender : 800;
-      const descender = activeFont ? activeFont.font.descender : -200;
-      
-      const widthEm = advanceWidth / unitsPerEm;
-      
-      const svgContainer = document.createElement('span');
-      svgContainer.className = "inline-block align-baseline select-none select-all mx-[0.05em]";
-      svgContainer.setAttribute('data-glyph-index', String(glyph.index));
-      svgContainer.setAttribute('contenteditable', 'false');
-      svgContainer.style.width = `${widthEm}em`;
-      svgContainer.style.height = `1em`;
-      svgContainer.style.verticalAlign = `middle`;
-      svgContainer.style.transform = `translateY(${descender / unitsPerEm * 0.2}em)`;
+    const charStr = getGlyphCharacter(glyph);
+    const textNode = document.createTextNode(charStr);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
 
-      // Draw SVG interior
-      svgContainer.innerHTML = `
-        <svg viewBox="0 0 ${advanceWidth} ${ascender - descender}" class="w-full h-full block" fill="currentColor">
-          <g transform="scale(1, -1) translate(0, -${ascender})">
-            ${glyph.getPath(0, 0, unitsPerEm).toSVG(2)}
-          </g>
-        </svg>
-      `;
-
-      range.insertNode(svgContainer);
-      
-      // Append zero-width space (\u200B) text node right after contenteditable="false" container
-      // to keep the browser selection/caret inside a healthy text block.
-      const zwsp = document.createTextNode('\u200B');
-      range.setStartAfter(svgContainer);
-      range.insertNode(zwsp);
-      range.setStartAfter(zwsp);
-      range.collapse(true);
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
     }
 
-    // Trigger update of editor state
-    handleEditorInput();
+    // Sync state immediately
+    const updatedText = editorRef.current.innerText || editorRef.current.textContent || '';
+    setEditorText(updatedText);
+
+    // Reset floating popover and saved range
+    savedRangeRef.current = null;
+    setAlternates([]);
+    setAlternatesPosition(null);
+
+    return updatedText;
+  };
+
+  // Replace selection with chosen alternate glyph
+  const applyAlternate = (alternate: opentype.Glyph): string => {
+    return insertGlyph(alternate);
+  };
+
+  // Handle Double-Click on any Glyph: insert into text AND send to layout!
+  const handleGlyphDoubleClick = (glyph: opentype.Glyph) => {
+    setSelectedGlyphIndex(glyph.index);
+    const updatedText = insertGlyph(glyph);
+    if (onInsertIntoLayout && activeFont) {
+      const textToSend = updatedText.trim() || editorText.trim();
+      if (textToSend) {
+        onInsertIntoLayout(textToSend, activeFont.family);
+      }
+    }
   };
 
   // Sync ContentEditable content
@@ -718,6 +756,11 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
     }
 
     const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.startContainer)) return;
+
+    // Save selection range reference
+    savedRangeRef.current = range.cloneRange();
+
     const selectedText = range.toString();
 
     // Only process a single letter/character selection for alternates
@@ -820,56 +863,6 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
       setAlternates([]);
       setAlternatesPosition(null);
     }
-  };
-
-  // Replace selection with chosen alternate glyph
-  const applyAlternate = (alternate: opentype.Glyph) => {
-    const selection = window.getSelection();
-    if (!selection || !selection.rangeCount) return;
-
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-
-    if (alternate.unicode !== undefined && alternate.unicode !== null) {
-      const textNode = document.createTextNode(String.fromCharCode(alternate.unicode));
-      range.insertNode(textNode);
-      range.setStartAfter(textNode);
-    } else {
-      // Alternates without unicodes render as precise embedded inline SVGs
-      const unitsPerEm = activeFont ? activeFont.font.unitsPerEm : 1000;
-      const advanceWidth = alternate.advanceWidth || unitsPerEm * 0.6;
-      const ascender = activeFont ? activeFont.font.ascender : 800;
-      const descender = activeFont ? activeFont.font.descender : -200;
-      const widthEm = advanceWidth / unitsPerEm;
-
-      const svgContainer = document.createElement('span');
-      svgContainer.className = "inline-block align-baseline select-none mx-[0.05em]";
-      svgContainer.setAttribute('data-glyph-index', String(alternate.index));
-      svgContainer.setAttribute('contenteditable', 'false');
-      svgContainer.style.width = `${widthEm}em`;
-      svgContainer.style.height = `1em`;
-      svgContainer.style.verticalAlign = `middle`;
-      svgContainer.style.transform = `translateY(${descender / unitsPerEm * 0.2}em)`;
-
-      svgContainer.innerHTML = `
-        <svg viewBox="0 0 ${advanceWidth} ${ascender - descender}" class="w-full h-full block" fill="currentColor">
-          <g transform="scale(1, -1) translate(0, -${ascender})">
-            ${alternate.getPath(0, 0, unitsPerEm).toSVG(2)}
-          </g>
-        </svg>
-      `;
-
-      range.insertNode(svgContainer);
-      range.setStartAfter(svgContainer);
-    }
-
-    // Clear state
-    setAlternates([]);
-    setAlternatesPosition(null);
-    setSelectedCharRange(null);
-
-    // Trigger input synchronization
-    handleEditorInput();
   };
 
   // Keyboard navigation & closing floating popover
@@ -1216,16 +1209,19 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
                         setSelectedGlyphIndex(item.index);
                         insertGlyph(item.glyph);
                       }}
+                      onDoubleClick={() => {
+                        handleGlyphDoubleClick(item.glyph);
+                      }}
                       draggable
                       onDragStart={(e) => handleDragStart(e, item.index)}
-                      className={`group p-1.5 rounded-lg border flex flex-col items-center justify-center transition-all ${
+                      className={`group p-1.5 rounded-lg border flex flex-col items-center justify-center transition-all cursor-pointer ${
                         isSelected
                           ? 'bg-indigo-500 border-indigo-500 text-white shadow-md'
                           : workspaceTheme === 'dark'
                             ? 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
                             : 'bg-slate-50 border-slate-200 text-slate-800 hover:border-indigo-300 hover:bg-indigo-50/10'
                       }`}
-                      title={`${item.name} (${item.unicode ? `U+${item.unicode.toString(16).toUpperCase().padStart(4, '0')}` : 'Alternativa'})`}
+                      title={`Clique para aplicar / Duplo clique para aplicar e enviar ao layout\n${item.name} (${item.unicode ? `U+${item.unicode.toString(16).toUpperCase().padStart(4, '0')}` : 'Alternativa'})`}
                     >
                       <GlyphThumbnail glyph={item.glyph} size={28} />
                       <span className={`text-[8px] font-mono truncate w-full text-center mt-1 ${
@@ -1404,7 +1400,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
                     </div>
                     <div>
                       <p className="font-extrabold text-indigo-655 dark:text-indigo-400 mb-0.5">3. Catálogo de Glifos</p>
-                      <p className="opacity-80">Clique em qualquer caractere do catálogo esquerdo para adicioná-lo na hora.</p>
+                      <p className="opacity-80">Clique simples para aplicar ao texto. **Duplo clique** para aplicar e enviar diretamente ao layout!</p>
                     </div>
                     <div>
                       <p className="font-extrabold text-indigo-655 dark:text-indigo-400 mb-0.5">4. Ative Recursos</p>
@@ -1412,7 +1408,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
                     </div>
                     <div>
                       <p className="font-extrabold text-indigo-655 dark:text-indigo-400 mb-0.5">5. Aplicar no Layout</p>
-                      <p className="opacity-80">Clique no banner ou no botão "Aplicar no Layout" para enviar sua arte à Agenda!</p>
+                      <p className="opacity-80">Dê duplo clique em qualquer glifo ou clique no botão "Aplicar no Layout"!</p>
                     </div>
                   </div>
                 </div>
@@ -1474,8 +1470,9 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ user, onClose, o
                         key={alt.index}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => applyAlternate(alt)}
-                        className="p-1.5 rounded-lg border border-slate-150 hover:border-indigo-500 dark:border-slate-800 dark:hover:border-indigo-500 bg-slate-50 dark:bg-slate-950 flex flex-shrink-0 items-center justify-center transition-all hover:scale-110"
-                        title={alt.name || `glyph-${alt.index}`}
+                        onDoubleClick={() => handleGlyphDoubleClick(alt)}
+                        className="p-1.5 rounded-lg border border-slate-150 hover:border-indigo-500 dark:border-slate-800 dark:hover:border-indigo-500 bg-slate-50 dark:bg-slate-950 flex flex-shrink-0 items-center justify-center transition-all hover:scale-110 cursor-pointer"
+                        title={`${alt.name || `glyph-${alt.index}`} (Clique duplo para enviar ao layout)`}
                       >
                         <GlyphThumbnail glyph={alt} size={24} />
                       </button>
