@@ -18,7 +18,7 @@ const PAGE_SIZES: Record<PageSize, { name: string, w: number, h: number }> = {
     'A5': { name: 'A5 (Padrão Agenda)', w: 148, h: 210 },
     'A4': { name: 'A4 (Sulfite)', w: 210, h: 297 },
     'Letter': { name: 'Carta (Letter)', w: 216, h: 279 },
-    'Custom': { name: 'Personalizado', w: 0, h: 0 }
+    'Custom': { name: 'Personalizado', w: 148, h: 210 }
 };
 
 export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmail, defaultValues, onLogout, userPlan = 'pro' }) => {
@@ -213,7 +213,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           durationMonths,
           pageCount: (projectType === 'notebook' || projectType === 'devotional') ? 100 : undefined,
           pageSize,
-          customPageSize: pageSize === 'Custom' ? { width: customWidth, height: customHeight } : undefined,
+          customPageSize: pageSize === 'Custom' ? { width: Math.max(20, customWidth || 148), height: Math.max(20, customHeight || 210) } : undefined,
           orientation,
           margins,
           mirrorEvenPages,
@@ -239,7 +239,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
     setMunicipalHolidays(newHolidays);
   };
 
-  const currentSize = pageSize === 'Custom' ? { w: customWidth, h: customHeight } : PAGE_SIZES[pageSize];
+  const currentSize = pageSize === 'Custom' 
+    ? { w: Math.max(20, customWidth || 148), h: Math.max(20, customHeight || 210) } 
+    : (PAGE_SIZES[pageSize] || PAGE_SIZES['A5']);
   const displayW = orientation === 'portrait' ? currentSize.w : currentSize.h;
   const displayH = orientation === 'portrait' ? currentSize.h : currentSize.w;
 

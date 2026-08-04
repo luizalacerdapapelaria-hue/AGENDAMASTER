@@ -42,8 +42,11 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
     const wrapperRef = useRef<HTMLDivElement>(null);
     const [scale, setScale] = useState(1);
 
-    const nativeWidth = widthMm * 3.77952;
-    const nativeHeight = heightMm * 3.77952;
+    const safeW = Math.max(20, Number(widthMm) || 148);
+    const safeH = Math.max(20, Number(heightMm) || 210);
+
+    const nativeWidth = safeW * 3.77952;
+    const nativeHeight = safeH * 3.77952;
 
     useEffect(() => {
         const wrapper = wrapperRef.current;
@@ -51,9 +54,9 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
 
         const handleResize = () => {
             const currentWidth = wrapper.clientWidth;
-            if (currentWidth > 0) {
+            if (currentWidth > 0 && nativeWidth > 0) {
                 const targetScale = currentWidth / nativeWidth;
-                setScale(Math.min(1.0, targetScale));
+                setScale(Math.min(1.0, Math.max(0.1, targetScale)));
             }
         };
 
@@ -110,7 +113,7 @@ const PAGE_SIZES_MM: Record<PageSize, { width: number; height: number }> = {
     'A4': { width: 210, height: 297 },
     'A5': { width: 148, height: 210 },
     'Letter': { width: 215.9, height: 279.4 },
-    'Custom': { width: 0, height: 0 }
+    'Custom': { width: 148, height: 210 }
 };
 
 import { initializeApp } from 'firebase/app';
@@ -675,6 +678,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     year: initialConfig?.year || new Date().getFullYear() + 1,
     layoutType: initialConfig?.layoutType || '1_per_page',
     pageSize: initialConfig?.pageSize || 'A5',
+    customPageSize: initialConfig?.customPageSize || (initialConfig?.pageSize === 'Custom' ? { width: 148, height: 210 } : undefined),
     orientation: initialConfig?.orientation || 'portrait',
     includeHolidays: initialConfig?.includeHolidays ?? true,
     includeMoonPhases: initialConfig?.includeMoonPhases ?? false,
@@ -1955,11 +1959,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const getPageDimensions = () => {
-      const base = config.pageSize === 'Custom' && config.customPageSize 
-        ? config.customPageSize 
-        : PAGE_SIZES_MM[config.pageSize];
-      if (config.orientation === 'portrait') return base;
-      return { width: base.height, height: base.width };
+      let base: { width: number; height: number };
+      if (config.pageSize === 'Custom') {
+          if (config.customPageSize && typeof config.customPageSize.width === 'number' && typeof config.customPageSize.height === 'number' && config.customPageSize.width > 0 && config.customPageSize.height > 0) {
+              base = config.customPageSize;
+          } else {
+              base = { width: 148, height: 210 };
+          }
+      } else {
+          base = PAGE_SIZES_MM[config.pageSize] || { width: 148, height: 210 };
+      }
+
+      const w = Math.max(20, Number(base.width) || 148);
+      const h = Math.max(20, Number(base.height) || 210);
+
+      if (config.orientation === 'portrait') return { width: w, height: h };
+      return { width: h, height: w };
   };
 
   const { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM } = getPageDimensions();
