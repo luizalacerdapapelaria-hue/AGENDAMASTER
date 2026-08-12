@@ -166,7 +166,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl }) => 
                 onClick={onChooseBrowser}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider py-4 px-6 rounded-2xl shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
               >
-                <span>Quero Adquirir o Meu Acesso</span>
+                <span>Acessar no Navegador</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -217,7 +217,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl }) => 
                 onClick={onChooseBrowser}
                 className="w-full bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold text-xs uppercase tracking-wider py-4 px-6 rounded-2xl shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer text-center"
               >
-                <span>Quero Adquirir o Meu Acesso</span>
+                <span>Instalar no Computador</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

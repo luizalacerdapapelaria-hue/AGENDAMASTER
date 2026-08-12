@@ -283,5 +283,67 @@ export const generateMonthGrid = (year: number, month: number, startOfWeekDay: n
     return grid;
 };
 
-export const getMonthName = (i: number) => ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][i];
-export const getDayName = (i: number) => ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'][i];
+export const getMonthName = (i: number, format?: string) => {
+    const idx = ((i % 12) + 12) % 12;
+    const full = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const short = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const twoLetters = ['Ja', 'Fe', 'Ma', 'Ab', 'Ma', 'Ju', 'Ju', 'Ag', 'Se', 'Ou', 'No', 'De'];
+    const initial = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+
+    if (format === 'short' || format === '3_letters') return short[idx];
+    if (format === 'two_letters' || format === '2_letters') return twoLetters[idx];
+    if (format === 'initial' || format === '1_letter') return initial[idx];
+    return full[idx];
+};
+
+export const getDayName = (i: number, format?: string) => {
+    const idx = ((i % 7) + 7) % 7;
+    const full = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const noFeira = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const short = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const twoLetters = ['Do', 'Se', 'Te', 'Qu', 'Qi', 'Se', 'Sá'];
+    const initial = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+    const ordinalFull = ['Domingo', '2ª-feira', '3ª-feira', '4ª-feira', '5ª-feira', '6ª-feira', 'Sábado'];
+    const ordinalShort = ['Dom', '2ª', '3ª', '4ª', '5ª', '6ª', 'Sáb'];
+
+    if (format === 'no_feira' || format === 'without_feira' || format === 'medium' || format === 'short_name') return noFeira[idx];
+    if (format === 'short' || format === '3_letters') return short[idx];
+    if (format === 'two_letters' || format === '2_letters') return twoLetters[idx];
+    if (format === 'initial' || format === '1_letter') return initial[idx];
+    if (format === 'ordinal_full') return ordinalFull[idx];
+    if (format === 'ordinal_short') return ordinalShort[idx];
+    return full[idx];
+};
+
+export const isProjectYearRestricted = (
+    projectType: string | undefined,
+    year: number,
+    startMonth: number = 0,
+    durationMonths: number = 12,
+    userPlan: string = ''
+): boolean => {
+    if (projectType === 'notebook' || projectType === 'devotional') return false;
+
+    const planLower = (userPlan || '').toLowerCase();
+    const is2028Unlocked = planLower.includes('2028') || planLower.includes('renovad') || planLower.includes('master');
+
+    if (is2028Unlocked) return false;
+
+    if (year < 2026 || year > 2028) return true;
+    if (year === 2028) return true;
+
+    let monthsIn2028OrBeyond = 0;
+    for (let i = 0; i < durationMonths; i++) {
+        const yearOffset = Math.floor((startMonth + i) / 12);
+        const mYear = year + yearOffset;
+        if (mYear >= 2028) {
+            monthsIn2028OrBeyond++;
+        }
+    }
+
+    if (monthsIn2028OrBeyond > 1) {
+        return true;
+    }
+
+    return false;
+};

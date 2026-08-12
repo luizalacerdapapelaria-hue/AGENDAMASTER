@@ -3,7 +3,7 @@ import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
 import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, IntroPage, BackgroundConfig } from '../../types';
-import { generateCalendarYear, getMonthName, generatePlannerDays, generateGenericPages } from '../../core/backend/calendar';
+import { generateCalendarYear, getMonthName, generatePlannerDays, generateGenericPages, isProjectYearRestricted } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
 import { calculateDragPosition, calculateResize, SnapGuide } from '../../core/logic/interaction';
@@ -13,6 +13,7 @@ import { BackgroundSettings } from './components/BackgroundSettings';
 import { OpenTypeEditor } from './components/OpenTypeEditor';
 import { compressImage } from './utils/imageCompressor';
 import { ImageManager, useImageSrc } from './utils/imageManager';
+import { getEffectiveBackgroundForPage, BackgroundCategoryType } from '../../core/logic/backgroundRules';
 import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
 import * as icons from 'lucide-react';
 
@@ -114,6 +115,62 @@ const PAGE_SIZES_MM: Record<PageSize, { width: number; height: number }> = {
     'A5': { width: 148, height: 210 },
     'Letter': { width: 215.9, height: 279.4 },
     'Custom': { width: 148, height: 210 }
+};
+
+const getVisualBounds = (el: any, usableW_MM: number, usableH_MM: number) => {
+    if (!el) return { x: 0, y: 0, w: 0, h: 0 };
+    const rot = (el.style?.rotation || 0) % 360;
+    const rawX_mm = (el.x / 100) * usableW_MM;
+    const rawY_mm = (el.y / 100) * usableH_MM;
+    const rawW_mm = (el.w / 100) * usableW_MM;
+    const rawH_mm = (el.h / 100) * usableH_MM;
+
+    const normalizedRot = (rot + 360) % 360;
+    if (normalizedRot === 90 || normalizedRot === 270) {
+        const visW_mm = rawH_mm;
+        const visH_mm = rawW_mm;
+        const visX_mm = rawX_mm + (rawW_mm - rawH_mm) / 2;
+        const visY_mm = rawY_mm + (rawH_mm - rawW_mm) / 2;
+        return { x: visX_mm, y: visY_mm, w: visW_mm, h: visH_mm };
+    }
+
+    return { x: rawX_mm, y: rawY_mm, w: rawW_mm, h: rawH_mm };
+};
+
+const setVisualBounds = (el: any, updates: { x?: number; y?: number; w?: number; h?: number }, usableW_MM: number, usableH_MM: number) => {
+    if (!el) return { x: 0, y: 0, w: 0, h: 0 };
+    const rot = (el.style?.rotation || 0) % 360;
+    const currentVis = getVisualBounds(el, usableW_MM, usableH_MM);
+
+    const visX_mm = updates.x !== undefined ? updates.x : currentVis.x;
+    const visY_mm = updates.y !== undefined ? updates.y : currentVis.y;
+    const visW_mm = updates.w !== undefined ? updates.w : currentVis.w;
+    const visH_mm = updates.h !== undefined ? updates.h : currentVis.h;
+
+    const normalizedRot = (rot + 360) % 360;
+    if (normalizedRot === 90 || normalizedRot === 270) {
+        const newRawW_mm = visH_mm;
+        const newRawH_mm = visW_mm;
+        const newCenterX = visX_mm + visW_mm / 2;
+        const newCenterY = visY_mm + visH_mm / 2;
+
+        const newRawX_mm = newCenterX - newRawW_mm / 2;
+        const newRawY_mm = newCenterY - newRawH_mm / 2;
+
+        return {
+            x: (newRawX_mm / usableW_MM) * 100,
+            y: (newRawY_mm / usableH_MM) * 100,
+            w: (newRawW_mm / usableW_MM) * 100,
+            h: (newRawH_mm / usableH_MM) * 100,
+        };
+    }
+
+    return {
+        x: (visX_mm / usableW_MM) * 100,
+        y: (visY_mm / usableH_MM) * 100,
+        w: (visW_mm / usableW_MM) * 100,
+        h: (visH_mm / usableH_MM) * 100,
+    };
 };
 
 import { initializeApp } from 'firebase/app';
@@ -1614,13 +1671,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [activeTab, renderedPreviewCount, generatedData.length]);
 
   const handlePrintRequest = () => {
-      const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
-        config.year !== 2026 && 
-        config.year !== 2027 && 
-        !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(
+          config.projectType,
+          config.year,
+          config.startMonth ?? 0,
+          config.durationMonths ?? 12,
+          user.plan
+      );
 
       if (isYearRestricted) {
-          alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
+          alert(`Desculpe! As configurações do arquivo (ano ${config.year}, duração ${config.durationMonths ?? 12} meses) englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
       setPrintStatus('generating');
@@ -1759,30 +1819,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const renderBackgroundsForPage = (
       pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard',
       pageNumber?: number,
-      pageSpecificBg?: BackgroundConfig
+      pageSpecificBg?: BackgroundConfig,
+      categoryRelativeIndex?: number
   ) => {
-      // 1. If pageSpecificBg is provided and not 'none', it overrides global backgrounds for this page
-      if (pageSpecificBg && pageSpecificBg.type && pageSpecificBg.type !== 'none') {
-          return renderSingleBackground(pageSpecificBg, pageNumber, 'page_specific');
-      }
+      const pageNum = pageNumber || 1;
+      const catRelIdx = categoryRelativeIndex !== undefined ? categoryRelativeIndex : pageNum;
 
-      // 2. Resolve global backgrounds array
-      const globalBgs = (config.backgrounds && config.backgrounds.length > 0)
-          ? config.backgrounds
-          : (config.background ? [config.background] : []);
+      let catKey: BackgroundCategoryType = 'miolo';
+      if (pageType === 'intro') catKey = 'iniciais';
+      else if (pageType === 'monthly_intro') catKey = 'mensais';
+      else if (pageType === 'divider' || pageType === 'divider_verso') catKey = 'divisorias';
 
-      if (globalBgs.length === 0) return null;
-
-      // 3. Filter all backgrounds that match this page context
-      const matchingBgs = globalBgs.filter(bg => isBgMatchingPage(bg, pageType, pageNumber));
-
-      if (matchingBgs.length === 0) return null;
-
-      return (
-          <>
-              {matchingBgs.map((bg, idx) => renderSingleBackground(bg, pageNumber, `global_${bg.id || idx}`))}
-          </>
+      const resolvedBg = getEffectiveBackgroundForPage(
+          pageNum,
+          catKey,
+          catRelIdx,
+          config.backgroundRules,
+          pageSpecificBg,
+          config.backgrounds || (config.background ? [config.background] : undefined)
       );
+
+      if (!resolvedBg) return null;
+      return renderSingleBackground(resolvedBg, pageNum, `resolved_${catKey}_${pageNum}`);
   };
 
   const cancelPrint = () => {
@@ -3665,17 +3723,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             if (!element) return;
             const initial = dragRef.current.initialStates.find((s: any) => s.id === currentId);
 
-            const { x, y, w, h } = calculateResize(deltaX, deltaY, initial.x, initial.y, initial.w, initial.h, editorRect.width, editorRect.height, resizeDir);
-            
-            let finalH = h;
-            let finalW = w;
-            let finalX = x;
-            let finalY = y;
-            
-            let newElementConfig = { ...element, x, y, w, h };
-
+            const rotation = element.style.rotation || 0;
             const unscaledEditorHeight = EDITOR_HEIGHT_PX;
             const unscaledEditorWidth = EDITOR_WIDTH_PX;
+
+            const isSingleLine = element.type === 'lines' && !element.style.showTimes && (
+                initial.h < 3 || 
+                (!element.style.rowCount || element.style.rowCount === 0) ||
+                (element.style.lineSpacing && (initial.h / 100 * unscaledEditorHeight) <= element.style.lineSpacing)
+            );
+
+            const { x, y, w, h } = calculateResize(
+                deltaX, deltaY, 
+                initial.x, initial.y, initial.w, initial.h, 
+                editorRect.width, editorRect.height, 
+                resizeDir,
+                rotation,
+                isSingleLine
+            );
+            
+            let finalH = isSingleLine ? initial.h : h;
+            let finalW = w;
+            
+            let newElementConfig = { ...element, x, y, w, h: finalH };
 
             if (element.type === 'circle') {
                 if (resizeDir.includes('n') || resizeDir.includes('s')) {
@@ -3684,10 +3754,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     finalH = w * (unscaledEditorWidth / unscaledEditorHeight);
                 }
             } else if (element.type === 'lines') {
-                const heightPx = (h / 100 * unscaledEditorHeight);
-                const spacing = element.style.lineSpacing || 24;
-                const lineCount = Math.max(1, Math.floor((heightPx - 1) / spacing));
-                finalH = ((lineCount * spacing + 1) / unscaledEditorHeight) * 100;
+                if (!element.style.showTimes && (!element.style.rowCount || element.style.rowCount === 0) && !isSingleLine) {
+                    const heightPx = (h / 100 * unscaledEditorHeight);
+                    const spacing = element.style.lineSpacing || 24;
+                    const lineCount = Math.max(1, Math.floor((heightPx - 1) / spacing));
+                    finalH = ((lineCount * spacing + 1) / unscaledEditorHeight) * 100;
+                }
             } else if (element.type === 'habit_tracker') {
                 const heightPx = (h / 100 * unscaledEditorHeight);
                 const rowHeight = (element.style.habitMarkerSize || 16) + (element.style.habitSpacing || 4);
@@ -3704,6 +3776,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     table: { ...newElementConfig.style.table, rowHeight: newRowHeight } 
                 };
                 finalH = ((newRowHeight * rows) / unscaledEditorHeight) * 100;
+            }
+
+            let finalX = x;
+            let finalY = y;
+
+            const diffW_px = ((finalW - w) / 100) * editorRect.width;
+            const diffH_px = ((finalH - h) / 100) * editorRect.height;
+
+            if (Math.abs(diffW_px) > 0.01 || Math.abs(diffH_px) > 0.01) {
+                let localShiftX_px = 0;
+                let localShiftY_px = 0;
+
+                if (resizeDir.includes('e')) localShiftX_px += diffW_px / 2;
+                if (resizeDir.includes('w')) localShiftX_px -= diffW_px / 2;
+                if (resizeDir.includes('s')) localShiftY_px += diffH_px / 2;
+                if (resizeDir.includes('n')) localShiftY_px -= diffH_px / 2;
+
+                const rad = (rotation * Math.PI) / 180;
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+
+                const screenShiftX_px = localShiftX_px * cos - localShiftY_px * sin;
+                const screenShiftY_px = localShiftX_px * sin + localShiftY_px * cos;
+
+                const x_px = (x / 100) * editorRect.width;
+                const y_px = (y / 100) * editorRect.height;
+                const w_px = (w / 100) * editorRect.width;
+                const h_px = (h / 100) * editorRect.height;
+                const finalW_px = (finalW / 100) * editorRect.width;
+                const finalH_px = (finalH / 100) * editorRect.height;
+
+                const initialCenterX_px = x_px + w_px / 2;
+                const initialCenterY_px = y_px + h_px / 2;
+
+                const finalCenterX_px = initialCenterX_px + screenShiftX_px;
+                const finalCenterY_px = initialCenterY_px + screenShiftY_px;
+
+                const finalX_px = finalCenterX_px - finalW_px / 2;
+                const finalY_px = finalCenterY_px - finalH_px / 2;
+
+                finalX = (finalX_px / editorRect.width) * 100;
+                finalY = (finalY_px / editorRect.height) * 100;
             }
 
             newElementConfig.x = finalX; newElementConfig.y = finalY; newElementConfig.w = finalW; newElementConfig.h = finalH;
@@ -3808,6 +3922,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       };
     }
   }, [isDragging, resizeDir, resizingTableCol, resizingTableRow, marquee]);
+
+  const getRotatedCursor = (dir: string, rotation: number) => {
+      const baseAngles: Record<string, number> = {
+          'n': 0, 'ne': 45, 'e': 90, 'se': 135,
+          's': 180, 'sw': 225, 'w': 270, 'nw': 315
+      };
+      const baseAngle = baseAngles[dir] ?? 0;
+      const totalAngle = (baseAngle + rotation) % 360;
+      const normalizedAngle = totalAngle < 0 ? totalAngle + 360 : totalAngle;
+
+      const cursors = [
+          'n-resize', 'ne-resize', 'e-resize', 'se-resize',
+          's-resize', 'sw-resize', 'w-resize', 'nw-resize'
+      ];
+
+      const index = Math.round(normalizedAngle / 45) % 8;
+      return cursors[index];
+  };
 
   const renderResizeHandle = (cursor: string, dir: string) => {
       const pos: React.CSSProperties = { position: 'absolute', width: '8px', height: '8px', backgroundColor: 'white', border: '1px solid #4f46e5', borderRadius: '50%', zIndex: 50 };
@@ -4061,7 +4193,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             >
                 {isEditor && selectedIds.length === 1 && selectedIds[0] === el.id && (
                     <div className="no-print">
-                        {['nw','n','ne','e','se','s','sw','w'].map(d => renderResizeHandle(d+'-resize', d))}
+                        {(() => {
+                            const isSingleLine = el.type === 'lines' && !el.style.showTimes && (
+                                el.h < 3 || 
+                                (!el.style.rowCount || el.style.rowCount === 0) ||
+                                (el.style.lineSpacing && (el.h / 100 * EDITOR_HEIGHT_PX) <= el.style.lineSpacing)
+                            );
+                            const handles = isSingleLine ? ['w', 'e'] : ['nw','n','ne','e','se','s','sw','w'];
+                            return handles.map(d => renderResizeHandle(getRotatedCursor(d, el.style.rotation || 0), d));
+                        })()}
                         
                         {/* Floating Action Toolbar */}
                         <div 
@@ -4607,6 +4747,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const pageStyle = { width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm` };
     const borderStyle = showMargins ? 'border border-indigo-200 border-dashed' : '';
     let pageCount = 0;
+    const categoryRelativeCounters: Record<string, number> = {
+        iniciais: 0,
+        mensais: 0,
+        divisorias: 0,
+        miolo: 0
+    };
 
     const renderPageContainer = (
         children: React.ReactNode, 
@@ -4614,9 +4760,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         hideNumbers = false, 
         pageSpecificBg?: BackgroundConfig, 
         customPageStyle?: React.CSSProperties,
-        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard' = 'daily'
+        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard' = 'daily'
     ) => {
         pageCount++;
+        
+        let catKey: BackgroundCategoryType = 'miolo';
+        if (pageType === 'intro') catKey = 'iniciais';
+        else if (pageType === 'monthly_intro') catKey = 'mensais';
+        else if (pageType === 'divider' || pageType === 'divider_verso') catKey = 'divisorias';
+
+        categoryRelativeCounters[catKey] = (categoryRelativeCounters[catKey] || 0) + 1;
+        const catRelIndex = categoryRelativeCounters[catKey];
+
         if (countOnly) return <div key={key} />;
 
         if (limitStart !== undefined && limitEnd !== undefined) {
@@ -4634,7 +4789,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return (
             <div id={`preview-page-${pageCount}`} key={key} className="bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 transition-transform hover:scale-[1.01]" style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
-                {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg)}
+                {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg, catRelIndex)}
                 <div className="relative z-10 h-full w-full">
                     <div className="absolute -top-7 left-0 right-0 flex justify-between items-center no-print px-2 bg-indigo-900/5 py-1 rounded-t-lg">
                     <div className="flex items-center gap-1.5">
@@ -4747,7 +4902,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             false,
             versoBg,
             undefined,
-            'intro'
+            'divider_verso'
         );
     };
 
@@ -5856,13 +6011,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const progressPercent = Math.min(100, Math.round(((config.introPages.length + (config.monthlyIntroPages?.length || 0) * 12 + renderedPrintCount) / Math.max(1, totalPages)) * 100));
 
   const executePrint = useCallback(async () => {
-      const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
-        config.year !== 2026 && 
-        config.year !== 2027 && 
-        !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(
+          config.projectType,
+          config.year,
+          config.startMonth ?? 0,
+          config.durationMonths ?? 12,
+          user.plan
+      );
 
       if (isYearRestricted) {
-          alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
+          alert(`Desculpe! As configurações do arquivo englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
       setPdfExporting(true);
@@ -5981,13 +6139,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [actualTotalPagesCount, config, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, pdfScaleMode]);
 
   const executeVectorPrint = useCallback(async () => {
-      const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
-        config.year !== 2026 && 
-        config.year !== 2027 && 
-        !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(
+          config.projectType,
+          config.year,
+          config.startMonth ?? 0,
+          config.durationMonths ?? 12,
+          user.plan
+      );
 
       if (isYearRestricted) {
-          alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
+          alert(`Desculpe! As configurações do arquivo englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
       
@@ -7441,8 +7602,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       className="flex items-center text-xs font-medium text-indigo-700 hover:text-indigo-850 bg-indigo-50/50 hover:bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded shadow-sm transition-colors"
                       title="Instalar Agenda Master no Computador ou Celular"
                     >
-                      <Smartphone className="w-4 h-4 mr-1.5 text-indigo-600" />
-                      <span>Instalar App</span>
+                      <Monitor className="w-4 h-4 mr-1.5 text-indigo-600" />
+                      <span>Instalar no Computador</span>
                     </button>
                     <div className="h-5 w-px bg-gray-200"></div>
                   </>
@@ -7509,7 +7670,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 value={config.year} 
                                                 onChange={(e) => setConfig({ ...config, year: parseInt(e.target.value) || 2027 })} 
                                                 className={`flex-1 p-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold ${
-                                                  config.year !== 2026 && config.year !== 2027 && !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')))
+                                                  isProjectYearRestricted(config.projectType, config.year, config.startMonth ?? 0, config.durationMonths ?? 12, user.plan)
                                                     ? 'border-amber-400 bg-amber-50/25 text-amber-900' 
                                                     : 'border-gray-200 text-gray-700'
                                                 }`}
@@ -7519,25 +7680,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             </div>
                                         </div>
 
-                                        {(config.year !== 2026 && config.year !== 2027 && !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')))) && (
+                                        {(isProjectYearRestricted(config.projectType, config.year, config.startMonth ?? 0, config.durationMonths ?? 12, user.plan)) && (
                                             <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 leading-normal shadow-sm">
                                                 <p className="font-bold flex items-center gap-1 mb-1 text-amber-955">
-                                                    <Lock className="w-3 h-3 text-amber-600" /> Ano {config.year} Bloqueado
+                                                    <Lock className="w-3 h-3 text-amber-600" /> Período/Ano Restrito
                                                 </p>
-                                                <p>Geração de arquivos liberada apenas para <strong>2026 e 2027</strong> neste plano de assinatura.</p>
-                                                <p className="mt-1 font-semibold">Os botões de exportação e download do PDF foram desabilitados para este ano.</p>
+                                                <p>Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
+                                                <p className="mt-1 font-semibold">Os botões de exportação e download do PDF foram desabilitados para esta configuração.</p>
                                                 <div className="mt-2 flex gap-1.5">
                                                     <button 
-                                                        onClick={() => setConfig({ ...config, year: 2027 })} 
+                                                        onClick={() => setConfig({ ...config, year: 2027, startMonth: 0, durationMonths: 12 })} 
                                                         className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-0.5 px-2 rounded text-[9px] transition-colors"
                                                     >
-                                                        Voltar para 2027
+                                                        Ajustar para 2027 (12 Meses)
                                                     </button>
                                                     <button 
-                                                        onClick={() => setConfig({ ...config, year: 2026 })} 
+                                                        onClick={() => setConfig({ ...config, year: 2027, startMonth: 0, durationMonths: 13 })} 
                                                         className="bg-white hover:bg-gray-100 text-gray-700 font-bold py-0.5 px-2 rounded text-[9px] border border-gray-200 transition-colors"
                                                     >
-                                                        Voltar para 2026
+                                                        Jan/27 a Jan/28 (13 Meses)
                                                     </button>
                                                 </div>
                                             </div>
@@ -7607,7 +7768,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             onChange={(e) => setConfig({ ...config, durationMonths: parseInt(e.target.value) })} 
                                             className="w-full p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700 bg-white"
                                         >
-                                            {Array.from({ length: 24 }, (_, i) => i + 1).map(m => (
+                                            {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
                                                 <option key={m} value={m}>{m} {m === 1 ? 'mês' : 'meses'}</option>
                                             ))}
                                         </select>
@@ -8641,87 +8802,90 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
 
 
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    
-                                                 
+                                            {(() => {
+                                                const vis = getVisualBounds(selectedElement, usableWidthMM, usableHeightMM);
+                                                return (
+                                                    <div className="space-y-3 mb-3">
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição X (mm)</label>
+                                                                <input 
+                                                                    type="number" 
+                                                                    step="1"
+                                                                    value={Math.round(vis.x)} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        if (!isNaN(val)) {
+                                                                            const newRaw = setVisualBounds(selectedElement, { x: val }, usableWidthMM, usableHeightMM);
+                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                        }
+                                                                    }} 
+                                                                    className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição Y (mm)</label>
+                                                                <input 
+                                                                    type="number" 
+                                                                    step="1"
+                                                                    value={Math.round(vis.y)} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        if (!isNaN(val)) {
+                                                                            const newRaw = setVisualBounds(selectedElement, { y: val }, usableWidthMM, usableHeightMM);
+                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                        }
+                                                                    }} 
+                                                                    className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                />
+                                                            </div>
+                                                        </div>
 
-
-                                             <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição X (mm)</label>
-                                                    <input 
-                                                        type="number" 
-                                                        step="1"
-                                                        value={Math.round((selectedElement.x / 100) * usableWidthMM)} 
-                                                        onChange={(e) => {
-                                                            const val = parseFloat(e.target.value);
-                                                            if (!isNaN(val)) {
-                                                                const percentage = (val / usableWidthMM) * 100;
-                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, x: percentage} : el));
-                                                            }
-                                                        }} 
-                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição Y (mm)</label>
-                                                    <input 
-                                                        type="number" 
-                                                        step="1"
-                                                        value={Math.round((selectedElement.y / 100) * usableHeightMM)} 
-                                                        onChange={(e) => {
-                                                            const val = parseFloat(e.target.value);
-                                                            if (!isNaN(val)) {
-                                                                const percentage = (val / usableHeightMM) * 100;
-                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, y: percentage} : el));
-                                                            }
-                                                        }} 
-                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Largura (mm)</label>
-                                                    <div className="flex items-center gap-1">
-                                                        <input 
-                                                            type="number" 
-                                                            min="5" 
-                                                            max={usableWidthMM} 
-                                                            step="1"
-                                                            value={Math.round((selectedElement.w / 100) * usableWidthMM)} 
-                                                            onChange={(e) => {
-                                                                const val = parseFloat(e.target.value);
-                                                                if (!isNaN(val)) {
-                                                                    const percentage = (val / usableWidthMM) * 100;
-                                                                    updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, w: percentage} : el));
-                                                                }
-                                                            }} 
-                                                            className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                        />
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Largura (mm)</label>
+                                                                <div className="flex items-center gap-1">
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="1" 
+                                                                        max={usableWidthMM * 2} 
+                                                                        step="1"
+                                                                        value={Math.round(vis.w)} 
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            if (!isNaN(val)) {
+                                                                                const newRaw = setVisualBounds(selectedElement, { w: val }, usableWidthMM, usableHeightMM);
+                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                            }
+                                                                        }} 
+                                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Altura (mm)</label>
+                                                                <div className="flex items-center gap-1">
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="1" 
+                                                                        max={usableHeightMM * 2} 
+                                                                        step="1"
+                                                                        value={Math.round(vis.h)} 
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            if (!isNaN(val)) {
+                                                                                const newRaw = setVisualBounds(selectedElement, { h: val }, usableWidthMM, usableHeightMM);
+                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                            }
+                                                                        }} 
+                                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Altura (mm)</label>
-                                                    <div className="flex items-center gap-1">
-                                                        <input 
-                                                            type="number" 
-                                                            min="2" 
-                                                            max={usableHeightMM} 
-                                                            step="1"
-                                                            value={Math.round((selectedElement.h / 100) * usableHeightMM)} 
-                                                            onChange={(e) => {
-                                                                const val = parseFloat(e.target.value);
-                                                                if (!isNaN(val)) {
-                                                                    const percentage = (val / usableHeightMM) * 100;
-                                                                    updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, h: percentage} : el));
-                                                                }
-                                                            }} 
-                                                            className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
+                                                );
+                                            })()}
 
                                             <div className="pt-2 border-t border-gray-100">
                                                 <div className="flex items-center justify-between mb-1.5">
@@ -10625,6 +10789,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </select>
                                                         </div>
                                                     )}
+                                                    {((selectedElement.type === 'day_name' || selectedElement.type === 'month_name') || 
+                                                      (selectedElement.type === 'date_placeholder' && ['day_name', 'month_name'].includes(selectedElement.style.variant || '')) ||
+                                                      selectedElement.type === 'permanent_day_header' ||
+                                                      selectedElement.type === 'planner_day_box') && (
+                                                        <div className="space-y-1 mb-2 pt-2 border-t border-gray-100">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Formato / Abreviação</label>
+                                                            <select 
+                                                                value={selectedElement.style.nameFormat || 'full'} 
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    if (selectedElement.type === 'planner_day_box') {
+                                                                        updateElementStyle(selectedElement.id, { 
+                                                                            nameFormat: val,
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, nameFormat: val }
+                                                                        });
+                                                                    } else {
+                                                                        updateElementStyle(selectedElement.id, { nameFormat: val });
+                                                                    }
+                                                                }} 
+                                                                className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white shadow-sm font-medium text-gray-700"
+                                                            >
+                                                                <option value="full">Nome Completo (ex: Terça-feira / Janeiro)</option>
+                                                                <option value="no_feira">Sem "-feira" (ex: Terça / Segunda)</option>
+                                                                <option value="short">Abreviação 3 Letras (ex: Ter / Jan)</option>
+                                                                <option value="two_letters">Abreviação 2 Letras (ex: Te / Ja)</option>
+                                                                <option value="initial">Abreviação 1 Letra (ex: T / J)</option>
+                                                                <option value="ordinal_full">Ordinal Completo (ex: 3ª-feira)</option>
+                                                                <option value="ordinal_short">Ordinal Curto (ex: 3ª / 2ª)</option>
+                                                            </select>
+                                                        </div>
+                                                    )}
                                                     {selectedElement.type === 'moon' && (
                                                         <div className="space-y-1 mb-2">
                                                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Estilo da Lua</label>
@@ -11450,82 +11645,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             )}
                                             
                                             <BackgroundSettings 
-                                                activeBgIndex={activeBgIndex}
-                                                onActiveIndexChange={setActiveBgIndex}
-                                                config={editMode === 'intro' 
-                                                    ? config.introPages.find(p => p.id === currentIntroPageId)?.background || config.background 
-                                                    : editMode === 'monthly_intro'
-                                                    ? config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId)?.background || config.background
-                                                    : editMode === 'divider'
-                                                    ? (dividerViewMode === 'verso' ? config.monthlyDividerStyle?.versoBackground || config.background : config.monthlyDividerStyle?.background || config.background)
-                                                    : (config.backgrounds?.[0] || config.background)
-                                                }
-                                                configs={editMode === 'daily' 
-                                                    ? (config.backgrounds && config.backgrounds.length > 0 
-                                                        ? config.backgrounds 
-                                                        : [config.background || { id: 'bg_default', type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true, targetType: 'all', pageFilter: 'all' }]) 
-                                                    : undefined
-                                                }
-                                                onConfigsChange={editMode === 'daily' ? (newConfigs) => {
+                                                agendaConfig={config}
+                                                onAgendaConfigChange={(newCfg) => {
                                                     pushHistory();
-                                                    setConfig(prev => ({
-                                                        ...prev,
-                                                        backgrounds: newConfigs,
-                                                        background: newConfigs[0] || prev.background
-                                                    }));
-                                                } : undefined}
-                                                onChange={(updates) => {
-                                                    pushHistory();
-                                                    if (editMode === 'intro' && currentIntroPageId) {
-                                                        setConfig(prev => ({
-                                                            ...prev,
-                                                            introPages: prev.introPages.map(p => p.id === currentIntroPageId 
-                                                                ? { ...p, background: { ...(p.background || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates } } 
-                                                                : p
-                                                            )
-                                                        }));
-                                                    } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
-                                                        setConfig(prev => ({
-                                                            ...prev,
-                                                            monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId 
-                                                                ? { ...p, background: { ...(p.background || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates } } 
-                                                                : p
-                                                            )
-                                                        }));
-                                                    } else if (editMode === 'divider') {
-                                                        if (dividerViewMode === 'verso') {
-                                                            setConfig(prev => ({
-                                                                ...prev,
-                                                                monthlyDividerStyle: {
-                                                                    ...(prev.monthlyDividerStyle || {}),
-                                                                    versoBackground: { ...(prev.monthlyDividerStyle?.versoBackground || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates }
-                                                                }
-                                                            }));
-                                                        } else {
-                                                            setConfig(prev => ({
-                                                                ...prev,
-                                                                monthlyDividerStyle: {
-                                                                    ...(prev.monthlyDividerStyle || {}),
-                                                                    background: { ...(prev.monthlyDividerStyle?.background || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates }
-                                                                }
-                                                            }));
-                                                        }
-                                                    } else {
-                                                        setConfig(prev => {
-                                                            const currentBgs = prev.backgrounds && prev.backgrounds.length > 0 
-                                                                ? prev.backgrounds 
-                                                                : [prev.background || { id: 'bg_1', type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true, targetType: 'all', pageFilter: 'all' }];
-                                                            const updatedBgs = [...currentBgs];
-                                                            const targetIdx = (activeBgIndex !== undefined && activeBgIndex < updatedBgs.length) ? activeBgIndex : 0;
-                                                            updatedBgs[targetIdx] = { ...updatedBgs[targetIdx], ...updates };
-                                                            return {
-                                                                ...prev,
-                                                                backgrounds: updatedBgs,
-                                                                background: updatedBgs[0]
-                                                            };
-                                                        });
-                                                    }
+                                                    setConfig(newCfg);
                                                 }}
+                                                currentEditorPageNum={editorParityToggle === 'even' ? 2 : 1}
+                                                pushHistory={pushHistory}
                                             />
 
                                             {editMode !== 'daily' && (
@@ -11718,7 +11844,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         onChange={(e) => handleScrollToMonth(parseInt(e.target.value))}
                                                     >
                                                         <option value="">Pular para Mês...</option>
-                                                        {Array.from({length: 12}).map((_, i) => (<option key={i} value={i}>{getMonthName(i)}</option>))}
+                                                        {Array.from({length: config.durationMonths || 12}).map((_, i) => {
+                                                            const mIdx = ((config.startMonth ?? 0) + i) % 12;
+                                                            const yearOffset = Math.floor(((config.startMonth ?? 0) + i) / 12);
+                                                            const mYear = config.year + yearOffset;
+                                                            const mName = getMonthName(mIdx);
+                                                            return (
+                                                                <option key={i} value={i}>
+                                                                    {mName} {(config.durationMonths > 12 || yearOffset > 0) ? `(${mYear})` : ''}
+                                                                </option>
+                                                            );
+                                                        })}
                                                     </select>
                                                 </div>
                                             </div>

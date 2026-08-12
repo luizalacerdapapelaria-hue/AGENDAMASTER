@@ -19,7 +19,7 @@ const getFont = (fontName: string | undefined, weight: string | number | undefin
     return { font: 'helvetica', style };
 };
 
-const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, quote: string | undefined, verse: string | undefined, safeAreaW: number, safeAreaH: number, offsetX: number, offsetY: number) => {
+const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, quote: string | undefined, verse: string | undefined, safeAreaW: number, safeAreaH: number, offsetX: number, offsetY: number, week?: DayData[]) => {
     const { x, y, w, h, style } = el;
     const absX = (x / 100) * safeAreaW + offsetX;
     const absY = (y / 100) * safeAreaH + offsetY;

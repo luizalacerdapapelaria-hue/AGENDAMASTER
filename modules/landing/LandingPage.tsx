@@ -336,7 +336,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                         onClick={() => onNavigate(AppState.LOGIN)}
                         className="w-full py-1.5 bg-indigo-600 text-white font-extrabold text-[9px] rounded-lg uppercase cursor-pointer"
                       >
-                        QUERO ADQUIRIR MEU ACESSO
+                        ACESSAR NO NAVEGADOR
                       </button>
                     </div>
 
@@ -354,7 +354,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                         onClick={() => onNavigate(AppState.LOGIN)}
                         className="w-full py-1.5 bg-amber-600 text-white font-extrabold text-[9px] rounded-lg uppercase cursor-pointer"
                       >
-                        QUERO ADQUIRIR MEU ACESSO
+                        INSTALAR NO COMPUTADOR
                       </button>
                     </div>
                   </div>

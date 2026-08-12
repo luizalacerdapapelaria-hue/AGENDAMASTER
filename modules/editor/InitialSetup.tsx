@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType } from '../../types';
 import { FileText, BookOpen, ArrowRight, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap } from 'lucide-react';
 import { importProject } from '../../core/logic/fileSystem';
+import { isProjectYearRestricted } from '../../core/backend/calendar';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
@@ -139,14 +140,19 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
     try {
       const importedConfig = await importProject(file);
-      const isImportedYearRestricted = !(importedConfig.projectType === 'notebook' || importedConfig.projectType === 'devotional') && 
-        importedConfig.year !== 2026 && 
-        importedConfig.year !== 2027 && 
-        !(importedConfig.year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')));
+      const isImportedYearRestricted = isProjectYearRestricted(
+        importedConfig.projectType, 
+        importedConfig.year || 2027, 
+        importedConfig.startMonth || 0, 
+        importedConfig.durationMonths || 12, 
+        userPlan
+      );
 
       if (isImportedYearRestricted) {
-          alert(`O ano ${importedConfig.year} deste projeto importado está bloqueado no seu plano de assinatura. Reajustando para 2027 para permitir o uso.`);
+          alert(`As configurações do projeto importado (ano ${importedConfig.year}, ${importedConfig.durationMonths || 12} meses) excedem o limite permitido do seu plano de assinatura (no máximo 1 mês de 2028). Reajustando para 2027 para permitir o uso.`);
           importedConfig.year = 2027;
+          importedConfig.startMonth = 0;
+          importedConfig.durationMonths = 12;
       }
       onComplete(importedConfig);
     } catch (err) {
@@ -157,13 +163,10 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const handleSubmit = () => {
-      const isYearRestricted = !(projectType === 'notebook' || projectType === 'devotional') && 
-        year !== 2026 && 
-        year !== 2027 && 
-        !(year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan);
 
       if (isYearRestricted) {
-          alert(`O ano de referência ${year} está bloqueado na sua assinatura anual. Para preencher miolos de agenda/planner neste ano, é necessário renovar o seu pacote anual. Atualmente você pode gerar livremente agendas de 2026 e 2027.`);
+          alert(`As configurações selecionadas (ano ${year}, mês inicial ${['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][startMonth]}, duração ${durationMonths} meses) englobam mais de 1 mês de 2028, o que está bloqueado na sua assinatura anual. Para agendas de 2027, é permitido no máximo até Janeiro/2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028, é necessária a renovação da sua assinatura.`);
           return;
       }
       
@@ -752,34 +755,34 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     value={year} 
                                     onChange={(e) => setYear(parseInt(e.target.value) || 2027)} 
                                     className={`w-full p-2 border rounded focus:ring-2 focus:ring-orange-500 outline-none text-lg font-bold ${
-                                      year !== 2026 && year !== 2027 && !(year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')))
+                                      isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan)
                                          ? 'border-amber-400 bg-amber-50/20 text-amber-900' 
                                          : 'border-gray-300 text-gray-700'
                                     }`}
                                 />
                                 <p className="text-xs text-gray-400 mt-1">Define os feriados nacionais automaticamente.</p>
 
-                                {(year !== 2026 && year !== 2027 && !(year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')))) && (
+                                {isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan) && (
                                     <div className="mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 leading-relaxed shadow-sm">
                                         <p className="font-bold flex items-center gap-1.5 mb-1 text-amber-950">
-                                            <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 animate-pulse" /> Assinatura Anual Requerida para {year}
+                                            <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 animate-pulse" /> Assinatura Requerida para {year}
                                         </p>
-                                        <p>Seu plano atual para geração de agendas e planners cobre somente os anos de <strong>2026 e 2027</strong>.</p>
-                                        <p className="mt-1 font-semibold">Renove sua assinatura para desbloquear e liberar o ano de {year} em diante!</p>
+                                        <p>Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
+                                        <p className="mt-1 font-semibold">Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura anual!</p>
                                         <div className="mt-2.5 flex gap-2">
                                             <button 
                                                 type="button"
-                                                onClick={() => setYear(2027)} 
+                                                onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(12); }} 
                                                 className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-1 px-2.5 rounded text-[10px] transition-colors"
                                             >
-                                                Ajustar para 2027 (Liberado)
+                                                Ajustar para 2027 (12 meses)
                                             </button>
                                             <button 
                                                 type="button"
-                                                onClick={() => setYear(2026)} 
+                                                onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(13); }} 
                                                 className="bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold py-1 px-2.5 rounded text-[10px] border border-gray-200 transition-colors"
                                             >
-                                                Ajustar para 2026 (Liberado)
+                                                Jan/27 a Jan/28 (13 meses)
                                             </button>
                                         </div>
                                     </div>
@@ -810,7 +813,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     onChange={(e) => setDurationMonths(parseInt(e.target.value))}
                                     className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 outline-none text-sm font-bold text-gray-755 bg-white"
                                 >
-                                    {Array.from({ length: 24 }, (_, i) => i + 1).map(m => (
+                                    {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
                                         <option key={m} value={m}>{m} {m === 1 ? 'mês' : 'meses'}</option>
                                     ))}
                                 </select>

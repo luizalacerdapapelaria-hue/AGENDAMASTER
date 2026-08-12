@@ -121,6 +121,7 @@ export interface LayoutElement {
     autoMirrorImage?: boolean; // Novo: Espelhar automaticamente em páginas espelhadas (pares)
     simulateMaxSpace?: boolean; // Novo: Simular maior ocupação de espaço para testes de layout
     variant?: string;
+    nameFormat?: 'full' | 'short' | 'initial' | string; // Formato de nome/abreviação (Completo, 3 letras, 1 letra)
     fillOpacity?: number; // Transparência do preenchimento (0 a 1)
     strokeOpacity?: number; // Transparência da borda (0 a 1)
     shapeType?: 'rectangle' | 'circle' | 'triangle' | 'star' | 'heart' | 'arrow' | 'diamond' | 'hexagon' | 'octagon' | 'pentagon' | 'parallelogram' | 'trapezoid' | 'cloud' | 'shield'; // Tipos de formas vetoriais
@@ -245,6 +246,21 @@ export interface LayoutElement {
   };
 }
 
+export interface CategoryBackgroundConfig {
+    default?: BackgroundConfig; // Fundo padrão da categoria
+    even?: BackgroundConfig;    // Fundo das páginas pares da categoria (Esquerda)
+    odd?: BackgroundConfig;     // Fundo das páginas ímpares da categoria (Direita)
+}
+
+export interface BackgroundRulesConfig {
+    global?: BackgroundConfig;                             // 1. Fundo de toda a agenda
+    miolo?: CategoryBackgroundConfig;                      // 2. Fundo do Miolo
+    mensais?: CategoryBackgroundConfig;                    // 3. Fundo das Páginas Mensais
+    divisorias?: CategoryBackgroundConfig;                 // 4. Fundo das Divisórias Mensais
+    iniciais?: CategoryBackgroundConfig;                   // 5. Fundo das Páginas Iniciais
+    specificPages?: Record<number, BackgroundConfig>;      // 6. Fundo de Páginas Específicas (ex: página 37)
+}
+
 export interface BackgroundConfig {
     id?: string;
     name?: string;
@@ -331,6 +347,7 @@ export interface AgendaConfig {
   startOfWeekDay?: number; // Dia de início da semana para calendários (0-6)
   background?: BackgroundConfig; // Fundo global padrão (legado)
   backgrounds?: BackgroundConfig[]; // Lista de múltiplos planos de fundo globais
+  backgroundRules?: BackgroundRulesConfig; // Sistema de regras hierárquicas de plano de fundo
   customVerso?: boolean; // Se true, permite personalizar o verso com um layout diferente da frente
   versoAdvancesSequence?: boolean; // Se false, mantém a mesma data da frente no verso (não pula a sequência de dias)
   disableSequenceSkip?: boolean; // Se true, não insere páginas em branco/preenchimento para alinhar sequência

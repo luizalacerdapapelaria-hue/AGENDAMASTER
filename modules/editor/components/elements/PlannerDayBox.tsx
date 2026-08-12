@@ -2,7 +2,7 @@
 import React from 'react';
 import { Moon, Circle } from 'lucide-react';
 import { LayoutElement, DayData } from '../../../../types';
-import { getMonthName } from '../../../../core/backend/calendar';
+import { getMonthName, getDayName } from '../../../../core/backend/calendar';
 
 interface PlannerDayBoxProps {
     element: LayoutElement;
@@ -55,8 +55,8 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
 
     const dashArray = strokeStyle === 'dashed' ? '2,2' : (strokeStyle === 'dotted' ? '0.5,1.5' : 'none');
 
-    const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-    let dayName = dayNames[d.dayOfWeek];
+    const nameFormat = (plannerDayBox as any).nameFormat || element.style.nameFormat || 'full';
+    let dayName = getDayName(d.dayOfWeek, nameFormat);
     
     if (dayNameCase === 'uppercase') dayName = dayName.toUpperCase();
     if (dayNameCase === 'lowercase') dayName = dayName.toLowerCase();
