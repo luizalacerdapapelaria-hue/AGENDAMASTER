@@ -1,6 +1,7 @@
 
 import React, { memo } from 'react';
 import { LayoutElement, DayData, Holiday } from '../../../types';
+import { checkIsHoliday } from '../../../core/backend/calendar';
 import { TableElement } from './elements/Tables';
 import { CalendarElement } from './elements/Calendars';
 import { ShapeElement } from './elements/Shapes';
@@ -31,7 +32,7 @@ interface ElementRendererProps {
   calendarIndex?: number;
 }
 
-const getShiftedDayData = (baseDay: DayData, offset: number): DayData => {
+const getShiftedDayData = (baseDay: DayData, offset: number, municipalHolidays: Holiday[] = []): DayData => {
     if (!offset || offset === 0 || !baseDay) return baseDay;
     if (!baseDay.date) {
         return {
@@ -41,13 +42,19 @@ const getShiftedDayData = (baseDay: DayData, offset: number): DayData => {
     }
     const targetDate = new Date(baseDay.date);
     targetDate.setDate(targetDate.getDate() + offset);
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth();
+    const day = targetDate.getDate();
+    const holidayName = checkIsHoliday(year, month, day, municipalHolidays);
+
     return {
         ...baseDay,
-        dayOfMonth: targetDate.getDate(),
-        month: targetDate.getMonth(),
-        year: targetDate.getFullYear(),
+        dayOfMonth: day,
+        month: month,
+        year: year,
         dayOfWeek: targetDate.getDay(),
-        date: targetDate
+        date: targetDate,
+        holiday: holidayName
     };
 };
 
@@ -246,12 +253,12 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
           }
 
           if (!targetDay && props.dayData && dayIndex > 0) {
-              targetDay = getShiftedDayData(props.dayData, dayIndex);
+              targetDay = getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays);
           } else if (!targetDay) {
               targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0) };
           }
       } else if (dayIndex !== undefined && dayIndex > 0 && props.dayData) {
-          targetDay = getShiftedDayData(props.dayData, dayIndex);
+          targetDay = getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays);
       } else {
           targetDay = props.dayData;
       }

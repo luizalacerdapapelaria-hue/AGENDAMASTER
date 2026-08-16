@@ -1,5 +1,5 @@
 {
-  "version": "1.0.8",
-  "releaseDate": "2026-07-30",
-  "notes": "Versão 1.0.8 com correções de margem, alinhamento espelhado e exportação PDF de páginas pares/ímpares."
+  "version": "0.9",
+  "releaseDate": "2026-08-11",
+  "notes": "Versão 0.9 com melhorias no layout de Frente e Verso e exportação em alta qualidade."
 }

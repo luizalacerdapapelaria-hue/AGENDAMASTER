@@ -142,7 +142,9 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         const totalRows = filteredWeeks.length + 1; 
         
         const showYear = effectiveStyle?.showYearInTitle ?? (element.type === 'full_calendar'); 
-        const titleText = showYear ? `${getMonthName(monthIndex)} ${year}` : getMonthName(monthIndex);
+        const monthFormat = element.style.nameFormat || (effectiveStyle as any)?.monthFormat;
+        const monthName = getMonthName(monthIndex, monthFormat);
+        const titleText = showYear ? `${monthName} ${year}` : monthName;
   
         const titleTransform = titleStyle.textTransform;
         const isTitleSentenceOrCapitalize = titleTransform === 'sentence' || titleTransform === 'capitalize';

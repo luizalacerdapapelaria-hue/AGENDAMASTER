@@ -5,10 +5,11 @@ import Login from './modules/auth/Login';
 import { Welcome } from './modules/auth/Welcome';
 import { Dashboard } from './modules/editor/Dashboard';
 import { InitialSetup } from './modules/editor/InitialSetup';
+import { LandingPage } from './modules/landing/LandingPage';
 import { UpdateNotifier } from './modules/editor/components/UpdateNotifier';
 import { User, AppState, AgendaConfig } from './types';
 import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from './services/supabase';
-import { Wrench, Sparkles, Layout, LogIn, ChevronDown, ChevronUp, UserCheck, Settings } from 'lucide-react';
+import { Wrench, Sparkles, Layout, LogIn, ChevronDown, ChevronUp, UserCheck, Settings, Globe } from 'lucide-react';
 
 const App: React.FC = () => {
   const isElectron = typeof window !== 'undefined' && (
@@ -16,15 +17,70 @@ const App: React.FC = () => {
     !!(window as any).electronAPI?.isElectron
   );
 
+  const getInitialAppState = (): AppState => {
+    if (isElectron) return AppState.LOGIN;
+    if (typeof window !== 'undefined') {
+      const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
+      const search = new URLSearchParams(window.location.search);
+      const pageParam = (search.get('page') || '').toLowerCase();
+
+      if (path === '/agendamaster' || path.endsWith('/agendamaster') || pageParam === 'agendamaster' || pageParam === 'landing') {
+        return AppState.LANDING;
+      }
+      if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
+        return AppState.LOGIN;
+      }
+      if (path === '/welcome' || pageParam === 'welcome') {
+        return AppState.WELCOME;
+      }
+    }
+    return AppState.WELCOME;
+  };
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [appState, setAppState] = useState<AppState>(isElectron ? AppState.LOGIN : AppState.WELCOME);
+  const [appState, setAppState] = useState<AppState>(getInitialAppState);
   const [initialConfig, setInitialConfig] = useState<Partial<AgendaConfig> | undefined>(undefined);
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
-    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/vers%C3%A3o8/Agenda.Master.Setup.1.0.8.exe';
+    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.0.9/Agenda.Master.Setup.0.9.0.exe';
   });
 
   const verifiedEmailRef = React.useRef<string | null>(null);
+
+  // Sync browser URL with application state for clean addresses like /agendamaster and /acesso
+  const navigateToState = (targetState: AppState) => {
+    setAppState(targetState);
+    if (typeof window !== 'undefined' && window.history && !isElectron) {
+      if (targetState === AppState.LANDING) {
+        window.history.pushState({ state: 'landing' }, '', '/agendamaster');
+      } else if (targetState === AppState.LOGIN) {
+        window.history.pushState({ state: 'acesso' }, '', '/acesso');
+      } else if (targetState === AppState.WELCOME) {
+        window.history.pushState({ state: 'welcome' }, '', '/');
+      }
+    }
+  };
+
+  // Handle browser back/forward button
+  useEffect(() => {
+    if (isElectron) return;
+    const handlePopState = () => {
+      const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
+      const search = new URLSearchParams(window.location.search);
+      const pageParam = (search.get('page') || '').toLowerCase();
+
+      if (path === '/agendamaster' || path.endsWith('/agendamaster') || pageParam === 'agendamaster' || pageParam === 'landing') {
+        setAppState(AppState.LANDING);
+      } else if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
+        setAppState(AppState.LOGIN);
+      } else if (path === '/welcome' || pageParam === 'welcome') {
+        setAppState(AppState.WELCOME);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isElectron]);
 
   // Global network error fallback interceptor to prevent "Failed to fetch" from bubbling up as uncaught rejections/exceptions
   useEffect(() => {
@@ -341,7 +397,7 @@ const App: React.FC = () => {
   return (
     <>
       {appState === AppState.WELCOME && (
-        <Welcome onChooseBrowser={() => setAppState(AppState.LOGIN)} exeUrl={exeUrl} />
+        <Welcome onChooseBrowser={() => navigateToState(AppState.LOGIN)} exeUrl={exeUrl} />
       )}
 
       {appState === AppState.LOGIN && (
@@ -364,6 +420,13 @@ const App: React.FC = () => {
             initialConfig={initialConfig} 
             onLogout={handleLogout} 
             onConfigure={handleConfigure}
+        />
+      )}
+
+      {appState === AppState.LANDING && (
+        <LandingPage 
+            onNavigate={(state) => navigateToState(state)} 
+            exeUrl={exeUrl} 
         />
       )}
 
@@ -395,6 +458,21 @@ const App: React.FC = () => {
 
                 {/* Navigation Actions buttons */}
                 <div className="grid grid-cols-1 gap-2">
+                  <button
+                    onClick={() => setDevState(AppState.LANDING)}
+                    className={`w-full flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-semibold uppercase tracking-wider transition-all ${
+                      appState === AppState.LANDING 
+                        ? 'bg-slate-800 border-orange-500 text-orange-300 shadow-sm' 
+                        : 'bg-slate-800/40 border-slate-700 hover:bg-slate-800 hover:border-slate-650 text-slate-200'
+                    }`}
+                  >
+                    <Globe className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="leading-tight">Landing Page</p>
+                      <span className="text-[9px] text-slate-400 font-normal normal-case">Apresentação do Agenda Master AI</span>
+                    </div>
+                  </button>
+
                   <button
                     onClick={() => setDevState(AppState.WELCOME)}
                     className={`w-full flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-semibold uppercase tracking-wider transition-all ${

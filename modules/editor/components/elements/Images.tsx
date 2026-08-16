@@ -19,8 +19,12 @@ export const ImageElement: React.FC<BaseElementProps> = ({ element, isEditor, pa
     );
   }
 
+  const dropShadowFilter = style.boxShadow && style.boxShadow !== 'none'
+    ? (style.boxShadow === 'sm' ? 'drop-shadow(0px 2px 4px rgba(0,0,0,0.18))' : style.boxShadow === 'md' ? 'drop-shadow(0px 5px 8px rgba(0,0,0,0.22))' : style.boxShadow === 'lg' ? 'drop-shadow(0px 10px 15px rgba(0,0,0,0.28))' : 'none')
+    : undefined;
+
   return (
-    <div className="w-full h-full overflow-visible flex items-center justify-center" style={{ opacity: style.opacity ?? 1 }}>
+    <div className="w-full h-full overflow-visible flex items-center justify-center" style={{ opacity: style.opacity ?? 1, filter: dropShadowFilter }}>
       <img 
         src={imageSrc} 
         alt={element.name}

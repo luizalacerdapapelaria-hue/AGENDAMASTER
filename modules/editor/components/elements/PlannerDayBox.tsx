@@ -2,7 +2,7 @@
 import React from 'react';
 import { Moon, Circle } from 'lucide-react';
 import { LayoutElement, DayData } from '../../../../types';
-import { getMonthName } from '../../../../core/backend/calendar';
+import { getMonthName, getDayName } from '../../../../core/backend/calendar';
 
 interface PlannerDayBoxProps {
     element: LayoutElement;
@@ -38,6 +38,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
         contentStyle, 
         lineSpacing = 20, 
         gridSpacing = 20, 
+        showHeader = true,
         showDayNumber = true, 
         showDayName = true,
         dayNameCase = 'capitalize',
@@ -55,8 +56,8 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
 
     const dashArray = strokeStyle === 'dashed' ? '2,2' : (strokeStyle === 'dotted' ? '0.5,1.5' : 'none');
 
-    const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-    let dayName = dayNames[d.dayOfWeek];
+    const nameFormat = (plannerDayBox as any).nameFormat || element.style.nameFormat || 'full';
+    let dayName = getDayName(d.dayOfWeek, nameFormat);
     
     if (dayNameCase === 'uppercase') dayName = dayName.toUpperCase();
     if (dayNameCase === 'lowercase') dayName = dayName.toLowerCase();
@@ -65,7 +66,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
         // Subtract border width (1px on each side = 2px total)
         const boxWidth = Math.max(1, (pageWidth * (element.w / 100)) - 2);
         const boxHeight = Math.max(1, (pageHeight * (element.h / 100)) - 2);
-        const headerH = (headerHeight / 100) * boxHeight;
+        const headerH = showHeader ? (headerHeight / 100) * boxHeight : 0;
         const contentHeight = Math.max(1, boxHeight - headerH);
 
         // Note: The SVG is rendered inside a flex-1 div, so y=0 is already at the bottom of the header.
@@ -79,7 +80,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
 
             for (let i = 0; i <= rows; i++) {
                 const y = i * actualSpacing;
-                lines.push(<line key={i} x1="0" y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} style={{ vectorEffect: 'non-scaling-stroke' }} />);
+                lines.push(<line key={i} x1="0" y1={y} x2="100%" y2={y} stroke={plannerDayBox.hideLines ? 'transparent' : strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} style={{ vectorEffect: 'non-scaling-stroke' }} />);
             }
             return <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{lines}</svg>;
         }
@@ -129,39 +130,72 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
         }
 
         if (contentStyle === 'timetable') {
-            const lines = [];
-            const labels = [];
-            const startH = plannerDayBox.startHour ?? 7;
-            const spacing = Math.max(5, (lineSpacing / 100) * 100);
-            const rows = Math.max(1, Math.round(contentHeight / spacing));
-            const actualSpacing = contentHeight / rows;
+            const startH = plannerDayBox.startHour !== undefined ? plannerDayBox.startHour : 7;
+            const endH = plannerDayBox.endHour !== undefined ? plannerDayBox.endHour : 18;
+            const intervalM = plannerDayBox.timeInterval || 60;
 
-            for (let i = 0; i <= rows; i++) {
-                const y = i * actualSpacing;
-                lines.push(<line key={`l-${i}`} x1="0" y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} style={{ vectorEffect: 'non-scaling-stroke' }} />);
-                if (i < rows) {
-                    labels.push(
-                        <div 
-                            key={`t-${i}`} 
-                            className="absolute left-0.5 select-none pointer-events-none"
-                            style={{ 
-                                top: `${y + 1}px`, 
-                                transform: 'translateY(0%)', 
-                                fontFamily: plannerDayBox.fontFamily || 'monospace',
-                                fontSize: plannerDayBox.fontSize !== undefined ? `${plannerDayBox.fontSize * scaleFactor}px` : `${Math.max(4, 8 * scaleFactor)}px`,
-                                fontWeight: plannerDayBox.fontWeight || 'normal',
-                                color: plannerDayBox.color || '#9ca3af'
-                            }}
-                        >
-                            {String(startH + i).padStart(2, '0')}:00
-                        </div>
-                    );
-                }
+            const startMin = startH * 60;
+            const endMin = endH * 60;
+            const timesList: string[] = [];
+
+            for (let min = startMin; min <= endMin; min += intervalM) {
+                const hourPart = Math.floor(min / 60) % 24;
+                const minPart = min % 60;
+                timesList.push(`${String(hourPart).padStart(2, '0')}:${String(minPart).padStart(2, '0')}`);
             }
+
+            const heightPercent = plannerDayBox.timetableHeightPercent !== undefined ? plannerDayBox.timetableHeightPercent : 100;
+            const delimitedHeight = Math.max(10, (contentHeight * heightPercent) / 100);
+
+            const isDistribute = plannerDayBox.timetableFit === 'distribute';
+            let rowSpacing = Math.max(8, (lineSpacing || 20) * scaleFactor);
+            let lineCount = timesList.length;
+
+            if (isDistribute && timesList.length > 0) {
+                rowSpacing = delimitedHeight / timesList.length;
+            } else {
+                const maxFitting = Math.floor((delimitedHeight + 1) / rowSpacing);
+                lineCount = Math.min(timesList.length, Math.max(1, maxFitting));
+            }
+
+            const fontSz = plannerDayBox.fontSize !== undefined 
+                ? plannerDayBox.fontSize * scaleFactor 
+                : Math.max(4, 8 * scaleFactor);
+
             return (
-                <div className="absolute inset-0 w-full h-full">
-                    <svg className="w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{lines}</svg>
-                    {labels}
+                <div 
+                    className="absolute top-0 left-0 w-full overflow-hidden flex flex-col pointer-events-none"
+                    style={{ height: `${delimitedHeight}px` }}
+                >
+                    {Array(lineCount).fill(0).map((_, i) => (
+                        <div 
+                            key={i} 
+                            className="w-full flex items-end relative shrink-0" 
+                            style={{ height: `${rowSpacing}px` }}
+                        >
+                            <span 
+                                className="shrink-0 pl-1 pr-1.5 select-none font-mono" 
+                                style={{ 
+                                    fontFamily: plannerDayBox.fontFamily || 'monospace',
+                                    fontSize: `${fontSz}px`,
+                                    fontWeight: plannerDayBox.fontWeight || 'normal',
+                                    color: plannerDayBox.color || '#6b7280',
+                                    lineHeight: 1,
+                                    marginBottom: '2px'
+                                }}
+                            >
+                                {timesList[i]}
+                            </span>
+                            <div 
+                                className="flex-1 h-0 border-b" 
+                                style={{ 
+                                    borderBottomWidth: plannerDayBox.hideLines ? '0px' : `${strokeWidth}px`, 
+                                    borderBottomStyle: strokeStyle === 'dashed' ? 'dashed' : (strokeStyle === 'dotted' ? 'dotted' : 'solid'), 
+                                    borderBottomColor: strokeColor 
+                                }} 
+                            />
+                        </div>
+                    ))}
                 </div>
             );
         }
@@ -181,38 +215,40 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
             }}
         >
             {/* Header */}
-            <div 
-                className="flex items-center px-2 gap-2 shrink-0" 
-                style={{ 
-                    height: `${headerHeight}%`, 
-                    backgroundColor: headerBackgroundColor,
-                    borderBottom: showHeaderBorder ? `${headerBorderWidth}px ${headerBorderStyle} ${headerBorderColor}` : 'none'
-                }}
-            >
-                {showDayNumber && d.dayOfMonth > 0 && (
-                    <span className="font-bold text-lg" style={{ color: headerTextColor, fontSize: `${Math.max(6, 18 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
-                        {String(d.dayOfMonth).padStart(2, '0')}
-                    </span>
-                )}
-                {showDayName && d.dayOfMonth > 0 && (
-                    <span className="font-medium opacity-70" style={{ color: headerTextColor, fontSize: `${Math.max(5, 10 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
-                        {dayName}
-                    </span>
-                )}
-                {d.holiday && d.dayOfMonth > 0 && (
-                    <div className="ml-auto text-red-400 font-medium truncate max-w-[50%]" style={{ fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}>
-                        {d.holiday}
-                    </div>
-                )}
-                {plannerDayBox.showMoonPhase && d.moonPhase && (
-                    <div className={`flex items-center gap-1 ${d.holiday ? 'ml-2' : 'ml-auto'}`}>
-                        <div className="w-3.5 h-3.5 shrink-0 flex items-center justify-center">
-                            {renderMoonIcon(d.moonPhase, headerTextColor)}
+            {showHeader && (
+                <div 
+                    className="flex items-center px-2 gap-2 shrink-0" 
+                    style={{ 
+                        height: `${headerHeight}%`, 
+                        backgroundColor: headerBackgroundColor,
+                        borderBottom: showHeaderBorder ? `${headerBorderWidth}px ${headerBorderStyle} ${headerBorderColor}` : 'none'
+                    }}
+                >
+                    {showDayNumber && d.dayOfMonth > 0 && (
+                        <span className="font-bold text-lg" style={{ color: headerTextColor, fontSize: `${Math.max(6, 18 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
+                            {String(d.dayOfMonth).padStart(2, '0')}
+                        </span>
+                    )}
+                    {showDayName && d.dayOfMonth > 0 && (
+                        <span className="font-medium opacity-70" style={{ color: headerTextColor, fontSize: `${Math.max(5, 10 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
+                            {dayName}
+                        </span>
+                    )}
+                    {d.holiday && d.dayOfMonth > 0 && (
+                        <div className="ml-auto text-red-400 font-medium truncate max-w-[50%]" style={{ fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}>
+                            {d.holiday}
                         </div>
-                        <span className="opacity-60 truncate" style={{ color: headerTextColor, fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}>{d.moonPhase}</span>
-                    </div>
-                )}
-            </div>
+                    )}
+                    {plannerDayBox.showMoonPhase && d.moonPhase && (
+                        <div className={`flex items-center gap-1 ${d.holiday ? 'ml-2' : 'ml-auto'}`}>
+                            <div className="w-3.5 h-3.5 shrink-0 flex items-center justify-center">
+                                {renderMoonIcon(d.moonPhase, headerTextColor)}
+                            </div>
+                            <span className="opacity-60 truncate" style={{ color: headerTextColor, fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}>{d.moonPhase}</span>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Content Area */}
             <div className="flex-1 relative">

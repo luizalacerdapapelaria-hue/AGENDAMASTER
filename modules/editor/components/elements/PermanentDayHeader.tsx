@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { BaseElementProps } from './types';
+import { getDayName } from '../../../../core/backend/calendar';
 
 export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style, pageHeight, pageWidth }) => {
     const variant = style.variant || 'circles_outline';
@@ -9,7 +10,10 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
     const fontSize = style.fontSize || 10;
     const fontFamily = style.fontFamily || 'Inter';
     
-    const days = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+    // Order: Seg, Ter, Qua, Qui, Sex, Sáb, Dom
+    const dayIndices = [1, 2, 3, 4, 5, 6, 0];
+    const nameFormat = style.nameFormat || 'initial';
+    const days = dayIndices.map(dIdx => getDayName(dIdx, nameFormat));
     
     const renderDays = () => {
         const dayContainerStyle: React.CSSProperties = {

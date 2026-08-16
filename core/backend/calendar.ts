@@ -11,6 +11,7 @@ const getFixedHolidays = (year: number): Holiday[] => [
   { date: `${year}-10-12`, name: 'Nossa Senhora Aparecida', type: 'national' },
   { date: `${year}-11-02`, name: 'Finados', type: 'national' },
   { date: `${year}-11-15`, name: 'Proclamação da República', type: 'national' },
+  { date: `${year}-11-20`, name: 'Dia Nacional de Zumbi e da Consciência Negra', type: 'national' },
   { date: `${year}-12-25`, name: 'Natal', type: 'national' },
 ];
 
@@ -35,7 +36,12 @@ const getMobileHolidays = (year: number): Holiday[] => {
   const corpusDate = new Date(easterDate); corpusDate.setDate(easterDate.getDate() + 60);
   const goodFridayDate = new Date(easterDate); goodFridayDate.setDate(easterDate.getDate() - 2);
 
-  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+  const formatDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const dStr = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dStr}`;
+  };
 
   return [
     { date: formatDate(carnivalDate), name: 'Carnaval', type: 'optional' },
@@ -50,14 +56,33 @@ const knownNewMoon = new Date('2000-01-06').getTime();
 const cycle = 29.53058867;
 
 export const checkIsHoliday = (year: number, month: number, day: number, municipalHolidays: Holiday[] = []): string | undefined => {
-    const holidays = [...getFixedHolidays(year), ...getMobileHolidays(year), ...municipalHolidays];
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const monthStr = String(month + 1).padStart(2, '0');
+    const dayStr = String(day).padStart(2, '0');
+    const dateStr = `${year}-${monthStr}-${dayStr}`;
+
+    if (municipalHolidays && municipalHolidays.length > 0) {
+        for (const mh of municipalHolidays) {
+            if (!mh.date || !mh.name) continue;
+            const parts = mh.date.trim().split('-');
+            if (parts.length === 3) {
+                const m = parts[1].padStart(2, '0');
+                const d = parts[2].padStart(2, '0');
+                if (m === monthStr && d === dayStr) {
+                    return mh.name;
+                }
+            } else if (mh.date === dateStr) {
+                return mh.name;
+            }
+        }
+    }
+
+    const holidays = [...getFixedHolidays(year), ...getMobileHolidays(year)];
     return holidays.find(h => h.date === dateStr)?.name;
 };
 
 export const generateCalendarYear = (
   year: number,
-  includeHolidays: boolean,
+  includeHolidays: boolean = true,
   municipalHolidays: Holiday[] = [],
   startMonth: number = 0,
   durationMonths: number = 12
@@ -69,13 +94,40 @@ export const generateCalendarYear = (
   const startYear = start.getFullYear();
   const endYear = end.getFullYear();
   let holidays: Holiday[] = [];
-  if (includeHolidays) {
+  if (includeHolidays !== false) {
     for (let y = startYear; y <= endYear; y++) {
       holidays.push(...getFixedHolidays(y), ...getMobileHolidays(y));
     }
-    holidays.push(...municipalHolidays);
   }
-  const holidayMap = new Map(holidays.map(h => [h.date, h.name]));
+
+  if (municipalHolidays && municipalHolidays.length > 0) {
+    for (const mh of municipalHolidays) {
+      if (!mh.date || !mh.name) continue;
+      const parts = mh.date.trim().split('-');
+      if (parts.length === 3) {
+        const m = parts[1].padStart(2, '0');
+        const d = parts[2].padStart(2, '0');
+        for (let y = startYear; y <= endYear; y++) {
+          holidays.push({ ...mh, date: `${y}-${m}-${d}` });
+        }
+      } else {
+        holidays.push(mh);
+      }
+    }
+  }
+
+  const holidayMap = new Map<string, string>();
+  holidays.forEach(h => {
+    if (h.date && h.name) {
+      const parts = h.date.trim().split('-');
+      if (parts.length === 3) {
+        const iso = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        holidayMap.set(iso, h.name);
+      } else {
+        holidayMap.set(h.date, h.name);
+      }
+    }
+  });
 
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dYear = d.getFullYear();
@@ -231,5 +283,67 @@ export const generateMonthGrid = (year: number, month: number, startOfWeekDay: n
     return grid;
 };
 
-export const getMonthName = (i: number) => ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][i];
-export const getDayName = (i: number) => ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'][i];
+export const getMonthName = (i: number, format?: string) => {
+    const idx = ((i % 12) + 12) % 12;
+    const full = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const short = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const twoLetters = ['Ja', 'Fe', 'Ma', 'Ab', 'Ma', 'Ju', 'Ju', 'Ag', 'Se', 'Ou', 'No', 'De'];
+    const initial = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+
+    if (format === 'short' || format === '3_letters') return short[idx];
+    if (format === 'two_letters' || format === '2_letters') return twoLetters[idx];
+    if (format === 'initial' || format === '1_letter') return initial[idx];
+    return full[idx];
+};
+
+export const getDayName = (i: number, format?: string) => {
+    const idx = ((i % 7) + 7) % 7;
+    const full = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const noFeira = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const short = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const twoLetters = ['Do', 'Se', 'Te', 'Qu', 'Qi', 'Se', 'Sá'];
+    const initial = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+    const ordinalFull = ['Domingo', '2ª-feira', '3ª-feira', '4ª-feira', '5ª-feira', '6ª-feira', 'Sábado'];
+    const ordinalShort = ['Dom', '2ª', '3ª', '4ª', '5ª', '6ª', 'Sáb'];
+
+    if (format === 'no_feira' || format === 'without_feira' || format === 'medium' || format === 'short_name') return noFeira[idx];
+    if (format === 'short' || format === '3_letters') return short[idx];
+    if (format === 'two_letters' || format === '2_letters') return twoLetters[idx];
+    if (format === 'initial' || format === '1_letter') return initial[idx];
+    if (format === 'ordinal_full') return ordinalFull[idx];
+    if (format === 'ordinal_short') return ordinalShort[idx];
+    return full[idx];
+};
+
+export const isProjectYearRestricted = (
+    projectType: string | undefined,
+    year: number,
+    startMonth: number = 0,
+    durationMonths: number = 12,
+    userPlan: string = ''
+): boolean => {
+    if (projectType === 'notebook' || projectType === 'devotional') return false;
+
+    const planLower = (userPlan || '').toLowerCase();
+    const is2028Unlocked = planLower.includes('2028') || planLower.includes('renovad') || planLower.includes('master');
+
+    if (is2028Unlocked) return false;
+
+    if (year < 2026 || year > 2028) return true;
+    if (year === 2028) return true;
+
+    let monthsIn2028OrBeyond = 0;
+    for (let i = 0; i < durationMonths; i++) {
+        const yearOffset = Math.floor((startMonth + i) / 12);
+        const mYear = year + yearOffset;
+        if (mYear >= 2028) {
+            monthsIn2028OrBeyond++;
+        }
+    }
+
+    if (monthsIn2028OrBeyond > 1) {
+        return true;
+    }
+
+    return false;
+};

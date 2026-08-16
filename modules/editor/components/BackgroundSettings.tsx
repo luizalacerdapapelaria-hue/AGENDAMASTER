@@ -1,8 +1,20 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { BackgroundConfig } from '../../../types';
-import { Palmtree, Trash2, Upload, Minus, Palette, Layers, Eye, EyeOff, AlertTriangle, X, ChevronLeft, ChevronRight, Loader2, FileText, FlipHorizontal, FlipVertical, RotateCw, BookOpen, Plus, Sparkles } from 'lucide-react';
+import { AgendaConfig, BackgroundConfig, BackgroundRulesConfig, CategoryBackgroundConfig } from '../../../types';
+import {
+    Palmtree, Trash2, Upload, Minus, Palette, Layers, Eye, EyeOff, AlertTriangle,
+    X, ChevronLeft, ChevronRight, Loader2, FileText, FlipHorizontal, FlipVertical,
+    RotateCw, BookOpen, Plus, Sparkles, Copy, CheckCircle2, HelpCircle, ArrowRight,
+    Settings, Zap
+} from 'lucide-react';
 import { compressImage } from '../utils/imageCompressor';
 import { ImageManager, useImageSrc } from '../utils/imageManager';
+import {
+    getRuleBackground,
+    updateRuleBackground,
+    applyBackgroundToTargets,
+    migrateLegacyBackgroundsToRules,
+    BackgroundCategoryType
+} from '../../../core/logic/backgroundRules';
 
 const loadPdfJs = (): Promise<any> => {
     return new Promise((resolve, reject) => {
@@ -39,176 +51,128 @@ const loadPdfJs = (): Promise<any> => {
     });
 };
 
+const COLOR_SWATCHES = [
+    { name: 'Branco Puríssimo', hex: '#ffffff' },
+    { name: 'Bege Floral', hex: '#fdfbf7' },
+    { name: 'Creme Suave', hex: '#f7f4eb' },
+    { name: 'Rosa Pastel', hex: '#fdf2f4' },
+    { name: 'Verde Botânico', hex: '#f0f7f4' },
+    { name: 'Azul Céu', hex: '#f0f4f8' },
+    { name: 'Lilás Delicado', hex: '#f8f0f8' },
+    { name: 'Terracota Suave', hex: '#f9f1ee' },
+    { name: 'Cinza Mármore', hex: '#f3f4f6' },
+];
+
 interface BackgroundSettingsProps {
-    config?: BackgroundConfig;
-    configs?: BackgroundConfig[];
-    onChange: (updates: Partial<BackgroundConfig>) => void;
-    onConfigsChange?: (newConfigs: BackgroundConfig[]) => void;
+    agendaConfig: AgendaConfig;
+    onAgendaConfigChange: (updatedConfig: AgendaConfig) => void;
+    currentEditorPageNum?: number;
+    pushHistory?: () => void;
 }
 
-export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, configs, onChange, onConfigsChange }) => {
-    const defaultBg: BackgroundConfig = {
-        id: 'bg-default',
-        name: 'Fundo Padrão',
-        type: 'none',
-        opacity: 1,
-        showOnIntroPages: true,
-        showOnDailyPages: true,
-        pageFilter: 'all',
-        targetType: 'all'
-    };
+export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
+    agendaConfig,
+    onAgendaConfigChange,
+    currentEditorPageNum = 1,
+    pushHistory
+}) => {
+    // Garantir que temos a estrutura de regras sincronizada
+    const rules: BackgroundRulesConfig = migrateLegacyBackgroundsToRules(agendaConfig);
 
-    const isMultiMode = Boolean(onConfigsChange);
-    const bgList = (configs && configs.length > 0) ? configs : [config || defaultBg];
-    const [activeIndex, setActiveIndex] = useState(0);
+    // Estados de navegação no painel
+    const [selectedCategory, setSelectedCategory] = useState<'global' | BackgroundCategoryType | 'specific'>('global');
+    const [selectedScope, setSelectedScope] = useState<'default' | 'even' | 'odd'>('default');
+    const [selectedSpecificPage, setSelectedSpecificPage] = useState<number>(currentEditorPageNum || 37);
+    const [specificPageInputText, setSpecificPageInputText] = useState<string>(String(currentEditorPageNum || 37));
 
-    const safeIndex = activeIndex < bgList.length ? activeIndex : 0;
-    const current = bgList[safeIndex] || defaultBg;
+    useEffect(() => {
+        setSpecificPageInputText(String(selectedSpecificPage));
+    }, [selectedSpecificPage]);
 
-    const handleCurrentUpdate = (updates: Partial<BackgroundConfig>) => {
-        if (isMultiMode && onConfigsChange && configs) {
-            const nextList = [...bgList];
-            nextList[safeIndex] = {
-                ...nextList[safeIndex],
-                ...updates
-            };
-            onConfigsChange(nextList);
-        } else {
-            onChange(updates);
-        }
-    };
+    // Modal "Aplicar este fundo a..."
+    const [showApplyModal, setShowApplyModal] = useState(false);
+    const [applyTargets, setApplyTargets] = useState<string[]>([]);
+    const [applySuccessMessage, setApplySuccessMessage] = useState(false);
 
-    const addNewBgSlot = () => {
-        if (!onConfigsChange || !configs) return;
-        const newBg: BackgroundConfig = {
-            id: 'bg-' + Date.now(),
-            name: `Fundo ${configs.length + 1}`,
-            type: 'none',
-            opacity: 1,
-            showOnIntroPages: true,
-            showOnDailyPages: true,
-            pageFilter: 'all',
-            targetType: 'all'
-        };
-        const nextList = [...configs, newBg];
-        onConfigsChange(nextList);
-        setActiveIndex(nextList.length - 1);
-    };
+    // Banner de ajuda da hierarquia
+    const [showHelpBanner, setShowHelpBanner] = useState(false);
 
-    const removeBgSlot = (indexToRemove: number) => {
-        if (!onConfigsChange || !configs || configs.length <= 1) return;
-        const nextList = configs.filter((_, idx) => idx !== indexToRemove);
-        onConfigsChange(nextList);
-        if (safeIndex >= nextList.length) {
-            setActiveIndex(Math.max(0, nextList.length - 1));
-        }
-    };
-
-    const applyEvenOddPreset = () => {
-        if (!onConfigsChange) return;
-        const oddBg: BackgroundConfig = {
-            id: 'bg-odd-' + Date.now(),
-            name: 'Fundo Páginas Ímpares (Direita)',
-            type: current.type !== 'none' ? current.type : 'solid',
-            color: current.color || '#ffffff',
-            gradient: current.gradient,
-            image: current.image ? { ...current.image } : undefined,
-            opacity: current.opacity ?? 1,
-            showOnIntroPages: true,
-            showOnDailyPages: true,
-            pageFilter: 'odd',
-            targetType: 'odd'
-        };
-        const evenBg: BackgroundConfig = {
-            id: 'bg-even-' + Date.now(),
-            name: 'Fundo Páginas Pares (Esquerda)',
-            type: current.type !== 'none' ? current.type : 'solid',
-            color: current.color || '#f9fafb',
-            gradient: current.gradient,
-            image: current.image ? { ...current.image } : undefined,
-            opacity: current.opacity ?? 1,
-            showOnIntroPages: true,
-            showOnDailyPages: true,
-            pageFilter: 'even',
-            targetType: 'even'
-        };
-        onConfigsChange([oddBg, evenBg]);
-        setActiveIndex(0);
-    };
-
-    const applyIntroDailyPreset = () => {
-        if (!onConfigsChange) return;
-        const introBg: BackgroundConfig = {
-            id: 'bg-intro-' + Date.now(),
-            name: 'Fundo Páginas Iniciais',
-            type: current.type !== 'none' ? current.type : 'solid',
-            color: current.color || '#ffffff',
-            gradient: current.gradient,
-            image: current.image ? { ...current.image } : undefined,
-            opacity: current.opacity ?? 1,
-            showOnIntroPages: true,
-            showOnDailyPages: false,
-            pageFilter: 'all',
-            targetType: 'intro'
-        };
-        const dailyBg: BackgroundConfig = {
-            id: 'bg-daily-' + Date.now(),
-            name: 'Fundo Páginas Diárias (Miolo)',
-            type: current.type !== 'none' ? current.type : 'solid',
-            color: current.color || '#ffffff',
-            gradient: current.gradient,
-            image: current.image ? { ...current.image } : undefined,
-            opacity: current.opacity ?? 1,
-            showOnIntroPages: false,
-            showOnDailyPages: true,
-            pageFilter: 'all',
-            targetType: 'daily'
-        };
-        onConfigsChange([introBg, dailyBg]);
-        setActiveIndex(0);
-    };
-
-    const getTargetLabel = (bg: BackgroundConfig) => {
-        if (bg.customPages && bg.customPages.trim() !== '') {
-            return `Páginas: ${bg.customPages}`;
-        }
-        const filter = bg.targetType || bg.pageFilter || 'all';
-        if (filter === 'even') return 'Páginas Pares (Esquerda)';
-        if (filter === 'odd') return 'Páginas Ímpares (Direita)';
-        if (filter === 'intro' || (bg.showOnIntroPages && !bg.showOnDailyPages)) return 'Páginas Iniciais';
-        if (filter === 'daily' || (bg.showOnDailyPages && !bg.showOnIntroPages)) return 'Páginas do Miolo';
-        return 'Todas as Páginas';
-    };
-
-    const bgUrl = useImageSrc(current.image?.url);
+    // Estados de upload de imagem/PDF
     const fileInputRef = useRef<HTMLInputElement>(null);
     const pdfPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
-
-    const [showWarning, setShowWarning] = useState(false);
-    const [dontShowAgain, setDontShowAgain] = useState(false);
-
-    // PDF upload states
     const [showPdfModal, setShowPdfModal] = useState(false);
-    const [pdfFile, setPdfFile] = useState<File | null>(null);
     const [pdfDoc, setPdfDoc] = useState<any>(null);
     const [pdfTotalPages, setPdfTotalPages] = useState(0);
     const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
     const [pdfLoading, setPdfLoading] = useState(false);
-    const [pdfRenderScale, setPdfRenderScale] = useState(2.0); // Default high resolution
+    const [pdfRenderScale, setPdfRenderScale] = useState(2.0);
 
-    // Render PDF page preview
+    // Obter a configuração atual selecionada
+    const currentBg: BackgroundConfig = getRuleBackground(
+        rules,
+        selectedCategory,
+        selectedCategory === 'specific' ? selectedSpecificPage : selectedScope
+    ) || {
+        type: 'none',
+        opacity: 1
+    };
+
+    const bgUrl = useImageSrc(currentBg.image?.url);
+
+    // Atualiza a regra atual
+    const updateCurrentBg = (updates: Partial<BackgroundConfig> | null) => {
+        if (pushHistory) pushHistory();
+
+        let updatedBg: BackgroundConfig | null = null;
+        if (updates !== null) {
+            updatedBg = {
+                ...currentBg,
+                ...updates
+            };
+        }
+
+        const newRules = updateRuleBackground(
+            rules,
+            selectedCategory,
+            selectedCategory === 'specific' ? selectedSpecificPage : selectedScope,
+            updatedBg
+        );
+
+        updateAllRules(newRules);
+    };
+
+    // Atualiza a estrutura inteira de regras
+    const updateAllRules = (newRules: BackgroundRulesConfig) => {
+        if (pushHistory) pushHistory();
+        onAgendaConfigChange({
+            ...agendaConfig,
+            backgroundRules: newRules,
+            // Sincronizar campo legado de fundo global para compatibilidade sem fantasma
+            background: newRules.global && newRules.global.type !== 'none' ? { ...newRules.global } : undefined
+        });
+    };
+
+    // Handler para confirmação em lote do modal "Aplicar este fundo a..."
+    const handleApplyToTargetsConfirm = () => {
+        if (applyTargets.length === 0) return;
+        const newRules = applyBackgroundToTargets(rules, currentBg, applyTargets, currentEditorPageNum);
+        updateAllRules(newRules);
+        setShowApplyModal(false);
+        setApplySuccessMessage(true);
+        setTimeout(() => setApplySuccessMessage(false), 3000);
+    };
+
+    // Renderizar prévia da página PDF no modal
     useEffect(() => {
         if (!pdfDoc || !showPdfModal) return;
-
         let active = true;
+
         const renderPage = async () => {
             try {
                 const page = await pdfDoc.getPage(pdfCurrentPage);
                 if (!active) return;
-
                 const canvas = pdfPreviewCanvasRef.current;
                 if (!canvas) return;
-
                 const context = canvas.getContext('2d');
                 if (!context) return;
 
@@ -216,43 +180,17 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
 
-                const renderContext = {
-                    canvasContext: context,
-                    viewport: viewport,
-                };
-                await page.render(renderContext).promise;
-            } catch (error) {
-                console.error('Erro ao renderizar prévia do PDF:', error);
+                await page.render({ canvasContext: context, viewport }).promise;
+            } catch (err) {
+                console.error('Erro ao renderizar prévia do PDF:', err);
             }
         };
 
         renderPage();
-        return () => {
-            active = false;
-        };
+        return () => { active = false; };
     }, [pdfDoc, pdfCurrentPage, showPdfModal]);
 
-    const triggerImageUpload = () => {
-        const isDismissed = localStorage.getItem('agendamaster_dismissed_image_warning') === 'true';
-        if (isDismissed) {
-            fileInputRef.current?.click();
-        } else {
-            setShowWarning(true);
-        }
-    };
-
-    const handleConfirmUpload = () => {
-        if (dontShowAgain) {
-            localStorage.setItem('agendamaster_dismissed_image_warning', 'true');
-        }
-        setShowWarning(false);
-        setTimeout(() => {
-            fileInputRef.current?.click();
-        }, 100);
-    };
-
     const handlePdfUpload = (file: File) => {
-        setPdfFile(file);
         setPdfLoading(true);
         setShowPdfModal(true);
 
@@ -261,15 +199,14 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
             try {
                 const pdfjs = await loadPdfJs();
                 const arrayBuffer = reader.result as ArrayBuffer;
-                const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-                const pdf = await loadingTask.promise;
+                const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
                 setPdfDoc(pdf);
                 setPdfTotalPages(pdf.numPages);
                 setPdfCurrentPage(1);
                 setPdfLoading(false);
             } catch (error) {
-                console.error('Erro ao processar PDF:', error);
-                alert('Não foi possível ler este arquivo PDF. Certifique-se de que é um PDF válido.');
+                console.error('Erro ao ler PDF:', error);
+                alert('Não foi possível ler este arquivo PDF.');
                 setPdfLoading(false);
                 setShowPdfModal(false);
             }
@@ -282,39 +219,32 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
         try {
             setPdfLoading(true);
             const page = await pdfDoc.getPage(pdfCurrentPage);
-            
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            if (!context) throw new Error('Não foi possível obter contexto do canvas.');
+            if (!context) throw new Error('Falha no canvas');
 
             const viewport = page.getViewport({ scale: pdfRenderScale });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
 
-            const renderContext = {
-                canvasContext: context,
-                viewport: viewport,
-            };
-            await page.render(renderContext).promise;
-
+            await page.render({ canvasContext: context, viewport }).promise;
             const dataUrl = canvas.toDataURL('image/png');
             const registeredUrl = await ImageManager.registerImage(dataUrl);
-            
-            handleCurrentUpdate({ 
-                type: 'image', 
-                image: { 
-                    url: registeredUrl, 
-                    opacity: current.image?.opacity ?? 1, 
+
+            updateCurrentBg({
+                type: 'image',
+                image: {
+                    url: registeredUrl,
+                    opacity: currentBg.image?.opacity ?? 1,
                     fit: 'fill'
-                } 
+                }
             });
-            
+
             setShowPdfModal(false);
             setPdfDoc(null);
-            setPdfFile(null);
         } catch (error) {
-            console.error('Erro ao converter PDF:', error);
-            alert('Erro ao converter a página do PDF. Tente usar uma resolução menor (ex: 1.5x).');
+            console.error('Erro ao converter página do PDF:', error);
+            alert('Erro ao converter a página do PDF.');
         } finally {
             setPdfLoading(false);
         }
@@ -333,827 +263,1056 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({ config, 
             const rawDataUrl = await compressImage(file);
             if (!rawDataUrl) return;
             const registeredUrl = await ImageManager.registerImage(rawDataUrl);
-            
-            handleCurrentUpdate({ 
-                type: 'image', 
-                image: { 
-                    url: registeredUrl, 
-                    opacity: current.image?.opacity ?? 1, 
-                    fit: current.image?.fit ?? 'cover' 
-                } 
+
+            updateCurrentBg({
+                type: 'image',
+                image: {
+                    url: registeredUrl,
+                    opacity: currentBg.image?.opacity ?? 1,
+                    fit: currentBg.image?.fit ?? 'cover'
+                }
             });
         } catch (error) {
-            console.error('Erro ao comprimir imagem:', error);
+            console.error('Erro ao fazer upload da imagem:', error);
         }
     };
 
+    // Label do alvo ativo para exibição
+    const getTargetActiveLabel = () => {
+        if (selectedCategory === 'global') return '🌐 Toda a Agenda (Geral)';
+        if (selectedCategory === 'specific') return `🔢 Página Específica (#${selectedSpecificPage})`;
+
+        const catNames: Record<string, string> = {
+            miolo: '📖 Miolo',
+            mensais: '📅 Páginas Mensais',
+            divisorias: '📑 Divisórias',
+            iniciais: '🚀 Páginas Iniciais'
+        };
+
+        const scopeNames: Record<string, string> = {
+            default: 'Padrão da Categoria',
+            even: 'Páginas Pares (Esquerda)',
+            odd: 'Páginas Ímpares (Direita)'
+        };
+
+        return `${catNames[selectedCategory]} → ${scopeNames[selectedScope]}`;
+    };
+
+    // Extrair lista detalhada de todas as regras ativas de fundo
+    const getActiveRulesList = () => {
+        const list: Array<{
+            key: string;
+            label: string;
+            category: 'global' | BackgroundCategoryType | 'specific';
+            scope: 'default' | 'even' | 'odd' | number;
+            bg: BackgroundConfig;
+        }> = [];
+
+        if (rules.global && rules.global.type && rules.global.type !== 'none') {
+            list.push({ key: 'global', label: '🌐 Toda a Agenda (Geral)', category: 'global', scope: 'default', bg: rules.global });
+        }
+
+        const catLabels: Record<BackgroundCategoryType, string> = {
+            miolo: '📖 Miolo',
+            mensais: '📅 Páginas Mensais',
+            divisorias: '📑 Divisórias',
+            iniciais: '🚀 Páginas Iniciais'
+        };
+
+        const scopeLabels: Record<string, string> = {
+            default: 'Padrão da Categoria',
+            even: 'Páginas Pares (Esquerda)',
+            odd: 'Páginas Ímpares (Direita)'
+        };
+
+        (['miolo', 'mensais', 'divisorias', 'iniciais'] as BackgroundCategoryType[]).forEach(cat => {
+            const c = rules[cat];
+            if (!c) return;
+            if (c.default && c.default.type && c.default.type !== 'none') {
+                list.push({ key: `${cat}_default`, label: `${catLabels[cat]} → ${scopeLabels.default}`, category: cat, scope: 'default', bg: c.default });
+            }
+            if (c.even && c.even.type && c.even.type !== 'none') {
+                list.push({ key: `${cat}_even`, label: `${catLabels[cat]} → ${scopeLabels.even}`, category: cat, scope: 'even', bg: c.even });
+            }
+            if (c.odd && c.odd.type && c.odd.type !== 'none') {
+                list.push({ key: `${cat}_odd`, label: `${catLabels[cat]} → ${scopeLabels.odd}`, category: cat, scope: 'odd', bg: c.odd });
+            }
+        });
+
+        if (rules.specificPages) {
+            Object.entries(rules.specificPages).forEach(([pNumStr, bg]) => {
+                const pNum = parseInt(pNumStr, 10);
+                if (bg && bg.type && bg.type !== 'none') {
+                    list.push({ key: `page_${pNum}`, label: `⭐ Página Específica nº ${pNum}`, category: 'specific', scope: pNum, bg });
+                }
+            });
+        }
+
+        return list;
+    };
+
+    const activeRulesList = getActiveRulesList();
+    const hasRuleForCurrentTarget = currentBg && currentBg.type && currentBg.type !== 'none';
+
+    // Toggle de seleção rápida para o modal
+    const toggleModalTarget = (key: string) => {
+        if (applyTargets.includes(key)) {
+            setApplyTargets(applyTargets.filter(k => k !== key));
+        } else {
+            setApplyTargets([...applyTargets, key]);
+        }
+    };
+
+    const selectAllModalTargets = () => {
+        setApplyTargets([
+            'global',
+            'miolo_default', 'miolo_even', 'miolo_odd',
+            'divisorias_default', 'divisorias_even', 'divisorias_odd',
+            'mensais_default', 'mensais_even', 'mensais_odd',
+            'iniciais_default', 'iniciais_even', 'iniciais_odd',
+            `page_${currentEditorPageNum}`
+        ]);
+    };
+
+    const deselectAllModalTargets = () => {
+        setApplyTargets([]);
+    };
+
     return (
-        <div className="space-y-6">
-            {/* Gerenciador de Múltiplos Planos de Fundo */}
-            {isMultiMode && configs && (
-                <div className="space-y-3 p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-150 shadow-2xs">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                            Planos de Fundo ({configs.length})
-                        </span>
-                        <button
-                            type="button"
-                            onClick={addNewBgSlot}
-                            className="text-[10px] font-bold px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
-                        >
-                            <Plus className="w-3 h-3" />
-                            <span>Adicionar Fundo</span>
+        <div className="space-y-5 text-gray-800">
+            {/* CABEÇALHO DO PAINEL */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md">
+                        <Palette className="w-4 h-4" />
+                    </div>
+                    <div>
+                        <h3 className="text-xs font-black text-gray-900 uppercase tracking-wide">Personalização de Fundos</h3>
+                        <p className="text-[10px] text-gray-500">Sistema hierárquico por seções, paridade e páginas</p>
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={() => setShowHelpBanner(!showHelpBanner)}
+                    className="p-1.5 hover:bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    title="Ver como funciona a prioridade dos fundos"
+                >
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span className="text-[10px]">Prioridades</span>
+                </button>
+            </div>
+
+            {/* BANNER INFORMATIVO DE HIERARQUIA */}
+            {showHelpBanner && (
+                <div className="p-3 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl border border-indigo-150 text-xs space-y-2 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between font-bold text-indigo-950 text-[11px]">
+                        <span>🏆 Hierarquia de Prioridades</span>
+                        <button type="button" onClick={() => setShowHelpBanner(false)} className="text-gray-400 hover:text-gray-600">
+                            <X className="w-3.5 h-3.5" />
                         </button>
                     </div>
-
-                    {/* Presets Rápidos */}
-                    <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                        <button
-                            type="button"
-                            onClick={applyEvenOddPreset}
-                            className="py-1.5 px-2 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg text-[9px] font-bold transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
-                            title="Cria automaticamente 1 fundo para páginas ímpares e 1 para páginas pares"
-                        >
-                            <Sparkles className="w-3 h-3 text-indigo-500" />
-                            <span>Pares vs. Ímpares</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={applyIntroDailyPreset}
-                            className="py-1.5 px-2 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg text-[9px] font-bold transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
-                            title="Cria automaticamente 1 fundo para páginas iniciais e 1 para o miolo diário"
-                        >
-                            <Sparkles className="w-3 h-3 text-indigo-500" />
-                            <span>Iniciais vs. Miolo</span>
-                        </button>
-                    </div>
-
-                    {/* Lista de Fundos Configurados */}
-                    <div className="space-y-1.5 pt-1">
-                        {configs.map((bgItem, idx) => (
-                            <div
-                                key={bgItem.id || idx}
-                                onClick={() => setActiveIndex(idx)}
-                                className={`p-2 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
-                                    safeIndex === idx
-                                        ? 'bg-white border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
-                                        : 'bg-white/70 hover:bg-white border-gray-200 text-gray-600'
-                                }`}
-                            >
-                                <div className="flex items-center gap-2 overflow-hidden">
-                                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${bgItem.type === 'none' ? 'bg-gray-300' : 'bg-indigo-500'}`} />
-                                    <div className="truncate">
-                                        <span className="font-bold text-[11px] block text-gray-800 truncate">
-                                            {bgItem.name || `Fundo ${idx + 1}`}
-                                        </span>
-                                        <span className="text-[9px] text-gray-500 block truncate font-medium">
-                                            {getTargetLabel(bgItem)}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                    {configs.length > 1 && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                removeBgSlot(idx);
-                                            }}
-                                            className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"
-                                            title="Excluir este fundo"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                    <ol className="space-y-1 text-[10px] text-gray-700 pl-4 list-decimal font-medium">
+                        <li><strong className="text-indigo-900">Página Específica:</strong> Sobrescreve tudo para aquela página única.</li>
+                        <li><strong className="text-indigo-900">Par / Ímpar da Categoria:</strong> Aplica às páginas pares ou ímpares daquela seção.</li>
+                        <li><strong className="text-indigo-900">Fundo da Categoria:</strong> Aplica a toda a seção (ex: todo o miolo).</li>
+                        <li><strong className="text-indigo-900">Fundo Geral:</strong> Fundo padrão da agenda inteira.</li>
+                    </ol>
                 </div>
             )}
 
-            {/* Configuração do Fundo Selecionado */}
-            {isMultiMode && (
-                <div className="space-y-2.5 p-3 bg-gray-50/80 rounded-xl border border-gray-200">
-                    <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                            Nome do Fundo ({safeIndex + 1}/{bgList.length})
-                        </label>
-                        <input
-                            type="text"
-                            value={current.name || `Fundo ${safeIndex + 1}`}
-                            onChange={(e) => handleCurrentUpdate({ name: e.target.value })}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-lg font-bold text-gray-800 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-                            placeholder="Ex: Fundo Páginas Ímpares"
-                        />
-                    </div>
+            {/* MENSAGEM DE SUCESSO DE APLICAÇÃO */}
+            {applySuccessMessage && (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Fundo aplicado aos alvos selecionados com sucesso!</span>
+                </div>
+            )}
 
-                    <div className="space-y-1.5 pt-1">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                            Onde este fundo será exibido?
-                        </label>
-                        <div className="grid grid-cols-2 gap-1.5">
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({ targetType: 'all', pageFilter: 'all', showOnIntroPages: true, showOnDailyPages: true })}
-                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
-                                    (!current.targetType || current.targetType === 'all') && (!current.pageFilter || current.pageFilter === 'all') && current.showOnIntroPages !== false && current.showOnDailyPages !== false
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                🌐 Todas as Páginas
-                            </button>
+            {/* PASSO 1: APLICAR FUNDO EM (SELEÇÃO DE CATEGORIA) */}
+            <div className="p-3 bg-gray-50/80 rounded-2xl border border-gray-200 space-y-2.5">
+                <label className="text-[10px] font-black text-gray-700 uppercase tracking-wider flex items-center justify-between">
+                    <span>1. Aplicar fundo em:</span>
+                </label>
 
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({ targetType: 'odd', pageFilter: 'odd', showOnIntroPages: true, showOnDailyPages: true })}
-                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
-                                    current.targetType === 'odd' || current.pageFilter === 'odd'
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                📘 Páginas Ímpares (Direita)
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({ targetType: 'even', pageFilter: 'even', showOnIntroPages: true, showOnDailyPages: true })}
-                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
-                                    current.targetType === 'even' || current.pageFilter === 'even'
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                📖 Páginas Pares (Esquerda)
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({ targetType: 'intro', showOnIntroPages: true, showOnDailyPages: false, pageFilter: 'all' })}
-                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
-                                    current.targetType === 'intro' || (current.showOnIntroPages && !current.showOnDailyPages)
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                📑 Páginas Iniciais
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({ targetType: 'daily', showOnIntroPages: false, showOnDailyPages: true, pageFilter: 'all' })}
-                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
-                                    current.targetType === 'daily' || (current.showOnDailyPages && !current.showOnIntroPages)
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                📅 Páginas do Miolo
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({ targetType: 'custom' })}
-                                className={`p-2 rounded-lg border text-[10px] font-bold text-left transition-all cursor-pointer ${
-                                    current.targetType === 'custom' || (current.customPages && current.customPages.trim() !== '')
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                🔢 Páginas Específicas
-                            </button>
+                <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                        type="button"
+                        onClick={() => setSelectedCategory('global')}
+                        className={`p-2.5 rounded-xl border text-[11px] font-bold text-left transition-all cursor-pointer flex items-center gap-2 relative ${
+                            selectedCategory === 'global'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/20'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                        }`}
+                    >
+                        {rules.global && rules.global.type && rules.global.type !== 'none' && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" title="Regra de Fundo Ativa" />
+                        )}
+                        <span className="text-base">🌐</span>
+                        <div>
+                            <div className="leading-tight">Toda a Agenda</div>
+                            <div className={`text-[9px] font-normal leading-tight ${selectedCategory === 'global' ? 'text-indigo-100' : 'text-gray-400'}`}>Geral</div>
                         </div>
-                    </div>
-                </div>
-            )}
+                    </button>
 
-            <div className="space-y-3">
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Tipo de Fundo</label>
-                <div className="grid grid-cols-2 gap-2">
-                    <button 
-                        onClick={() => handleCurrentUpdate({ type: 'none' })}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'none' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                    <button
+                        type="button"
+                        onClick={() => setSelectedCategory('miolo')}
+                        className={`p-2.5 rounded-xl border text-[11px] font-bold text-left transition-all cursor-pointer flex items-center gap-2 relative ${
+                            selectedCategory === 'miolo'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/20'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                        }`}
                     >
-                        <Minus className="w-4 h-4 mb-1" />
-                        Nenhum
+                        {rules.miolo && (rules.miolo.default || rules.miolo.even || rules.miolo.odd) && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" title="Regra de Fundo Ativa" />
+                        )}
+                        <span className="text-base">📖</span>
+                        <div>
+                            <div className="leading-tight">Miolo</div>
+                            <div className={`text-[9px] font-normal leading-tight ${selectedCategory === 'miolo' ? 'text-indigo-100' : 'text-gray-400'}`}>Páginas Diárias</div>
+                        </div>
                     </button>
-                    <button 
-                        onClick={() => handleCurrentUpdate({ type: 'solid', color: current.color || '#ffffff' })}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'solid' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+
+                    <button
+                        type="button"
+                        onClick={() => setSelectedCategory('mensais')}
+                        className={`p-2.5 rounded-xl border text-[11px] font-bold text-left transition-all cursor-pointer flex items-center gap-2 relative ${
+                            selectedCategory === 'mensais'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/20'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                        }`}
                     >
-                        <Palette className="w-4 h-4 mb-1" />
-                        Cor Sólida
+                        {rules.mensais && (rules.mensais.default || rules.mensais.even || rules.mensais.odd) && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" title="Regra de Fundo Ativa" />
+                        )}
+                        <span className="text-base">📅</span>
+                        <div>
+                            <div className="leading-tight">Páginas Mensais</div>
+                            <div className={`text-[9px] font-normal leading-tight ${selectedCategory === 'mensais' ? 'text-indigo-100' : 'text-gray-400'}`}>Aberturas Mês</div>
+                        </div>
                     </button>
-                    <button 
-                        onClick={() => handleCurrentUpdate({ 
-                            type: 'gradient', 
-                            gradient: current.gradient || { type: 'linear', colors: ['#ffffff', '#f3f4f6'], direction: 180 } 
-                        })}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'gradient' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+
+                    <button
+                        type="button"
+                        onClick={() => setSelectedCategory('divisorias')}
+                        className={`p-2.5 rounded-xl border text-[11px] font-bold text-left transition-all cursor-pointer flex items-center gap-2 relative ${
+                            selectedCategory === 'divisorias'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/20'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                        }`}
                     >
-                        <Layers className="w-4 h-4 mb-1" />
-                        Gradiente
+                        {rules.divisorias && (rules.divisorias.default || rules.divisorias.even || rules.divisorias.odd) && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" title="Regra de Fundo Ativa" />
+                        )}
+                        <span className="text-base">📑</span>
+                        <div>
+                            <div className="leading-tight">Divisórias</div>
+                            <div className={`text-[9px] font-normal leading-tight ${selectedCategory === 'divisorias' ? 'text-indigo-100' : 'text-gray-400'}`}>Capas Mês</div>
+                        </div>
                     </button>
-                    <button 
-                        onClick={triggerImageUpload}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${current.type === 'image' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+
+                    <button
+                        type="button"
+                        onClick={() => setSelectedCategory('iniciais')}
+                        className={`p-2.5 rounded-xl border text-[11px] font-bold text-left transition-all cursor-pointer flex items-center gap-2 relative ${
+                            selectedCategory === 'iniciais'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/20'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                        }`}
                     >
-                        <Upload className="w-4 h-4 mb-1" />
-                        Imagem / PDF
+                        {rules.iniciais && (rules.iniciais.default || rules.iniciais.even || rules.iniciais.odd) && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" title="Regra de Fundo Ativa" />
+                        )}
+                        <span className="text-base">🚀</span>
+                        <div>
+                            <div className="leading-tight">Páginas Iniciais</div>
+                            <div className={`text-[9px] font-normal leading-tight ${selectedCategory === 'iniciais' ? 'text-indigo-100' : 'text-gray-400'}`}>Dados, Calendários</div>
+                        </div>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setSelectedCategory('specific')}
+                        className={`p-2.5 rounded-xl border text-[11px] font-bold text-left transition-all cursor-pointer flex items-center gap-2 relative ${
+                            selectedCategory === 'specific'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/20'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                        }`}
+                    >
+                        {rules.specificPages && Object.keys(rules.specificPages).length > 0 && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" title="Páginas Exclusivas Ativas" />
+                        )}
+                        <span className="text-base">⭐</span>
+                        <div>
+                            <div className="leading-tight">Página Específica</div>
+                            <div className={`text-[9px] font-normal leading-tight ${selectedCategory === 'specific' ? 'text-indigo-100' : 'text-gray-400'}`}>Ex: Pág 37</div>
+                        </div>
                     </button>
                 </div>
             </div>
 
-            {current.type === 'solid' && (
-                <div className="space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Cor do Fundo</label>
-                    <div className="flex h-10 border border-gray-200 rounded-lg overflow-hidden bg-white">
-                        <input 
-                            type="color" 
-                            value={current.color || '#ffffff'} 
-                            onChange={(e) => handleCurrentUpdate({ color: e.target.value })} 
-                            className="w-12 h-full p-0 border-0 cursor-pointer" 
-                        />
-                        <input 
-                            type="text" 
-                            value={current.color || '#ffffff'} 
-                            onChange={(e) => handleCurrentUpdate({ color: e.target.value })} 
-                            className="flex-1 text-xs uppercase px-3 font-mono" 
-                        />
+            {/* PASSO 2: ESCOPO DE PARIDADE OU PÁGINA ESPECÍFICA */}
+            {selectedCategory !== 'global' && selectedCategory !== 'specific' && (() => {
+                const activeCat = rules[selectedCategory as BackgroundCategoryType];
+                const hasDefault = activeCat?.default && activeCat.default.type && activeCat.default.type !== 'none';
+                const hasEven = activeCat?.even && activeCat.even.type && activeCat.even.type !== 'none';
+                const hasOdd = activeCat?.odd && activeCat.odd.type && activeCat.odd.type !== 'none';
+
+                return (
+                    <div className="p-3 bg-indigo-50/60 rounded-2xl border border-indigo-150 space-y-2">
+                        <label className="text-[10px] font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                            2. Regra de Paridade da Categoria:
+                        </label>
+
+                        <div className="grid grid-cols-3 gap-1.5">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedScope('default')}
+                                className={`p-2 rounded-xl border text-[10px] font-bold text-center transition-all cursor-pointer flex items-center justify-center gap-1 relative ${
+                                    selectedScope === 'default'
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                        : 'bg-white border-indigo-100 text-gray-700 hover:bg-indigo-50'
+                                }`}
+                            >
+                                <span>Toda a Categoria</span>
+                                {hasDefault && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Regra ativa no Padrão da Categoria" />}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedScope('even')}
+                                className={`p-2 rounded-xl border text-[10px] font-bold text-center transition-all cursor-pointer flex items-center justify-center gap-1 relative ${
+                                    selectedScope === 'even'
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                        : 'bg-white border-indigo-100 text-gray-700 hover:bg-indigo-50'
+                                }`}
+                            >
+                                <span>📘 Par (Esquerda)</span>
+                                {hasEven && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Regra ativa para Páginas Pares" />}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedScope('odd')}
+                                className={`p-2 rounded-xl border text-[10px] font-bold text-center transition-all cursor-pointer flex items-center justify-center gap-1 relative ${
+                                    selectedScope === 'odd'
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                        : 'bg-white border-indigo-100 text-gray-700 hover:bg-indigo-50'
+                                }`}
+                            >
+                                <span>📖 Ímpar (Direita)</span>
+                                {hasOdd && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Regra ativa para Páginas Ímpares" />}
+                            </button>
+                        </div>
                     </div>
+                );
+            })()}
+
+            {/* SELEÇÃO DE PÁGINA ESPECÍFICA */}
+            {selectedCategory === 'specific' && (
+                <div className="p-3 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
+                    <label className="text-[10px] font-black text-amber-950 uppercase tracking-wider flex items-center justify-between">
+                        <span>⭐ Selecionar Número da Página:</span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                            <span className="absolute left-3 top-2.5 text-xs text-amber-700 font-bold">Página nº</span>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={specificPageInputText}
+                                onChange={(e) => {
+                                    const valStr = e.target.value;
+                                    setSpecificPageInputText(valStr);
+                                    const parsed = parseInt(valStr, 10);
+                                    if (!isNaN(parsed) && parsed >= 1 && parsed <= 5000) {
+                                        setSelectedSpecificPage(parsed);
+                                    }
+                                }}
+                                onBlur={() => {
+                                    const parsed = parseInt(specificPageInputText, 10);
+                                    if (isNaN(parsed) || parsed < 1) {
+                                        setSpecificPageInputText(String(selectedSpecificPage));
+                                    } else {
+                                        setSelectedSpecificPage(parsed);
+                                        setSpecificPageInputText(String(parsed));
+                                    }
+                                }}
+                                className="w-full pl-20 pr-3 py-2 text-xs font-black border border-amber-300 rounded-xl bg-white text-amber-950 outline-none focus:ring-2 focus:ring-amber-500 shadow-xs"
+                                placeholder="Digite o nº da página..."
+                            />
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setSelectedSpecificPage(currentEditorPageNum)}
+                            className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded-xl shadow-xs transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                        >
+                            <span>Página Atual (#{currentEditorPageNum})</span>
+                        </button>
+                    </div>
+
+                    {/* Lista de sobreposições de páginas específicas já ativas */}
+                    {rules.specificPages && Object.keys(rules.specificPages).length > 0 && (
+                        <div className="pt-2 border-t border-amber-200/60 space-y-1.5">
+                            <span className="text-[9px] font-bold text-amber-800 uppercase block">Páginas exclusivas personalizadas:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(rules.specificPages).map(([pNumStr, bgObj]) => {
+                                    const pNum = parseInt(pNumStr, 10);
+                                    if (!bgObj || bgObj.type === 'none') return null;
+                                    const isSelected = selectedSpecificPage === pNum;
+
+                                    return (
+                                        <div
+                                            key={pNum}
+                                            onClick={() => setSelectedSpecificPage(pNum)}
+                                            className={`px-2.5 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                                                isSelected
+                                                    ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                                                    : 'bg-white text-amber-900 border-amber-300 hover:bg-amber-100'
+                                            }`}
+                                        >
+                                            <span>Pág. {pNum}</span>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    updateAllRules(updateRuleBackground(rules, 'specific', pNum, null));
+                                                }}
+                                                className="p-0.5 hover:text-red-500 rounded"
+                                                title="Remover fundo exclusivo desta página"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
-            {current.type === 'gradient' && current.gradient && (
-                <div className="space-y-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    <div className="space-y-2">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase text-center">Visualização</label>
-                        <div 
-                            className="h-12 w-full rounded-md border border-gray-200 shadow-inner"
-                            style={{ 
-                                background: current.gradient.type === 'linear' 
-                                    ? `linear-gradient(${current.gradient.direction}deg, ${current.gradient.colors[0]}, ${current.gradient.colors[1]})`
-                                    : `radial-gradient(circle at center, ${current.gradient.colors[0]}, ${current.gradient.colors[1]})`
-                            }}
-                        />
+            {/* PAINEL DE EDIÇÃO DO FUNDO PARA O ALVO SELECIONADO */}
+            <div className="p-4 bg-white rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                    <div className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
+                        <Zap className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span>{getTargetActiveLabel()}</span>
                     </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Tipo</label>
-                            <select 
-                                value={current.gradient.type}
-                                onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, type: e.target.value as any } })}
-                                className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white select-none"
+
+                    <div className="flex items-center gap-1.5">
+                        {hasRuleForCurrentTarget && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    updateAllRules(updateRuleBackground(rules, selectedCategory, selectedCategory === 'specific' ? selectedSpecificPage : selectedScope, null));
+                                }}
+                                className="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                title="Excluir/remover a regra de fundo desta seção"
                             >
-                                <option value="linear">Linear</option>
-                                <option value="radial">Radial</option>
-                            </select>
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Excluir Regra</span>
+                            </button>
+                        )}
+                        {currentBg.type !== 'none' && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800">
+                                {currentBg.type === 'solid' ? 'Cor Sólida' : currentBg.type === 'gradient' ? 'Gradiente' : 'Imagem'}
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                {/* BOTÕES DE TIPO DE FUNDO */}
+                <div className="grid grid-cols-3 gap-2">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            updateAllRules(updateRuleBackground(rules, selectedCategory, selectedCategory === 'specific' ? selectedSpecificPage : selectedScope, null));
+                        }}
+                        className={`p-2.5 rounded-xl border text-[10px] font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            currentBg.type === 'none'
+                                ? 'bg-gray-100 border-gray-300 text-gray-500'
+                                : 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100 hover:border-red-300'
+                        }`}
+                        title="Remover/excluir o fundo desta seção"
+                    >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                        <span>Excluir Fundo</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => updateCurrentBg({ type: 'solid', color: currentBg.color || '#fdfbf7' })}
+                        className={`p-2.5 rounded-xl border text-[10px] font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            currentBg.type === 'solid' || currentBg.type === 'gradient'
+                                ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-xs'
+                                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                        }`}
+                    >
+                        <Palette className="w-4 h-4 text-indigo-600" />
+                        <span>Cor / Gradiente</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`p-2.5 rounded-xl border text-[10px] font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            currentBg.type === 'image'
+                                ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-xs'
+                                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                        }`}
+                    >
+                        <Upload className="w-4 h-4 text-purple-600" />
+                        <span>Imagem / PDF</span>
+                    </button>
+                </div>
+
+                {/* CONTROLES SE TIPO = COR / GRADIENTE */}
+                {(currentBg.type === 'solid' || currentBg.type === 'gradient') && (
+                    <div className="space-y-3 p-3 bg-gray-50 rounded-xl border border-gray-200 animate-in fade-in">
+                        <div className="flex items-center justify-between pb-1">
+                            <span className="text-[10px] font-bold text-gray-600 uppercase">Modo de Cor:</span>
+                            <div className="flex bg-gray-200 p-0.5 rounded-lg text-[9px] font-bold">
+                                <button
+                                    type="button"
+                                    onClick={() => updateCurrentBg({ type: 'solid', color: currentBg.color || '#fdfbf7' })}
+                                    className={`px-2 py-1 rounded-md transition-all cursor-pointer ${currentBg.type === 'solid' ? 'bg-white text-indigo-900 shadow-xs' : 'text-gray-600'}`}
+                                >
+                                    Cor Sólida
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => updateCurrentBg({
+                                        type: 'gradient',
+                                        gradient: currentBg.gradient || { type: 'linear', colors: ['#ffffff', '#f3f4f6'], direction: 180 }
+                                    })}
+                                    className={`px-2 py-1 rounded-md transition-all cursor-pointer ${currentBg.type === 'gradient' ? 'bg-white text-indigo-900 shadow-xs' : 'text-gray-600'}`}
+                                >
+                                    Gradiente
+                                </button>
+                            </div>
                         </div>
-                        {current.gradient.type === 'linear' && (
+
+                        {currentBg.type === 'solid' && (
                             <div className="space-y-2">
-                                <label className="block text-[10px] font-bold text-gray-500 uppercase">Ângulo</label>
-                                <input 
-                                    type="number" 
-                                    value={current.gradient.direction}
-                                    onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, direction: parseInt(e.target.value) || 0 } })}
-                                    className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white"
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="color"
+                                        value={currentBg.color || '#ffffff'}
+                                        onChange={(e) => updateCurrentBg({ color: e.target.value })}
+                                        className="w-10 h-10 border-0 rounded-lg cursor-pointer bg-transparent"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={currentBg.color || '#ffffff'}
+                                        onChange={(e) => updateCurrentBg({ color: e.target.value })}
+                                        className="flex-1 text-xs p-2 font-mono uppercase font-bold border border-gray-300 rounded-lg bg-white"
+                                    />
+                                </div>
+
+                                {/* PALETA DE CORES RÁPIDAS */}
+                                <div>
+                                    <span className="text-[9px] font-extrabold text-gray-500 uppercase block mb-1">Cores Recomendadas:</span>
+                                    <div className="flex flex-wrap gap-1">
+                                        {COLOR_SWATCHES.map((swatch) => (
+                                            <button
+                                                key={swatch.hex}
+                                                type="button"
+                                                onClick={() => updateCurrentBg({ color: swatch.hex })}
+                                                className="w-6 h-6 rounded-md border border-gray-300 shadow-2xs hover:scale-110 transition-transform cursor-pointer"
+                                                style={{ backgroundColor: swatch.hex }}
+                                                title={swatch.name}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {currentBg.type === 'gradient' && currentBg.gradient && (
+                            <div className="space-y-3">
+                                <div
+                                    className="h-10 w-full rounded-lg border border-gray-300 shadow-inner"
+                                    style={{
+                                        background: currentBg.gradient.type === 'linear'
+                                            ? `linear-gradient(${currentBg.gradient.direction}deg, ${currentBg.gradient.colors[0]}, ${currentBg.gradient.colors[1]})`
+                                            : `radial-gradient(circle at center, ${currentBg.gradient.colors[0]}, ${currentBg.gradient.colors[1]})`
+                                    }}
                                 />
+
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                        <label className="block text-[9px] font-bold text-gray-500 uppercase">Tipo</label>
+                                        <select
+                                            value={currentBg.gradient.type}
+                                            onChange={(e) => updateCurrentBg({ gradient: { ...currentBg.gradient!, type: e.target.value as any } })}
+                                            className="w-full text-xs p-1.5 border border-gray-300 rounded-lg bg-white font-bold"
+                                        >
+                                            <option value="linear">Linear</option>
+                                            <option value="radial">Radial</option>
+                                        </select>
+                                    </div>
+
+                                    {currentBg.gradient.type === 'linear' && (
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-gray-500 uppercase">Ângulo (°)</label>
+                                            <input
+                                                type="number"
+                                                value={currentBg.gradient.direction}
+                                                onChange={(e) => updateCurrentBg({ gradient: { ...currentBg.gradient!, direction: parseInt(e.target.value) || 0 } })}
+                                                className="w-full text-xs p-1.5 border border-gray-300 rounded-lg bg-white font-bold"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-[9px] font-bold text-gray-500 uppercase">Cor Inicial</label>
+                                        <input
+                                            type="color"
+                                            value={currentBg.gradient.colors[0]}
+                                            onChange={(e) => updateCurrentBg({ gradient: { ...currentBg.gradient!, colors: [e.target.value, currentBg.gradient!.colors[1]] } })}
+                                            className="w-full h-8 border border-gray-300 rounded-lg cursor-pointer"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[9px] font-bold text-gray-500 uppercase">Cor Final</label>
+                                        <input
+                                            type="color"
+                                            value={currentBg.gradient.colors[1]}
+                                            onChange={(e) => updateCurrentBg({ gradient: { ...currentBg.gradient!, colors: [currentBg.gradient!.colors[0], e.target.value] } })}
+                                            className="w-full h-8 border border-gray-300 rounded-lg cursor-pointer"
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>
+                )}
 
-                    <div className="grid grid-cols-2 gap-3 pt-2">
-                        <div className="space-y-2">
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase">Cor 1</label>
-                            <div className="flex h-8 border border-gray-200 rounded overflow-hidden">
-                                <input 
-                                    type="color" 
-                                    value={current.gradient.colors[0]} 
-                                    onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, colors: [e.target.value, current.gradient!.colors[1]] } })} 
-                                    className="w-full h-full p-0 border-0 cursor-pointer" 
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase">Cor 2</label>
-                            <div className="flex h-8 border border-gray-200 rounded overflow-hidden">
-                                <input 
-                                    type="color" 
-                                    value={current.gradient.colors[1]} 
-                                    onChange={(e) => handleCurrentUpdate({ gradient: { ...current.gradient!, colors: [current.gradient!.colors[0], e.target.value] } })} 
-                                    className="w-full h-full p-0 border-0 cursor-pointer" 
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {current.type === 'image' && current.image && (
-                <div className="space-y-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    <div className="relative group aspect-[3/4] max-h-48 overflow-hidden rounded-md border border-gray-200 bg-gray-100 flex items-center justify-center">
-                        <img 
-                            src={bgUrl} 
-                            alt="Background" 
-                            className="w-full h-full object-contain transition-transform duration-200"
-                            style={{
-                                transform: [
-                                    current.image.rotation ? `rotate(${current.image.rotation}deg)` : '',
-                                    current.image.flipHorizontal ? 'scaleX(-1)' : '',
-                                    current.image.flipVertical ? 'scaleY(-1)' : '',
-                                ].filter(Boolean).join(' ') || undefined
-                            }}
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                            <button 
-                                onClick={triggerImageUpload}
-                                className="p-2 bg-white rounded-full hover:bg-gray-100 text-gray-700 shadow-lg cursor-pointer"
-                                title="Alterar Imagem"
-                            >
-                                <Upload className="w-5 h-5" />
-                            </button>
-                            <button 
-                                onClick={() => handleCurrentUpdate({ type: 'none' })}
-                                className="p-2 bg-red-500 rounded-full hover:bg-red-600 text-white shadow-lg cursor-pointer"
-                                title="Remover"
-                            >
-                                <Trash2 className="w-5 h-5" />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Ajuste da Imagem</label>
-                        <select 
-                            value={current.image.fit}
-                            onChange={(e) => handleCurrentUpdate({ image: { ...current.image!, fit: e.target.value as any } })}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white select-none"
-                        >
-                            <option value="cover">Cobrir Totalmente (Crop)</option>
-                            <option value="contain">Conter Inteira (Bordas)</option>
-                            <option value="fill">Esticar para Preencher</option>
-                        </select>
-                    </div>
-
-                    {/* Orientação e Sentido (Inverter/Espelhar) */}
-                    <div className="space-y-3 pt-3 border-t border-gray-200">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                            Inverter e Espelhar Fundo
-                        </label>
-
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({
-                                    image: {
-                                        ...current.image!,
-                                        flipHorizontal: !current.image?.flipHorizontal
-                                    }
-                                })}
-                                className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
-                                    current.image.flipHorizontal 
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                                title="Espelhar Horizontalmente (Esquerda/Direita)"
-                            >
-                                <FlipHorizontal className="w-3.5 h-3.5" />
-                                <span>Inverter H (Espelhar)</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => handleCurrentUpdate({
-                                    image: {
-                                        ...current.image!,
-                                        flipVertical: !current.image?.flipVertical
-                                    }
-                                })}
-                                className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
-                                    current.image.flipVertical 
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                }`}
-                                title="Espelhar Verticalmente (Ponta-cabeça)"
-                            >
-                                <FlipVertical className="w-3.5 h-3.5" />
-                                <span>Inverter V</span>
-                            </button>
-                        </div>
-
-                        {/* Alternar em Páginas Pares (Simetria do Miolo) */}
-                        <button
-                            type="button"
-                            onClick={() => handleCurrentUpdate({
-                                image: {
-                                    ...current.image!,
-                                    flipOnEvenPages: !current.image?.flipOnEvenPages
-                                }
-                            })}
-                            className={`w-full flex items-center justify-between p-2.5 rounded-lg border text-[10px] font-medium transition-all text-left cursor-pointer ${
-                                current.image.flipOnEvenPages 
-                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-800' 
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}
-                        >
-                            <div className="flex items-center gap-2">
-                                <BookOpen className={`w-4 h-4 flex-shrink-0 ${current.image.flipOnEvenPages ? 'text-indigo-600' : 'text-gray-400'}`} />
-                                <div>
-                                    <p className="font-bold leading-tight">Alternar em Páginas Pares</p>
-                                    <p className="text-[9px] opacity-75 font-normal leading-tight">Inverte o sentido nas páginas da esquerda (miolo duplex)</p>
+                {/* CONTROLES SE TIPO = IMAGEM */}
+                {currentBg.type === 'image' && (
+                    <div className="space-y-3 p-3 bg-gray-50 rounded-xl border border-gray-200 animate-in fade-in">
+                        {bgUrl ? (
+                            <div className="flex items-center gap-3">
+                                <img src={bgUrl} alt="Prévia do Fundo" className="w-16 h-20 object-cover rounded-lg border border-gray-300 shadow-2xs" />
+                                <div className="space-y-1">
+                                    <span className="text-xs font-bold text-gray-800 block">Imagem Carregada</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 underline block cursor-pointer"
+                                    >
+                                        Trocar Imagem ou PDF
+                                    </button>
                                 </div>
                             </div>
-                            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${current.image.flipOnEvenPages ? 'bg-indigo-600' : 'bg-gray-300'}`} />
-                        </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="w-full p-4 border-2 border-dashed border-gray-300 rounded-xl text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-all cursor-pointer"
+                            >
+                                <Upload className="w-6 h-6 mx-auto text-gray-400 mb-1" />
+                                <span className="text-xs font-bold text-gray-700 block">Clique para escolher imagem ou PDF</span>
+                            </button>
+                        )}
 
-                        {/* Rotação e Seleção de Páginas Pares / Ímpares */}
-                        <div className="space-y-2 pt-2 border-t border-gray-200/60">
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                                Páginas de Exibição (Pares / Ímpares)
-                            </label>
-                            <div className="grid grid-cols-3 gap-1.5">
-                                <button
-                                    type="button"
-                                    onClick={() => handleCurrentUpdate({ pageFilter: 'all', targetType: 'all' })}
-                                    className={`py-2 px-1 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                                        (!current.pageFilter || current.pageFilter === 'all')
-                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                    }`}
-                                >
-                                    <BookOpen className="w-3.5 h-3.5" />
-                                    <span>Todas</span>
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => handleCurrentUpdate({ pageFilter: 'even', targetType: 'even' })}
-                                    className={`py-2 px-1 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                                        current.pageFilter === 'even' || current.targetType === 'even'
-                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                    }`}
-                                    title="Apenas Páginas Pares (2, 4, 6... Lado Esquerdo)"
-                                >
-                                    <FileText className="w-3.5 h-3.5" />
-                                    <span>Páginas Pares</span>
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => handleCurrentUpdate({ pageFilter: 'odd', targetType: 'odd' })}
-                                    className={`py-2 px-1 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                                        current.pageFilter === 'odd' || current.targetType === 'odd'
-                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                    }`}
-                                    title="Apenas Páginas Ímpares (1, 3, 5... Lado Direito)"
-                                >
-                                    <FileText className="w-3.5 h-3.5" />
-                                    <span>Páginas Ímpares</span>
-                                </button>
+                        {/* CONTROLES DE IMAGEM */}
+                        <div className="space-y-2 pt-2 border-t border-gray-200">
+                            <div>
+                                <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">
+                                    Opacidade: {Math.round((currentBg.image?.opacity ?? 1) * 100)}%
+                                </label>
+                                <input
+                                    type="range"
+                                    min="0.05"
+                                    max="1"
+                                    step="0.05"
+                                    value={currentBg.image?.opacity ?? 1}
+                                    onChange={(e) => updateCurrentBg({
+                                        image: { ...(currentBg.image || { url: '', fit: 'cover' }), opacity: parseFloat(e.target.value) }
+                                    })}
+                                    className="w-full"
+                                />
                             </div>
-                        </div>
 
-                        {/* Rotation selector */}
-                        <div className="space-y-1.5 pt-1">
-                            <div className="flex items-center justify-between">
-                                <label className="block text-[9px] font-bold text-gray-400 uppercase">Girar Imagem (Rotação)</label>
-                                <span className="text-[9px] font-bold text-indigo-600">{current.image?.rotation || 0}°</span>
-                            </div>
-                            <div className="grid grid-cols-4 gap-1.5">
-                                {[0, 90, 180, 270].map((deg) => (
+                            <div>
+                                <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Ajuste na Página:</label>
+                                <div className="grid grid-cols-3 gap-1">
                                     <button
-                                        key={deg}
                                         type="button"
-                                        onClick={() => handleCurrentUpdate({
-                                            image: {
-                                                ...current.image!,
-                                                rotation: deg
-                                            }
-                                        })}
-                                        className={`py-1.5 px-1 rounded text-[10px] font-bold border transition-all text-center cursor-pointer ${
-                                            (current.image?.rotation || 0) === deg 
-                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
-                                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                        }`}
+                                        onClick={() => updateCurrentBg({ image: { ...(currentBg.image || { url: '', opacity: 1 }), fit: 'cover' } })}
+                                        className={`py-1 text-[10px] font-bold rounded-lg border cursor-pointer ${currentBg.image?.fit === 'cover' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300'}`}
                                     >
-                                        {deg}°
+                                        Cobrir
                                     </button>
-                                ))}
+                                    <button
+                                        type="button"
+                                        onClick={() => updateCurrentBg({ image: { ...(currentBg.image || { url: '', opacity: 1 }), fit: 'contain' } })}
+                                        className={`py-1 text-[10px] font-bold rounded-lg border cursor-pointer ${currentBg.image?.fit === 'contain' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                                    >
+                                        Conter
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => updateCurrentBg({ image: { ...(currentBg.image || { url: '', opacity: 1 }), fit: 'fill' } })}
+                                        className={`py-1 text-[10px] font-bold rounded-lg border cursor-pointer ${currentBg.image?.fit === 'fill' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                                    >
+                                        Esticar
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
 
-            <div className="space-y-3 pt-3 border-t border-gray-100">
-                <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Opacidade do Fundo ({Math.round((current.opacity ?? 1) * 100)}%)</label>
-                </div>
-                <input 
-                    type="range" 
-                    min="0" 
-                    max="1" 
-                    step="0.05" 
-                    value={current.opacity ?? 1} 
-                    onChange={(e) => handleCurrentUpdate({ opacity: parseFloat(e.target.value) })} 
-                    className="w-full" 
-                />
+                {/* BOTÃO "APLICAR ESTE FUNDO A..." */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setApplyTargets([
+                            selectedCategory === 'global' ? 'global' :
+                            selectedCategory === 'specific' ? `page_${selectedSpecificPage}` :
+                            `${selectedCategory}_${selectedScope}`
+                        ]);
+                        setShowApplyModal(true);
+                    }}
+                    className="w-full py-2.5 px-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+                >
+                    <Zap className="w-4 h-4 text-amber-300" />
+                    <span>Aplicar este fundo a...</span>
+                </button>
             </div>
 
-            <div className="space-y-3 pt-3 border-t border-gray-100">
-                <label className="block text-[10px] font-bold text-gray-500 uppercase">Visibilidade e Páginas</label>
-                <div className="space-y-2">
-                    <button 
-                        onClick={() => handleCurrentUpdate({ showOnIntroPages: !current.showOnIntroPages })}
-                        className={`w-full flex items-center justify-between p-2 rounded-md border text-[10px] font-medium transition-all ${current.showOnIntroPages ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-100 text-gray-400'}`}
-                    >
-                        <span className="flex items-center">
-                            {current.showOnIntroPages ? <Eye className="w-3.5 h-3.5 mr-2" /> : <EyeOff className="w-3.5 h-3.5 mr-2" />}
-                            Exibir em Páginas Iniciais
-                        </span>
-                        <div className={`w-2 h-2 rounded-full ${current.showOnIntroPages ? 'bg-indigo-500' : 'bg-gray-300'}`} />
-                    </button>
-                    <button 
-                        onClick={() => handleCurrentUpdate({ showOnDailyPages: !current.showOnDailyPages })}
-                        className={`w-full flex items-center justify-between p-2 rounded-md border text-[10px] font-medium transition-all ${current.showOnDailyPages ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-100 text-gray-400'}`}
-                    >
-                        <span className="flex items-center">
-                            {current.showOnDailyPages ? <Eye className="w-3.5 h-3.5 mr-2" /> : <EyeOff className="w-3.5 h-3.5 mr-2" />}
-                            Exibir em Páginas Diárias/Miolo
-                        </span>
-                        <div className={`w-2 h-2 rounded-full ${current.showOnDailyPages ? 'bg-indigo-500' : 'bg-gray-300'}`} />
-                    </button>
-                </div>
-
-                <div className="space-y-1.5 pt-2">
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase">
-                        Filtrar por Paridade de Página
-                    </label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                        <button
-                            type="button"
-                            onClick={() => handleCurrentUpdate({ pageFilter: 'all', targetType: 'all' })}
-                            className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
-                                (!current.pageFilter || current.pageFilter === 'all')
-                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}
-                        >
-                            Todas
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleCurrentUpdate({ pageFilter: 'even', targetType: 'even' })}
-                            className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
-                                current.pageFilter === 'even' || current.targetType === 'even'
-                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}
-                        >
-                            Páginas Pares
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleCurrentUpdate({ pageFilter: 'odd', targetType: 'odd' })}
-                            className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
-                                current.pageFilter === 'odd' || current.targetType === 'odd'
-                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}
-                        >
-                            Páginas Ímpares
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div className="space-y-3 pt-3 border-t border-gray-100">
-                <label className="block text-[10px] font-bold text-gray-500 uppercase">Páginas Específicas (Opcional)</label>
-                <div className="space-y-1">
-                    <input 
-                        type="text"
-                        placeholder="Ex: 1, 3, 5-10"
-                        value={current.customPages || ''}
-                        onChange={(e) => handleCurrentUpdate({ customPages: e.target.value, targetType: e.target.value.trim() !== '' ? 'custom' : 'all' })}
-                        className="w-full text-xs p-2.5 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
-                    />
-                    <p className="text-[9px] text-gray-400 italic px-1">Se preenchido, ignora as opções acima e exibe apenas nestas páginas.</p>
-                </div>
-            </div>
-
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleImageUpload} 
-                accept="image/*,application/pdf" 
-                className="hidden" 
+            {/* INPUT INVISÍVEL DE UPLOAD */}
+            <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleImageUpload}
+                accept="image/*,application/pdf"
+                className="hidden"
             />
 
-            {showWarning && (
-                <div className="fixed inset-0 z-[20000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 flex flex-col text-gray-800 animate-in zoom-in-95 duration-200">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex items-center gap-2 text-amber-600">
-                                <AlertTriangle className="w-5 h-5 flex-shrink-0 animate-bounce" />
-                                <h3 className="text-base font-black text-gray-950">Aviso: Upload de Fotos</h3>
+            {/* GERENCIADOR DE REGRAS ATIVAS DA AGENDA COM BOTÕES DE EXCLUSÃO */}
+            <div className="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-gray-700 uppercase tracking-wider block">
+                        📋 Regras Ativas ({activeRulesList.length})
+                    </span>
+
+                    {activeRulesList.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (confirm('Tem certeza que deseja apagar todas as regras de fundo da agenda?')) {
+                                    updateAllRules({});
+                                }
+                            }}
+                            className="text-[9px] font-bold text-red-600 hover:text-red-800 hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Excluir Todas</span>
+                        </button>
+                    )}
+                </div>
+
+                {activeRulesList.length === 0 ? (
+                    <div className="p-3 bg-white rounded-xl border border-dashed border-gray-300 text-center text-gray-400 text-xs">
+                        Nenhuma regra de fundo personalizada ativa.
+                    </div>
+                ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                        {activeRulesList.map((item) => {
+                            const isCurrentSelected = selectedCategory === item.category &&
+                                (item.category === 'specific' ? selectedSpecificPage === item.scope : selectedScope === item.scope);
+
+                            return (
+                                <div
+                                    key={item.key}
+                                    onClick={() => {
+                                        setSelectedCategory(item.category);
+                                        if (item.category === 'specific') {
+                                            setSelectedSpecificPage(item.scope as number);
+                                        } else {
+                                            setSelectedScope(item.scope as any);
+                                        }
+                                    }}
+                                    className={`p-2 rounded-xl border text-[11px] font-bold flex items-center justify-between gap-2 cursor-pointer transition-all ${
+                                        isCurrentSelected
+                                            ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-2xs'
+                                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2 truncate">
+                                        <div
+                                            className="w-4 h-4 rounded-full border border-gray-300 shrink-0 shadow-2xs"
+                                            style={{
+                                                backgroundColor: item.bg.type === 'solid' ? item.bg.color : '#e0e7ff'
+                                            }}
+                                        />
+                                        <span className="truncate">{item.label}</span>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateAllRules(updateRuleBackground(rules, item.category, item.scope, null));
+                                        }}
+                                        className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0 cursor-pointer"
+                                        title={`Excluir regra: ${item.label}`}
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+
+            {/* MODAL: "APLICAR ESTE FUNDO A..." */}
+            {showApplyModal && (
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl border border-gray-200">
+                        <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                            <div className="flex items-center gap-2">
+                                <Zap className="w-5 h-5 text-indigo-600" />
+                                <h3 className="text-sm font-black text-gray-900">Aplicar este fundo a...</h3>
                             </div>
-                            <button 
-                                onClick={() => setShowWarning(false)}
-                                className="p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                            >
+                            <button type="button" onClick={() => setShowApplyModal(false)} className="text-gray-400 hover:text-gray-600">
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
 
-                        <div className="space-y-4 text-xs text-gray-600 leading-relaxed text-left">
-                            <p>
-                                Para garantir que o system funcione com rapidez e para evitar erros de salvamento, siga as recomendações abaixo:
-                            </p>
+                        <p className="text-xs text-gray-600">
+                            Marque todas as seções para as quais você quer copiar este fundo atual:
+                        </p>
 
-                            <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl space-y-2">
-                                <p className="font-bold text-amber-950 flex items-center gap-1">
-                                    📏 Limite de Tamanho (Máx 1.5MB)
-                                </p>
-                                <p className="text-[11px] text-amber-900 leading-normal">
-                                    Fotos originais tiradas pelo celular são muito pesadas (5MB a 12MB). Se você enviar uma foto muito grande, ela pode esgotar a memória do navegador, travando o editor e fazendo você perder as suas alterações.
-                                </p>
-                            </div>
-
-                            <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-2">
-                                <p className="font-bold text-emerald-950 flex items-center gap-1">
-                                    ⚙️ Como Otimizar Facilmente
-                                </p>
-                                <ol className="list-decimal list-inside text-[11px] text-emerald-900 space-y-1 leading-normal">
-                                    <li><strong>Tire um Print Screen (captura de tela)</strong> da foto no seu celular ou computador e envie o print. Ele mantém ótima qualidade e é super leve!</li>
-                                    <li>Ou <strong>envie a foto para si mesma no WhatsApp</strong> e faça o download de lá. O WhatsApp comprime o tamanho de forma automática.</li>
-                                </ol>
-                            </div>
-
-                            <div className="p-3 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-2">
-                                <p className="font-bold text-indigo-950 flex items-center gap-1">
-                                    🌐 Navegador Recomendado
-                                </p>
-                                <p className="text-[11px] text-indigo-900 leading-normal">
-                                    Sempre use o <strong>Google Chrome</strong> ou <strong>Safari</strong>. Nunca use os navegadores internos do Instagram, Facebook ou WhatsApp, pois eles limitam o tamanho de arquivos e travam constantemente.
-                                </p>
-                            </div>
-
-                            <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                                <input 
-                                    type="checkbox" 
-                                    id="dont-show-again-bg" 
-                                    checked={dontShowAgain}
-                                    onChange={(e) => setDontShowAgain(e.target.checked)}
-                                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
-                                />
-                                <label htmlFor="dont-show-again-bg" className="text-[11px] font-bold text-gray-500 cursor-pointer select-none">
-                                    Não mostrar este aviso novamente
-                                </label>
-                            </div>
+                        <div className="flex justify-between items-center text-[10px] font-bold text-indigo-600">
+                            <button type="button" onClick={selectAllModalTargets} className="hover:underline cursor-pointer">
+                                ☑️ Selecionar Todos
+                            </button>
+                            <button type="button" onClick={deselectAllModalTargets} className="hover:underline cursor-pointer">
+                                ☐ Desmarcar Todos
+                            </button>
                         </div>
 
-                        <div className="flex gap-2 justify-end mt-5 pt-3 border-t border-gray-100">
-                            <button 
-                                onClick={() => setShowWarning(false)}
-                                className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                        {/* LISTA DE OPÇÕES COM CHECKBOXES */}
+                        <div className="space-y-3 max-h-60 overflow-y-auto pr-1 text-xs font-semibold">
+                            {/* GERAL */}
+                            <label className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={applyTargets.includes('global')}
+                                    onChange={() => toggleModalTarget('global')}
+                                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <span>🌐 Toda a Agenda (Fundo Geral)</span>
+                            </label>
+
+                            {/* MIOLO */}
+                            <div className="p-2 bg-indigo-50/50 rounded-xl space-y-1.5 border border-indigo-100">
+                                <span className="text-[10px] font-black text-indigo-900 uppercase">📖 Miolo</span>
+                                <div className="grid grid-cols-1 gap-1 pl-2">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('miolo_default')}
+                                            onChange={() => toggleModalTarget('miolo_default')}
+                                        />
+                                        <span>Todo o Miolo (Padrão)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('miolo_even')}
+                                            onChange={() => toggleModalTarget('miolo_even')}
+                                        />
+                                        <span>Todo o Miolo Par (Esquerda)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('miolo_odd')}
+                                            onChange={() => toggleModalTarget('miolo_odd')}
+                                        />
+                                        <span>Todo o Miolo Ímpar (Direita)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* DIVISÓRIAS */}
+                            <div className="p-2 bg-purple-50/50 rounded-xl space-y-1.5 border border-purple-100">
+                                <span className="text-[10px] font-black text-purple-900 uppercase">📑 Divisórias</span>
+                                <div className="grid grid-cols-1 gap-1 pl-2">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('divisorias_default')}
+                                            onChange={() => toggleModalTarget('divisorias_default')}
+                                        />
+                                        <span>Todas as Divisórias (Padrão)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('divisorias_even')}
+                                            onChange={() => toggleModalTarget('divisorias_even')}
+                                        />
+                                        <span>Todas as Divisórias Pares</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('divisorias_odd')}
+                                            onChange={() => toggleModalTarget('divisorias_odd')}
+                                        />
+                                        <span>Todas as Divisórias Ímpares</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* MENSAIS */}
+                            <div className="p-2 bg-blue-50/50 rounded-xl space-y-1.5 border border-blue-100">
+                                <span className="text-[10px] font-black text-blue-900 uppercase">📅 Páginas Mensais</span>
+                                <div className="grid grid-cols-1 gap-1 pl-2">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('mensais_default')}
+                                            onChange={() => toggleModalTarget('mensais_default')}
+                                        />
+                                        <span>Todas as Mensais (Padrão)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('mensais_even')}
+                                            onChange={() => toggleModalTarget('mensais_even')}
+                                        />
+                                        <span>Todas as Mensais Pares</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('mensais_odd')}
+                                            onChange={() => toggleModalTarget('mensais_odd')}
+                                        />
+                                        <span>Todas as Mensais Ímpares</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* INICIAIS */}
+                            <div className="p-2 bg-emerald-50/50 rounded-xl space-y-1.5 border border-emerald-100">
+                                <span className="text-[10px] font-black text-emerald-900 uppercase">🚀 Páginas Iniciais</span>
+                                <div className="grid grid-cols-1 gap-1 pl-2">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyTargets.includes('iniciais_default')}
+                                            onChange={() => toggleModalTarget('iniciais_default')}
+                                        />
+                                        <span>Todas as Iniciais (Padrão)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* PÁGINA ESPECÍFICA */}
+                            <label className="flex items-center gap-2 p-2 bg-amber-50 rounded-lg border border-amber-200 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={applyTargets.includes(`page_${currentEditorPageNum}`)}
+                                    onChange={() => toggleModalTarget(`page_${currentEditorPageNum}`)}
+                                />
+                                <span>Somente esta página (#{currentEditorPageNum})</span>
+                            </label>
+                        </div>
+
+                        {/* AÇÕES DO MODAL */}
+                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-200">
+                            <button
+                                type="button"
+                                onClick={() => setShowApplyModal(false)}
+                                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl cursor-pointer"
                             >
                                 Cancelar
                             </button>
-                            <button 
-                                onClick={handleConfirmUpload}
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+                            <button
+                                type="button"
+                                onClick={handleApplyToTargetsConfirm}
+                                disabled={applyTargets.length === 0}
+                                className="px-5 py-2 text-xs font-black bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
                             >
-                                Entendi, Escolher Foto
+                                <Zap className="w-3.5 h-3.5 text-amber-300" />
+                                <span>Aplicar ({applyTargets.length})</span>
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
+            {/* MODAL DE SELEÇÃO DE PÁGINA PDF */}
             {showPdfModal && (
-                <div className="fixed inset-0 z-[20000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 flex flex-col text-gray-800 animate-in zoom-in-95 duration-200">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex items-center gap-2 text-indigo-600">
-                                <FileText className="w-5 h-5 flex-shrink-0" />
-                                <h3 className="text-base font-black text-gray-950">Selecionar Página do PDF</h3>
-                            </div>
-                            <button 
-                                onClick={() => {
-                                    setShowPdfModal(false);
-                                    setPdfDoc(null);
-                                    setPdfFile(null);
-                                }}
-                                className="p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                            >
+                <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+                        <div className="flex items-center justify-between pb-2 border-b">
+                            <h3 className="text-sm font-black text-gray-900">Selecione a Página do PDF</h3>
+                            <button type="button" onClick={() => setShowPdfModal(false)} className="text-gray-400 hover:text-gray-600">
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
 
-                        <div className="space-y-4">
-                            <p className="text-xs text-gray-500 font-medium text-left">
-                                Arquivo: <span className="font-bold text-gray-700">{pdfFile?.name}</span>
-                            </p>
-
-                            {/* Preview Area */}
-                            <div className="relative aspect-[3/4] max-h-[320px] bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner flex items-center justify-center p-2">
-                                {pdfLoading && !pdfDoc ? (
-                                    <div className="flex flex-col items-center justify-center gap-3 text-indigo-600">
-                                        <Loader2 className="w-8 h-8 animate-spin" />
-                                        <p className="text-xs font-bold uppercase tracking-wider animate-pulse">Lendo PDF...</p>
-                                    </div>
-                                ) : (
-                                    <canvas 
-                                        ref={pdfPreviewCanvasRef} 
-                                        className="max-w-full max-h-full border border-gray-200 rounded-lg shadow-md bg-white object-contain"
-                                    />
-                                )}
+                        <div className="flex flex-col items-center space-y-3">
+                            <div className="border rounded-xl p-2 bg-gray-50 max-h-72 overflow-auto flex justify-center w-full">
+                                <canvas ref={pdfPreviewCanvasRef} className="max-w-full h-auto shadow-md rounded" />
                             </div>
 
-                            {!pdfLoading && pdfTotalPages > 0 && (
-                                <div className="space-y-3 text-left">
-                                    {/* Pagination Controls */}
-                                    <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                                        <button
-                                            type="button"
-                                            disabled={pdfCurrentPage <= 1}
-                                            onClick={() => setPdfCurrentPage(prev => Math.max(1, prev - 1))}
-                                            className="p-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            <ChevronLeft className="w-4 h-4" />
-                                        </button>
-                                        <span className="text-xs font-bold text-gray-700">
-                                            Página {pdfCurrentPage} de {pdfTotalPages}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            disabled={pdfCurrentPage >= pdfTotalPages}
-                                            onClick={() => setPdfCurrentPage(prev => Math.min(pdfTotalPages, prev + 1))}
-                                            className="p-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            <ChevronRight className="w-4 h-4" />
-                                        </button>
-                                    </div>
-
-                                    {/* Resolution Controls */}
-                                    <div className="space-y-1.5 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100">
-                                        <label className="block text-[10px] font-bold text-indigo-900 uppercase">Qualidade da Importação (Resolução)</label>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setPdfRenderScale(1.5)}
-                                                className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all ${pdfRenderScale === 1.5 ? 'bg-indigo-600 text-white border-transparent shadow-sm' : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
-                                            >
-                                                Média (1.5x)
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setPdfRenderScale(2.0)}
-                                                className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all ${pdfRenderScale === 2.0 ? 'bg-indigo-600 text-white border-transparent shadow-sm' : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
-                                            >
-                                                Alta (2.0x)
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setPdfRenderScale(3.0)}
-                                                className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all ${pdfRenderScale === 3.0 ? 'bg-indigo-600 text-white border-transparent shadow-sm' : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
-                                            >
-                                                Ultra (3.0x)
-                                            </button>
-                                        </div>
-                                        <p className="text-[9px] text-indigo-900 opacity-70 leading-normal mt-1">
-                                            * Resolução Ultra (3.0x) garante máxima nitidez para impressão, mas exige mais do computador. Recomendamos 2.0x para a maioria dos computadores.
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
+                            <div className="flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    disabled={pdfCurrentPage <= 1}
+                                    onClick={() => setPdfCurrentPage(p => Math.max(1, p - 1))}
+                                    className="p-1.5 border rounded-lg hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <span className="text-xs font-bold">Página {pdfCurrentPage} de {pdfTotalPages}</span>
+                                <button
+                                    type="button"
+                                    disabled={pdfCurrentPage >= pdfTotalPages}
+                                    onClick={() => setPdfCurrentPage(p => Math.min(pdfTotalPages, p + 1))}
+                                    className="p-1.5 border rounded-lg hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
 
-                        <div className="flex gap-2 justify-end mt-5 pt-3 border-t border-gray-100">
-                            <button 
-                                onClick={() => {
-                                    setShowPdfModal(false);
-                                    setPdfDoc(null);
-                                    setPdfFile(null);
-                                }}
-                                className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                        <div className="flex justify-end gap-2 pt-2 border-t">
+                            <button
+                                type="button"
+                                onClick={() => setShowPdfModal(false)}
+                                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl"
                             >
                                 Cancelar
                             </button>
-                            <button 
+                            <button
+                                type="button"
                                 onClick={handleConfirmPdfPage}
-                                disabled={pdfLoading || !pdfDoc}
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                                disabled={pdfLoading}
+                                className="px-5 py-2 text-xs font-bold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 flex items-center gap-2"
                             >
                                 {pdfLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                Aplicar como Layout de Fundo
+                                <span>Usar esta Página</span>
                             </button>
                         </div>
                     </div>

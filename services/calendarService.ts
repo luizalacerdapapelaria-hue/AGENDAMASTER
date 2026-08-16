@@ -9,6 +9,7 @@ const getFixedHolidays = (year: number): Holiday[] => [
   { date: `${year}-10-12`, name: 'Nossa Senhora Aparecida', type: 'national' },
   { date: `${year}-11-02`, name: 'Finados', type: 'national' },
   { date: `${year}-11-15`, name: 'Proclamação da República', type: 'national' },
+  { date: `${year}-11-20`, name: 'Dia Nacional de Zumbi e da Consciência Negra', type: 'national' },
   { date: `${year}-12-25`, name: 'Natal', type: 'national' },
 ];
 
@@ -43,7 +44,12 @@ const getMobileHolidays = (year: number): Holiday[] => {
   const goodFridayDate = new Date(easterDate);
   goodFridayDate.setDate(easterDate.getDate() - 2);
 
-  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+  const formatDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const dStr = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dStr}`;
+  };
 
   return [
     { date: formatDate(carnivalDate), name: 'Carnaval', type: 'optional' },
@@ -64,7 +70,10 @@ export const generateCalendarYear = (year: number, includeHolidays: boolean): Da
   const holidayMap = new Map(holidays.map(h => [h.date, h.name]));
 
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const isoDate = d.toISOString().split('T')[0];
+    const dYear = d.getFullYear();
+    const dMonth = String(d.getMonth() + 1).padStart(2, '0');
+    const dDay = String(d.getDate()).padStart(2, '0');
+    const isoDate = `${dYear}-${dMonth}-${dDay}`;
     const holidayName = holidayMap.get(isoDate);
 
     // Simple moon phase simulation (approximate 29.53 days cycle)

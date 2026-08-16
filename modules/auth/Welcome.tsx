@@ -68,7 +68,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl }) => 
                   Agenda Master AI
                 </h1>
                 <span className="bg-orange-50 text-orange-600 border border-orange-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  v1.0.8
+                  v0.9
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 font-medium">Plataforma Profissional de Miolos e Planners</p>
@@ -166,7 +166,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl }) => 
                 onClick={onChooseBrowser}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider py-4 px-6 rounded-2xl shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
               >
-                <span>Entrar pelo Navegador</span>
+                <span>Acessar no Navegador</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -214,13 +214,18 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl }) => 
 
             <div className="pt-8">
               <a
-                href={exeUrl}
+                href={exeUrl || '#'}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold text-xs uppercase tracking-wider py-4 px-6 rounded-2xl shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer text-center"
+                onClick={() => {
+                  setTimeout(() => {
+                    onChooseBrowser();
+                  }, 1200);
+                }}
+                className="w-full bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold text-xs uppercase tracking-wider py-4 px-6 rounded-2xl shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer text-center block"
               >
                 <Download className="w-4 h-4" />
-                <span>Baixar Aplicativo (.EXE)</span>
+                <span>Instalar no Computador (.EXE)</span>
               </a>
             </div>
           </div>

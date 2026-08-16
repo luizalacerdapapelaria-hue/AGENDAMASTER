@@ -60,19 +60,19 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
 
     switch (element.type) {
         case 'day_number': return renderContent(String(d.dayOfMonth).padStart(2, '0'));
-        case 'month_name': return renderContent(getMonthName(d.month));
+        case 'month_name': return renderContent(getMonthName(d.month, style.nameFormat));
         case 'month_number': {
             const mVal = d.month >= 0 ? d.month + 1 : 1;
             return renderContent(String(mVal).padStart(2, '0'));
         }
-        case 'day_name': return renderContent(getDayName(d.dayOfWeek));
+        case 'day_name': return renderContent(getDayName(d.dayOfWeek, style.nameFormat));
         case 'year': return renderContent(d.year);
         case 'date_placeholder': {
             const variant = style.variant || 'day_number';
             switch (variant) {
                 case 'day_number': return renderContent(String(d.dayOfMonth).padStart(2, '0'));
-                case 'day_name': return renderContent(getDayName(d.dayOfWeek));
-                case 'month_name': return renderContent(getMonthName(d.month));
+                case 'day_name': return renderContent(getDayName(d.dayOfWeek, style.nameFormat));
+                case 'month_name': return renderContent(getMonthName(d.month, style.nameFormat));
                 case 'month_number': {
                     const mVal = d.month >= 0 ? d.month + 1 : 1;
                     return renderContent(String(mVal).padStart(2, '0'));

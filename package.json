@@ -1,7 +1,7 @@
 {
   "name": "agendamaster-ai",
   "private": true,
-  "version": "1.0.8",
+  "version": "0.9.0",
   "description": "Gerenciador e Editor de Agendas Personalizadas",
   "author": "Luiza Lacerda",
   "type": "module",

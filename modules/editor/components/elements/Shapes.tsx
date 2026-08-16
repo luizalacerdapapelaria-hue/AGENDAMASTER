@@ -20,18 +20,37 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
   
     const getBoxShadow = () => {
         if (!style.boxShadow || style.boxShadow === 'none') return 'none';
-        if (style.boxShadow === 'sm') return '0 1px 2px 0 rgb(0 0 0 / 0.05)';
-        if (style.boxShadow === 'md') return '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)';
-        if (style.boxShadow === 'lg') return '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)';
-        return 'none';
+        if (style.boxShadow === 'sm') return '0 2px 4px -1px rgba(0, 0, 0, 0.15), 0 1px 2px -1px rgba(0, 0, 0, 0.1)';
+        if (style.boxShadow === 'md') return '0 6px 12px -2px rgba(0, 0, 0, 0.2), 0 3px 6px -2px rgba(0, 0, 0, 0.15)';
+        if (style.boxShadow === 'lg') return '0 12px 24px -4px rgba(0, 0, 0, 0.25), 0 6px 10px -4px rgba(0, 0, 0, 0.2)';
+        return style.boxShadow;
     };
 
     if (element.type === 'lines') {
         const borderWidthVal = style.borderWidth !== undefined ? style.borderWidth : 0.5;
         const borderStyleVal = style.borderStyle || 'solid';
         const isSingleLine = !style.showTimes && (element.h < 3 || (style.lineSpacing && element.h / 100 * pageHeight <= style.lineSpacing));
+        const dashArray = borderStyleVal === 'dashed' ? '5,5' : (borderStyleVal === 'dotted' ? `${Math.max(1, borderWidthVal)},${Math.max(2, borderWidthVal * 2)}` : 'none');
+        const strokeColor = style.hideLines ? 'transparent' : (style.borderColor || style.color || '#d1d5db');
         
-        if (isSingleLine) return <div className="w-full h-full flex items-center justify-center"><div className="w-full" style={{ borderTopWidth: `${borderWidthVal}px`, borderTopStyle: borderStyleVal, borderTopColor: style.borderColor || style.color }}></div></div>;
+        if (isSingleLine) {
+            return (
+                <div className="w-full h-full flex items-center justify-center">
+                    <svg className="w-full h-full overflow-visible">
+                        <line 
+                            x1="0" 
+                            y1="50%" 
+                            x2="100%" 
+                            y2="50%" 
+                            stroke={strokeColor} 
+                            strokeWidth={borderWidthVal} 
+                            strokeDasharray={dashArray} 
+                            vectorEffect="non-scaling-stroke" 
+                        />
+                    </svg>
+                </div>
+            );
+        }
         
         const heightPx = (element.h / 100 * pageHeight);
         let lineCount = 0;
@@ -60,64 +79,166 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             lineCount = Math.floor((heightPx - 1) / finalLineSpacing);
         }
 
+        const textAlign = style.textAlign || 'left';
+        const verticalAlign = style.verticalAlign || 'middle';
+        const timePosition = style.timePosition || 'left';
+        const timeWidthPx = style.timeWidth || 36;
+
+        let flexVerticalAlign = 'items-center';
+        let selfVerticalAlign = 'self-center';
+        let verticalOffset = '0px';
+
+        if (verticalAlign === 'top') {
+            flexVerticalAlign = 'items-start';
+            selfVerticalAlign = 'self-start';
+            verticalOffset = '2px';
+        } else if (verticalAlign === 'bottom') {
+            flexVerticalAlign = 'items-end';
+            selfVerticalAlign = 'self-end';
+            verticalOffset = `-${borderWidthVal / 2}px`;
+        }
+
+        let flexHorizontalAlign = 'justify-start';
+        if (textAlign === 'center') {
+            flexHorizontalAlign = 'justify-center';
+        } else if (textAlign === 'right') {
+            flexHorizontalAlign = 'justify-end';
+        }
+
         return (
             <>
-                {Array(lineCount).fill(0).map((_, i) => (
-                    <div 
-                        key={i} 
-                        className="w-full flex items-end relative" 
-                        style={{ height: finalLineSpacing }}
-                    >
-                        {style.showTimes && timesList[i] && (
+                {Array(lineCount).fill(0).map((_, i) => {
+                    const timeText = style.showTimes && timesList[i];
+                    
+                    const timeNode = timeText ? (
+                        <div 
+                            className={`shrink-0 select-none flex ${flexHorizontalAlign} ${selfVerticalAlign}`}
+                            style={{ 
+                                width: style.timeWidth ? `${style.timeWidth}px` : undefined,
+                                minWidth: `${timeWidthPx}px`,
+                                paddingRight: timePosition === 'left' ? '8px' : '0px',
+                                paddingLeft: timePosition === 'right' ? '8px' : '0px',
+                                marginBottom: verticalAlign === 'bottom' ? verticalOffset : undefined,
+                                marginTop: verticalAlign === 'top' ? verticalOffset : undefined,
+                                justifyContent: textAlign === 'center' ? 'center' : (textAlign === 'right' ? 'flex-end' : 'flex-start'),
+                                alignItems: verticalAlign === 'top' ? 'flex-start' : (verticalAlign === 'bottom' ? 'flex-end' : 'center')
+                            }}
+                        >
                             <span 
-                                className="shrink-0 pr-2 select-none" 
                                 style={{ 
                                     fontFamily: style.fontFamily || 'monospace',
                                     fontSize: style.fontSize || 10,
                                     fontWeight: style.fontWeight || 'normal',
                                     color: style.color || '#6b7280',
                                     letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
+                                    textTransform: (style.textTransform as any) || 'none',
+                                    backgroundColor: style.backgroundColor || 'transparent',
+                                    textAlign: textAlign as any,
                                     lineHeight: 1,
-                                    marginBottom: `-${borderWidthVal / 2}px`
+                                    display: 'block',
+                                    width: '100%'
                                 }}
                             >
-                                {timesList[i]}
+                                {timeText}
                             </span>
-                        )}
+                        </div>
+                    ) : null;
+
+                    return (
                         <div 
-                            className="flex-1" 
+                            key={i} 
+                            className={`w-full flex relative`} 
                             style={{ 
-                                borderBottomWidth: `${borderWidthVal}px`, 
-                                borderBottomStyle: borderStyleVal, 
-                                borderColor: style.borderColor || style.color 
+                                height: finalLineSpacing,
+                                alignItems: verticalAlign === 'top' ? 'flex-start' : (verticalAlign === 'bottom' ? 'flex-end' : 'center')
                             }}
-                        />
-                    </div>
-                ))}
+                        >
+                            {timeNode && timePosition === 'left' && timeNode}
+                            <div className="flex-1 self-end relative w-full h-[1px] flex items-center">
+                                <svg className="w-full h-full overflow-visible">
+                                    <line 
+                                        x1="0" 
+                                        y1="0" 
+                                        x2="100%" 
+                                        y2="0" 
+                                        stroke={strokeColor} 
+                                        strokeWidth={borderWidthVal} 
+                                        strokeDasharray={dashArray} 
+                                        vectorEffect="non-scaling-stroke" 
+                                    />
+                                </svg>
+                            </div>
+                            {timeNode && timePosition === 'right' && timeNode}
+                        </div>
+                    );
+                })}
             </>
         );
     }
 
     if (element.type === 'box') {
+        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : 0;
+        const strokeColor = style.borderColor || '#000000';
+        const borderRadius = style.borderRadius || 0;
+        const borderStyle = style.borderStyle || 'solid';
+        const dashArray = borderStyle === 'dashed' ? '5,5' : (borderStyle === 'dotted' ? `${Math.max(1, strokeWidth)},${Math.max(2, strokeWidth * 2)}` : 'none');
+
         return (
-            <div className="w-full h-full" style={{ 
+            <div className="w-full h-full relative" style={{ 
                 background: getBackgroundStyle(),
-                border: `${style.borderWidth}px ${style.borderStyle || 'solid'} ${style.borderColor}`, 
-                borderRadius: style.borderRadius,
+                borderRadius: `${borderRadius}px`,
                 boxShadow: getBoxShadow(),
                 opacity: style.opacity ?? 1
-            }}></div>
+            }}>
+                {strokeWidth > 0 && (
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                        <rect 
+                            x="0" 
+                            y="0" 
+                            width="100%" 
+                            height="100%" 
+                            rx={borderRadius} 
+                            ry={borderRadius} 
+                            fill="none" 
+                            stroke={strokeColor} 
+                            strokeWidth={strokeWidth} 
+                            strokeDasharray={dashArray} 
+                            vectorEffect="non-scaling-stroke" 
+                        />
+                    </svg>
+                )}
+            </div>
         );
     }
 
     if (element.type === 'circle') {
+        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : 0;
+        const strokeColor = style.borderColor || '#000000';
+        const borderStyle = style.borderStyle || 'solid';
+        const dashArray = borderStyle === 'dashed' ? '5,5' : (borderStyle === 'dotted' ? `${Math.max(1, strokeWidth)},${Math.max(2, strokeWidth * 2)}` : 'none');
+
         return (
-            <div className="w-full h-full rounded-full" style={{ 
+            <div className="w-full h-full rounded-full relative" style={{ 
                 background: getBackgroundStyle(),
-                border: `${style.borderWidth}px ${style.borderStyle || 'solid'} ${style.borderColor}`, 
                 boxShadow: getBoxShadow(),
                 opacity: style.opacity ?? 1
-            }}></div>
+            }}>
+                {strokeWidth > 0 && (
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                        <ellipse 
+                            cx="50%" 
+                            cy="50%" 
+                            rx="50%" 
+                            ry="50%" 
+                            fill="none" 
+                            stroke={strokeColor} 
+                            strokeWidth={strokeWidth} 
+                            strokeDasharray={dashArray} 
+                            vectorEffect="non-scaling-stroke" 
+                        />
+                    </svg>
+                )}
+            </div>
         );
     }
 
@@ -183,8 +304,13 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             }
         };
 
+        const shadowStyle = getBoxShadow();
+        const dropShadowFilter = shadowStyle && shadowStyle !== 'none'
+            ? (style.boxShadow === 'sm' ? 'drop-shadow(0px 2px 4px rgba(0,0,0,0.18))' : style.boxShadow === 'md' ? 'drop-shadow(0px 5px 8px rgba(0,0,0,0.22))' : style.boxShadow === 'lg' ? 'drop-shadow(0px 10px 15px rgba(0,0,0,0.28))' : 'none')
+            : 'none';
+
         return (
-            <div className="w-full h-full" style={{ opacity }}>
+            <div className="w-full h-full" style={{ opacity, filter: dropShadowFilter !== 'none' ? dropShadowFilter : undefined }}>
                 <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
                     <defs>
                         {renderGradient()}

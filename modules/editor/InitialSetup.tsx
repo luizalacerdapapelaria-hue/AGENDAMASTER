@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType } from '../../types';
 import { FileText, BookOpen, ArrowRight, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap } from 'lucide-react';
 import { importProject } from '../../core/logic/fileSystem';
+import { isProjectYearRestricted } from '../../core/backend/calendar';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
@@ -18,28 +19,31 @@ const PAGE_SIZES: Record<PageSize, { name: string, w: number, h: number }> = {
     'A5': { name: 'A5 (Padrão Agenda)', w: 148, h: 210 },
     'A4': { name: 'A4 (Sulfite)', w: 210, h: 297 },
     'Letter': { name: 'Carta (Letter)', w: 216, h: 279 },
-    'Custom': { name: 'Personalizado', w: 0, h: 0 }
+    'Custom': { name: 'Personalizado', w: 148, h: 210 }
 };
 
 export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmail, defaultValues, onLogout, userPlan = 'pro' }) => {
-  const [step, setStep] = useState<'type' | 'library' | 'template' | 'config'>('type');
-  const [projectType, setProjectType] = useState<ProjectType | null>(null);
+  const [step, setStep] = useState<'type' | 'library' | 'template' | 'config'>(defaultValues ? 'config' : 'type');
+  const [projectType, setProjectType] = useState<ProjectType | null>(defaultValues?.projectType || null);
   const [templateCategory, setTemplateCategory] = useState<'intro' | 'planner'>('intro');
   const [plannerStyle, setPlannerStyle] = useState<'blank' | 'lines' | 'dots' | 'grid' | 'timetable'>('lines');
   const [selectedIntroTemplate, setSelectedIntroTemplate] = useState<string | null>(null);
   const [selectedTemplateElements, setSelectedTemplateElements] = useState<LayoutElement[] | null>(null);
-  const [projectName, setProjectName] = useState('Meu Novo Projeto');
-  const [year, setYear] = useState(new Date().getFullYear() + 1);
-  const [pageSize, setPageSize] = useState<PageSize>('A5');
-  const [customWidth, setCustomWidth] = useState(148);
-  const [customHeight, setCustomHeight] = useState(210);
-  const [orientation, setOrientation] = useState<PageOrientation>('portrait');
-  const [margins, setMargins] = useState<PageMargins>({ top: 15, bottom: 15, inside: 15, outside: 15 });
-  const [mirrorEvenPages, setMirrorEvenPages] = useState(true);
-  const [layoutType, setLayoutType] = useState<PageLayoutType>('1_per_page');
-  const [municipalHolidays, setMunicipalHolidays] = useState<Holiday[]>([]);
-  const [startMonth, setStartMonth] = useState<number>(0);
-  const [durationMonths, setDurationMonths] = useState<number>(12);
+  const [isSelectionExplicit, setIsSelectionExplicit] = useState(false);
+  const [projectName, setProjectName] = useState(defaultValues?.name || 'Meu Novo Projeto');
+  const [year, setYear] = useState(defaultValues?.year || new Date().getFullYear() + 1);
+  const [pageSize, setPageSize] = useState<PageSize>(defaultValues?.pageSize || 'A5');
+  const [customWidth, setCustomWidth] = useState(defaultValues?.customPageSize?.width || 148);
+  const [customHeight, setCustomHeight] = useState(defaultValues?.customPageSize?.height || 210);
+  const [orientation, setOrientation] = useState<PageOrientation>(defaultValues?.orientation || 'portrait');
+  const [margins, setMargins] = useState<PageMargins>(defaultValues?.margins || { top: 15, bottom: 15, inside: 15, outside: 15 });
+  const [mirrorEvenPages, setMirrorEvenPages] = useState(defaultValues?.mirrorEvenPages ?? true);
+  const [customVerso, setCustomVerso] = useState(defaultValues?.customVerso ?? false);
+  const [versoAdvancesSequence, setVersoAdvancesSequence] = useState<boolean>(defaultValues?.versoAdvancesSequence ?? true);
+  const [layoutType, setLayoutType] = useState<PageLayoutType>(defaultValues?.layoutType || '1_per_page');
+  const [municipalHolidays, setMunicipalHolidays] = useState<Holiday[]>(defaultValues?.municipalHolidays || []);
+  const [startMonth, setStartMonth] = useState<number>(defaultValues?.startMonth ?? 0);
+  const [durationMonths, setDurationMonths] = useState<number>(defaultValues?.durationMonths ?? 12);
 
   useEffect(() => {
       if (defaultValues) {
@@ -55,20 +59,31 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           if (defaultValues.orientation) setOrientation(defaultValues.orientation);
           if (defaultValues.margins) setMargins(defaultValues.margins);
           if (defaultValues.mirrorEvenPages !== undefined) setMirrorEvenPages(defaultValues.mirrorEvenPages);
+          if (defaultValues.customVerso !== undefined) setCustomVerso(defaultValues.customVerso);
+          if (defaultValues.versoAdvancesSequence !== undefined) setVersoAdvancesSequence(defaultValues.versoAdvancesSequence);
           if (defaultValues.layoutType) {
               setLayoutType(defaultValues.layoutType);
-              if (['weekly_vertical', 'weekly_horizontal'].includes(defaultValues.layoutType)) {
+              if (['weekly_vertical', 'weekly_horizontal', 'weekly_one_page_vertical', 'weekly_one_page_horizontal'].includes(defaultValues.layoutType)) {
                   setProjectType('planner');
+              } else if (defaultValues.layoutType === 'notebook') {
+                  setProjectType('notebook');
+              } else if (defaultValues.layoutType === 'devotional') {
+                  setProjectType('devotional');
               } else {
                   setProjectType('agenda');
               }
           }
+          if (defaultValues.projectType) setProjectType(defaultValues.projectType);
           if (defaultValues.municipalHolidays) setMunicipalHolidays(defaultValues.municipalHolidays);
+          setStep('config');
       }
   }, [defaultValues]);
 
   const handleProjectTypeSelect = (type: ProjectType) => {
       setProjectType(type);
+      setIsSelectionExplicit(true);
+      setSelectedTemplateElements(null);
+      setSelectedIntroTemplate(null);
       if (type === 'agenda') {
           setLayoutType('1_per_page');
           setTemplateCategory('intro');
@@ -91,6 +106,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   const handleTemplateSelect = (type: PageLayoutType, style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
       setLayoutType(type);
       setPlannerStyle(style);
+      setIsSelectionExplicit(true);
       setStep('config');
   };
 
@@ -129,14 +145,19 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
     try {
       const importedConfig = await importProject(file);
-      const isImportedYearRestricted = !(importedConfig.projectType === 'notebook' || importedConfig.projectType === 'devotional') && 
-        importedConfig.year !== 2026 && 
-        importedConfig.year !== 2027 && 
-        !(importedConfig.year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')));
+      const isImportedYearRestricted = isProjectYearRestricted(
+        importedConfig.projectType, 
+        importedConfig.year || 2027, 
+        importedConfig.startMonth || 0, 
+        importedConfig.durationMonths || 12, 
+        userPlan
+      );
 
       if (isImportedYearRestricted) {
-          alert(`O ano ${importedConfig.year} deste projeto importado está bloqueado no seu plano de assinatura. Reajustando para 2027 para permitir o uso.`);
+          alert(`As configurações do projeto importado (ano ${importedConfig.year}, ${importedConfig.durationMonths || 12} meses) excedem o limite permitido do seu plano de assinatura (no máximo 1 mês de 2028). Reajustando para 2027 para permitir o uso.`);
           importedConfig.year = 2027;
+          importedConfig.startMonth = 0;
+          importedConfig.durationMonths = 12;
       }
       onComplete(importedConfig);
     } catch (err) {
@@ -147,19 +168,20 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const handleSubmit = () => {
-      const isYearRestricted = !(projectType === 'notebook' || projectType === 'devotional') && 
-        year !== 2026 && 
-        year !== 2027 && 
-        !(year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan);
 
       if (isYearRestricted) {
-          alert(`O ano de referência ${year} está bloqueado na sua assinatura anual. Para preencher miolos de agenda/planner neste ano, é necessário renovar o seu pacote anual. Atualmente você pode gerar livremente agendas de 2026 e 2027.`);
+          alert(`As configurações selecionadas (ano ${year}, mês inicial ${['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][startMonth]}, duração ${durationMonths} meses) englobam mais de 1 mês de 2028, o que está bloqueado na sua assinatura anual. Para agendas de 2027, é permitido no máximo até Janeiro/2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028, é necessária a renovação da sua assinatura.`);
           return;
       }
       
-      let elements = defaultValues?.elements || [];
-      let elementsWeeklyLeft = defaultValues?.elementsWeeklyLeft || [];
-      let elementsWeeklyRight = defaultValues?.elementsWeeklyRight || [];
+      let elements = defaultValues?.elements ? [...defaultValues.elements] : [];
+      let elementsWeeklyLeft: LayoutElement[] | undefined = defaultValues?.elementsWeeklyLeft ? [...defaultValues.elementsWeeklyLeft] : undefined;
+      let elementsWeeklyRight: LayoutElement[] | undefined = defaultValues?.elementsWeeklyRight ? [...defaultValues.elementsWeeklyRight] : undefined;
+
+      const projectTypeChanged = defaultValues && defaultValues.projectType !== projectType;
+      const layoutTypeChanged = defaultValues && defaultValues.layoutType !== layoutType;
+      const shouldRegenerate = isSelectionExplicit || projectTypeChanged || layoutTypeChanged;
 
       // Se selecionou um template de extra (notebook/devocional)
       if (selectedTemplateElements) {
@@ -174,34 +196,57 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           }
       }
 
-      // Se for planner, inicializa com os templates se a coleção correspondente estiver vazia ou se mudou de layout
+      // Se for planner / semanal
       if (projectType === 'planner' || layoutType.startsWith('weekly')) {
-          if (layoutType === 'weekly_vertical') {
-              if (!elementsWeeklyLeft.length || !elementsWeeklyRight.length) {
+          if (shouldRegenerate || !elementsWeeklyLeft?.length || !elementsWeeklyRight?.length) {
+              if (layoutType === 'weekly_vertical') {
                   elementsWeeklyLeft = mapTemplateElements(WEEKLY_VERTICAL_LEFT, plannerStyle);
                   elementsWeeklyRight = mapTemplateElements(WEEKLY_VERTICAL_RIGHT, plannerStyle);
-              }
-          } else if (layoutType === 'weekly_horizontal') {
-              if (!elementsWeeklyLeft.length || !elementsWeeklyRight.length) {
+                  elements = [];
+              } else if (layoutType === 'weekly_horizontal') {
                   elementsWeeklyLeft = mapTemplateElements(WEEKLY_HORIZONTAL_LEFT, plannerStyle);
                   elementsWeeklyRight = mapTemplateElements(WEEKLY_HORIZONTAL_RIGHT, plannerStyle);
-              }
-          } else if (layoutType === 'weekly_one_page_vertical') {
-              if (!elements.length) {
+                  elements = [];
+              } else if (layoutType === 'weekly_one_page_vertical') {
                   elements = mapTemplateElements(WEEKLY_ONE_PAGE_VERTICAL, plannerStyle);
-              }
-          } else if (layoutType === 'weekly_one_page_horizontal') {
-              if (!elements.length) {
+                  elementsWeeklyLeft = undefined;
+                  elementsWeeklyRight = undefined;
+              } else if (layoutType === 'weekly_one_page_horizontal') {
                   elements = mapTemplateElements(WEEKLY_ONE_PAGE_HORIZONTAL, plannerStyle);
+                  elementsWeeklyLeft = undefined;
+                  elementsWeeklyRight = undefined;
               }
           }
-      }
+      } else {
+          // Não é planner semanal: limpa elementos de planner semanal
+          elementsWeeklyLeft = undefined;
+          elementsWeeklyRight = undefined;
 
-      if (!defaultValues && elements.length === 0 && !selectedTemplateElements && !selectedIntroTemplate) {
-          if (projectType === 'notebook' || layoutType === 'notebook') {
-              elements = [...NOTEBOOK_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))] as LayoutElement[];
-          } else if (projectType === 'devotional' || layoutType === 'devotional') {
-              elements = [...DEVOTIONAL_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))] as LayoutElement[];
+          // Se mudou de planner para agenda/caderno/devocional ou se elements contém elementos de planner
+          const hasPlannerBoxes = elements.some(el => el.type === 'planner_day_box');
+          if (shouldRegenerate || hasPlannerBoxes || elements.length === 0) {
+              if (projectType === 'notebook' || layoutType === 'notebook') {
+                  elements = NOTEBOOK_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
+              } else if (projectType === 'devotional' || layoutType === 'devotional') {
+                  elements = DEVOTIONAL_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
+              } else {
+                  // Agenda (1_per_page, 2_per_page, 1_per_page_weekend_shared)
+                  const clean = elements.filter(el => el.type !== 'planner_day_box');
+                  if (clean.length > 0) {
+                      elements = clean;
+                  } else {
+                      elements = [
+                          {
+                              id: Math.random().toString(36).substr(2, 9),
+                              name: 'Pautas',
+                              type: 'lines',
+                              x: 10, y: 15, w: 80, h: 75,
+                              zIndex: 1,
+                              style: { lineSpacing: 25, color: '#e5e7eb' }
+                          }
+                      ];
+                  }
+              }
           }
       }
 
@@ -213,11 +258,22 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           durationMonths,
           pageCount: (projectType === 'notebook' || projectType === 'devotional') ? 100 : undefined,
           pageSize,
-          customPageSize: pageSize === 'Custom' ? { width: customWidth, height: customHeight } : undefined,
+          customPageSize: pageSize === 'Custom' ? { width: Math.max(20, customWidth || 148), height: Math.max(20, customHeight || 210) } : undefined,
           orientation,
           margins,
           mirrorEvenPages,
+          customVerso,
+          versoAdvancesSequence,
+          elementsVerso: customVerso
+            ? ((defaultValues?.elementsVerso && defaultValues.elementsVerso.length > 0)
+                ? defaultValues.elementsVerso
+                : elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) })))
+            : undefined,
           layoutType,
+          includeHolidays: defaultValues?.includeHolidays ?? true,
+          includeMoonPhases: defaultValues?.includeMoonPhases ?? true,
+          includeQuotes: defaultValues?.includeQuotes ?? true,
+          includeVerses: defaultValues?.includeVerses ?? true,
           municipalHolidays,
           elements,
           elementsWeeklyLeft,
@@ -239,7 +295,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
     setMunicipalHolidays(newHolidays);
   };
 
-  const currentSize = pageSize === 'Custom' ? { w: customWidth, h: customHeight } : PAGE_SIZES[pageSize];
+  const currentSize = pageSize === 'Custom' 
+    ? { w: Math.max(20, customWidth || 148), h: Math.max(20, customHeight || 210) } 
+    : (PAGE_SIZES[pageSize] || PAGE_SIZES['A5']);
   const displayW = orientation === 'portrait' ? currentSize.w : currentSize.h;
   const displayH = orientation === 'portrait' ? currentSize.h : currentSize.w;
 
@@ -555,10 +613,10 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
         <div className="w-full md:w-1/3 bg-orange-600 p-8 text-white flex flex-col justify-between">
             <div>
                 <button 
-                  onClick={() => setStep(['planner'].includes(projectType || '') ? 'template' : 'type')}
-                  className="mb-6 flex items-center gap-2 text-orange-200 hover:text-white transition-colors text-xs font-bold uppercase tracking-widest"
+                  onClick={() => setStep('type')}
+                  className="mb-6 flex items-center gap-2 text-orange-200 hover:text-white transition-colors text-xs font-bold uppercase tracking-widest cursor-pointer"
                 >
-                  ← Voltar
+                  ← Escolher outro tipo de projeto
                 </button>
                 <h2 className="text-2xl font-bold mb-2">{defaultValues ? 'Editar Projeto' : 'Novo Projeto'}</h2>
                 <div className="text-orange-200 text-sm">
@@ -729,34 +787,34 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     value={year} 
                                     onChange={(e) => setYear(parseInt(e.target.value) || 2027)} 
                                     className={`w-full p-2 border rounded focus:ring-2 focus:ring-orange-500 outline-none text-lg font-bold ${
-                                      year !== 2026 && year !== 2027 && !(year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')))
+                                      isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan)
                                          ? 'border-amber-400 bg-amber-50/20 text-amber-900' 
                                          : 'border-gray-300 text-gray-700'
                                     }`}
                                 />
                                 <p className="text-xs text-gray-400 mt-1">Define os feriados nacionais automaticamente.</p>
 
-                                {(year !== 2026 && year !== 2027 && !(year === 2028 && (userPlan.toLowerCase().includes('2028') || userPlan.toLowerCase().includes('renovad') || userPlan.toLowerCase().includes('master')))) && (
+                                {isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan) && (
                                     <div className="mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 leading-relaxed shadow-sm">
                                         <p className="font-bold flex items-center gap-1.5 mb-1 text-amber-950">
-                                            <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 animate-pulse" /> Assinatura Anual Requerida para {year}
+                                            <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 animate-pulse" /> Assinatura Requerida para {year}
                                         </p>
-                                        <p>Seu plano atual para geração de agendas e planners cobre somente os anos de <strong>2026 e 2027</strong>.</p>
-                                        <p className="mt-1 font-semibold">Renove sua assinatura para desbloquear e liberar o ano de {year} em diante!</p>
+                                        <p>Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
+                                        <p className="mt-1 font-semibold">Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura anual!</p>
                                         <div className="mt-2.5 flex gap-2">
                                             <button 
                                                 type="button"
-                                                onClick={() => setYear(2027)} 
+                                                onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(12); }} 
                                                 className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-1 px-2.5 rounded text-[10px] transition-colors"
                                             >
-                                                Ajustar para 2027 (Liberado)
+                                                Ajustar para 2027 (12 meses)
                                             </button>
                                             <button 
                                                 type="button"
-                                                onClick={() => setYear(2026)} 
+                                                onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(13); }} 
                                                 className="bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold py-1 px-2.5 rounded text-[10px] border border-gray-200 transition-colors"
                                             >
-                                                Ajustar para 2026 (Liberado)
+                                                Jan/27 a Jan/28 (13 meses)
                                             </button>
                                         </div>
                                     </div>
@@ -787,7 +845,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     onChange={(e) => setDurationMonths(parseInt(e.target.value))}
                                     className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 outline-none text-sm font-bold text-gray-755 bg-white"
                                 >
-                                    {Array.from({ length: 24 }, (_, i) => i + 1).map(m => (
+                                    {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
                                         <option key={m} value={m}>{m} {m === 1 ? 'mês' : 'meses'}</option>
                                     ))}
                                 </select>
@@ -930,6 +988,30 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                         />
                         <label htmlFor="mirror" className="ml-2 text-sm text-gray-600">Espelhar margens nas páginas pares (Frente/Verso)</label>
                     </div>
+                    <div className="mt-2 flex items-center">
+                        <input 
+                            type="checkbox" 
+                            id="customVerso" 
+                            checked={customVerso} 
+                            onChange={(e) => setCustomVerso(e.target.checked)} 
+                            className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
+                        />
+                        <label htmlFor="customVerso" className="ml-2 text-sm font-medium text-gray-700">Diferenciar layout da Frente e do Verso (Costas)</label>
+                    </div>
+                    {customVerso && (
+                        <div className="mt-2 ml-6 flex items-center">
+                            <input 
+                                type="checkbox" 
+                                id="versoAdvancesSequence" 
+                                checked={versoAdvancesSequence === false} 
+                                onChange={(e) => setVersoAdvancesSequence(!e.target.checked)} 
+                                className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
+                            />
+                            <label htmlFor="versoAdvancesSequence" className="ml-2 text-xs text-gray-600">
+                                Não pular sequência de datas no verso (manter mesma data na frente e verso)
+                            </label>
+                        </div>
+                    )}
                 </div>
 
                 {/* Submit */}

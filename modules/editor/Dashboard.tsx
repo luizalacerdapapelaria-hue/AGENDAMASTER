@@ -3,7 +3,7 @@ import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
 import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, IntroPage, BackgroundConfig } from '../../types';
-import { generateCalendarYear, getMonthName, generatePlannerDays, generateGenericPages } from '../../core/backend/calendar';
+import { generateCalendarYear, getMonthName, generatePlannerDays, generateGenericPages, isProjectYearRestricted } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
 import { calculateDragPosition, calculateResize, SnapGuide } from '../../core/logic/interaction';
@@ -13,6 +13,7 @@ import { BackgroundSettings } from './components/BackgroundSettings';
 import { OpenTypeEditor } from './components/OpenTypeEditor';
 import { compressImage } from './utils/imageCompressor';
 import { ImageManager, useImageSrc } from './utils/imageManager';
+import { getEffectiveBackgroundForPage, BackgroundCategoryType } from '../../core/logic/backgroundRules';
 import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
 import * as icons from 'lucide-react';
 
@@ -26,7 +27,7 @@ import {
   Trash2, Move, AlignLeft, AlignCenter, AlignRight, AlignJustify, Layout,
   Square, Circle, Flower, ListTodo, Grid3X3,
   ScanLine, Layers, ChevronDown,
-  CalendarDays, X, Smile, Copy, ClipboardList, Shapes,
+  CalendarDays, CalendarClock, TableProperties, X, Smile, Copy, ClipboardList, Shapes,
   ChevronUp, Book, Plus, FileText, Grid, List, Undo,
   Type as TypeIcon, CaseUpper, CaseLower,
   PanelTop, PanelBottom, PanelLeft, PanelRight, Columns, Rows, Minus, Flag,
@@ -38,12 +39,15 @@ import {
   FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, FileImage, Printer, Lock, Ruler
 } from 'lucide-react';
 
-const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: number; heightMm: number }> = ({ children, widthMm, heightMm }) => {
+const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: number; heightMm: number; zoom?: number }> = ({ children, widthMm, heightMm, zoom = 1 }) => {
     const wrapperRef = useRef<HTMLDivElement>(null);
     const [scale, setScale] = useState(1);
 
-    const nativeWidth = widthMm * 3.77952;
-    const nativeHeight = heightMm * 3.77952;
+    const safeW = Math.max(20, Number(widthMm) || 148);
+    const safeH = Math.max(20, Number(heightMm) || 210);
+
+    const nativeWidth = safeW * 3.77952;
+    const nativeHeight = safeH * 3.77952;
 
     useEffect(() => {
         const wrapper = wrapperRef.current;
@@ -51,9 +55,9 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
 
         const handleResize = () => {
             const currentWidth = wrapper.clientWidth;
-            if (currentWidth > 0) {
+            if (currentWidth > 0 && nativeWidth > 0) {
                 const targetScale = currentWidth / nativeWidth;
-                setScale(Math.min(1.0, targetScale));
+                setScale(Math.min(1.0, Math.max(0.1, targetScale)));
             }
         };
 
@@ -68,17 +72,19 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
         };
     }, [nativeWidth]);
 
+    const effectiveScale = scale * zoom;
+
     return (
         <div ref={wrapperRef} className="w-full flex justify-center items-start overflow-visible">
             <div 
                 style={{
-                    transform: `scale(${scale})`,
+                    transform: `scale(${effectiveScale})`,
                     transformOrigin: 'top center',
                     width: `${widthMm}mm`,
                     height: `${heightMm}mm`,
-                    marginBottom: `${nativeHeight * (scale - 1)}px`,
+                    marginBottom: `${nativeHeight * (effectiveScale - 1)}px`,
                 }}
-                className="shrink-0 overflow-visible"
+                className="shrink-0 overflow-visible transition-transform duration-150 ease-out"
             >
                 {children}
             </div>
@@ -110,7 +116,63 @@ const PAGE_SIZES_MM: Record<PageSize, { width: number; height: number }> = {
     'A4': { width: 210, height: 297 },
     'A5': { width: 148, height: 210 },
     'Letter': { width: 215.9, height: 279.4 },
-    'Custom': { width: 0, height: 0 }
+    'Custom': { width: 148, height: 210 }
+};
+
+const getVisualBounds = (el: any, usableW_MM: number, usableH_MM: number) => {
+    if (!el) return { x: 0, y: 0, w: 0, h: 0 };
+    const rot = (el.style?.rotation || 0) % 360;
+    const rawX_mm = (el.x / 100) * usableW_MM;
+    const rawY_mm = (el.y / 100) * usableH_MM;
+    const rawW_mm = (el.w / 100) * usableW_MM;
+    const rawH_mm = (el.h / 100) * usableH_MM;
+
+    const normalizedRot = (rot + 360) % 360;
+    if (normalizedRot === 90 || normalizedRot === 270) {
+        const visW_mm = rawH_mm;
+        const visH_mm = rawW_mm;
+        const visX_mm = rawX_mm + (rawW_mm - rawH_mm) / 2;
+        const visY_mm = rawY_mm + (rawH_mm - rawW_mm) / 2;
+        return { x: visX_mm, y: visY_mm, w: visW_mm, h: visH_mm };
+    }
+
+    return { x: rawX_mm, y: rawY_mm, w: rawW_mm, h: rawH_mm };
+};
+
+const setVisualBounds = (el: any, updates: { x?: number; y?: number; w?: number; h?: number }, usableW_MM: number, usableH_MM: number) => {
+    if (!el) return { x: 0, y: 0, w: 0, h: 0 };
+    const rot = (el.style?.rotation || 0) % 360;
+    const currentVis = getVisualBounds(el, usableW_MM, usableH_MM);
+
+    const visX_mm = updates.x !== undefined ? updates.x : currentVis.x;
+    const visY_mm = updates.y !== undefined ? updates.y : currentVis.y;
+    const visW_mm = updates.w !== undefined ? updates.w : currentVis.w;
+    const visH_mm = updates.h !== undefined ? updates.h : currentVis.h;
+
+    const normalizedRot = (rot + 360) % 360;
+    if (normalizedRot === 90 || normalizedRot === 270) {
+        const newRawW_mm = visH_mm;
+        const newRawH_mm = visW_mm;
+        const newCenterX = visX_mm + visW_mm / 2;
+        const newCenterY = visY_mm + visH_mm / 2;
+
+        const newRawX_mm = newCenterX - newRawW_mm / 2;
+        const newRawY_mm = newCenterY - newRawH_mm / 2;
+
+        return {
+            x: (newRawX_mm / usableW_MM) * 100,
+            y: (newRawY_mm / usableH_MM) * 100,
+            w: (newRawW_mm / usableW_MM) * 100,
+            h: (newRawH_mm / usableH_MM) * 100,
+        };
+    }
+
+    return {
+        x: (visX_mm / usableW_MM) * 100,
+        y: (visY_mm / usableH_MM) * 100,
+        w: (visW_mm / usableW_MM) * 100,
+        h: (visH_mm / usableH_MM) * 100,
+    };
 };
 
 import { initializeApp } from 'firebase/app';
@@ -375,7 +437,7 @@ const RulerWrapper: React.FC<RulerWrapperProps> = ({
 
     return (
       <div 
-        className="absolute top-0 left-[24px] bg-slate-50 border-b border-slate-200 select-none overflow-hidden cursor-ns-resize hover:bg-slate-100 transition-colors z-[105]" 
+        className="absolute top-0 left-[24px] bg-slate-50 border-b border-slate-200 select-none overflow-hidden cursor-ns-resize hover:bg-slate-100 transition-colors z-0" 
         style={{ 
           width: `${viewportSize.width - 24}px`, 
           height: `${RULER_SIZE}px`,
@@ -466,7 +528,7 @@ const RulerWrapper: React.FC<RulerWrapperProps> = ({
 
     return (
       <div 
-        className="absolute top-[24px] left-0 bg-slate-50 border-r border-slate-200 select-none overflow-hidden cursor-ew-resize hover:bg-slate-100 transition-colors z-[105]" 
+        className="absolute top-[24px] left-0 bg-slate-50 border-r border-slate-200 select-none overflow-hidden cursor-ew-resize hover:bg-slate-100 transition-colors z-0" 
         style={{ 
           width: `${RULER_SIZE}px`, 
           height: `${viewportSize.height - 24}px`,
@@ -496,7 +558,7 @@ const RulerWrapper: React.FC<RulerWrapperProps> = ({
   const rulersNode = (portalTarget && enabled) ? createPortal(
     <>
       <div 
-        className="absolute top-0 left-0 bg-slate-100 border-r border-b border-slate-200 flex items-center justify-center text-[8px] font-bold text-slate-500 select-none cursor-pointer hover:bg-red-50 hover:text-red-600 transition-colors z-[110]"
+        className="absolute top-0 left-0 bg-slate-100 border-r border-b border-slate-200 flex items-center justify-center text-[8px] font-bold text-slate-500 select-none cursor-pointer hover:bg-red-50 hover:text-red-600 transition-colors z-[1]"
         style={{ 
           width: `${RULER_SIZE}px`, 
           height: `${RULER_SIZE}px`,
@@ -671,10 +733,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   ];
 
   const [config, _setConfig] = useState<AgendaConfig>({
+    name: initialConfig?.name || 'Meu Novo Projeto',
     projectType: initialConfig?.projectType || 'agenda',
     year: initialConfig?.year || new Date().getFullYear() + 1,
+    startMonth: initialConfig?.startMonth ?? 0,
+    durationMonths: initialConfig?.durationMonths ?? 12,
     layoutType: initialConfig?.layoutType || '1_per_page',
     pageSize: initialConfig?.pageSize || 'A5',
+    customPageSize: initialConfig?.customPageSize || (initialConfig?.pageSize === 'Custom' ? { width: 148, height: 210 } : undefined),
     orientation: initialConfig?.orientation || 'portrait',
     includeHolidays: initialConfig?.includeHolidays ?? true,
     includeMoonPhases: initialConfig?.includeMoonPhases ?? false,
@@ -684,6 +750,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     includeMonthlyDividers: initialConfig?.includeMonthlyDividers ?? true,
     includeMonthlyIntroPages: initialConfig?.includeMonthlyIntroPages ?? true,
     margins: initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+    municipalHolidays: initialConfig?.municipalHolidays || [],
     elements: initialConfig?.elements && initialConfig.elements.length > 0 ? initialConfig.elements : getDefaultElements(),
     elementsSaturday: initialConfig?.elementsSaturday,
     elementsSunday: initialConfig?.elementsSunday,
@@ -694,6 +761,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     introPages: initialConfig?.introPages || INTRO_TEMPLATES,
     monthlyIntroPages: initialConfig?.monthlyIntroPages || []
   });
+
+  useEffect(() => {
+    if (initialConfig) {
+      _setConfig(prev => {
+        const nextProjectType = initialConfig.projectType || prev.projectType;
+        const nextLayoutType = initialConfig.layoutType || prev.layoutType;
+        const isWeekly = nextProjectType === 'planner' || nextLayoutType.startsWith('weekly');
+
+        let nextElements = initialConfig.elements ?? prev.elements;
+        if (!isWeekly && nextElements) {
+          nextElements = nextElements.filter(el => el.type !== 'planner_day_box');
+          if (nextElements.length === 0) {
+            nextElements = getDefaultElements();
+          }
+        }
+
+        return {
+          ...prev,
+          ...initialConfig,
+          projectType: nextProjectType,
+          layoutType: nextLayoutType,
+          elements: nextElements,
+          elementsWeeklyLeft: isWeekly ? initialConfig.elementsWeeklyLeft : undefined,
+          elementsWeeklyRight: isWeekly ? initialConfig.elementsWeeklyRight : undefined,
+          municipalHolidays: initialConfig.municipalHolidays || prev.municipalHolidays || []
+        };
+      });
+
+      if (initialConfig.layoutType === 'weekly_vertical' || initialConfig.layoutType === 'weekly_horizontal') {
+        setEditorViewMode('weekly_left');
+      } else if (initialConfig.layoutType === '1_per_page' || initialConfig.projectType === 'agenda') {
+        setEditorViewMode('standard');
+      }
+    }
+  }, [initialConfig]);
 
   const [history, setHistory] = useState<AgendaConfig[]>([]);
 
@@ -741,6 +843,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       return [];
     }
   });
+  const [tableScheduleStart, setTableScheduleStart] = useState<number>(7);
+  const [tableScheduleEnd, setTableScheduleEnd] = useState<number>(18);
+  const [tableScheduleInterval, setTableScheduleInterval] = useState<number>(60);
+  const [tableTargetRow, setTableTargetRow] = useState<number>(0);
+  const [tableTargetCol, setTableTargetCol] = useState<number>(0);
   const [variantModal, setVariantModal] = useState<{type: ElementType, label: string} | null>(null);
   const [templateModal, setTemplateModal] = useState(false);
   const [templateCategory, setTemplateCategory] = useState<'intro' | 'planner' | 'library' | 'notebook' | 'devotional' | 'custom'>('intro');
@@ -765,11 +872,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
       return [];
   });
-  const [editorViewMode, setEditorViewMode] = useState<'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right'>(
+  const [editorViewMode, setEditorViewMode] = useState<'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right'>(
     initialConfig?.layoutType === 'weekly_vertical' || initialConfig?.layoutType === 'weekly_horizontal' 
     ? 'weekly_left' 
     : 'standard'
   );
+  const [activeBgIndex, setActiveBgIndex] = useState<number>(0);
+  const [editorParityToggle, setEditorParityToggle] = useState<'auto' | 'odd' | 'even'>('auto');
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
 
   // --- COREL DRAW NUDGE STATE ---
@@ -1111,6 +1220,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const [editMode, setEditMode] = useState<'daily' | 'intro' | 'monthly_intro' | 'divider'>('daily');
+  const [dividerViewMode, setDividerViewMode] = useState<'front' | 'verso'>('front');
   const [currentIntroPageId, setCurrentIntroPageId] = useState<string | null>(config.introPages[0]?.id || null);
   const [currentMonthlyIntroPageId, setCurrentMonthlyIntroPageId] = useState<string | null>(null);
   
@@ -1593,13 +1703,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [activeTab, renderedPreviewCount, generatedData.length]);
 
   const handlePrintRequest = () => {
-      const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
-        config.year !== 2026 && 
-        config.year !== 2027 && 
-        !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(
+          config.projectType,
+          config.year,
+          config.startMonth ?? 0,
+          config.durationMonths ?? 12,
+          user.plan
+      );
 
       if (isYearRestricted) {
-          alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
+          alert(`Desculpe! As configurações do arquivo (ano ${config.year}, duração ${config.durationMonths ?? 12} meses) englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
       setPrintStatus('generating');
@@ -1646,36 +1759,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const isBgMatchingPage = (
       bg: BackgroundConfig, 
-      pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard', 
+      pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard', 
       pageNumber?: number
   ): boolean => {
       if (!bg || bg.type === 'none') return false;
 
-      const isIntroType = pageType === 'intro' || pageType === 'monthly_intro' || pageType === 'divider';
-      const isDailyType = pageType === 'daily' || pageType === 'standard';
+      const target = bg.targetType || 'universal';
 
-      // Scope filtering (Intro vs Daily)
-      if (isIntroType) {
-          if (bg.targetType === 'daily') return false;
-          if (bg.showOnIntroPages === false) return false;
-      }
-      if (isDailyType) {
-          if (bg.targetType === 'intro') return false;
-          if (bg.showOnDailyPages === false) return false;
+      // 1. Category Scope Filtering
+      if (target === 'daily') {
+          if (pageType !== 'daily' && pageType !== 'standard') return false;
+      } else if (target === 'intro') {
+          if (pageType !== 'intro') return false;
+      } else if (target === 'monthly' || target === 'monthly_intro') {
+          if (pageType !== 'monthly_intro') return false;
+      } else if (target === 'divider') {
+          if (pageType !== 'divider') return false;
+      } else if (target === 'divider_verso') {
+          if (pageType !== 'divider_verso') return false;
+      } else if (target === 'universal' || target === 'all') {
+          if (bg.showOnIntroPages === false && (pageType === 'intro' || pageType === 'monthly_intro' || pageType === 'divider' || pageType === 'divider_verso')) return false;
+          if (bg.showOnDailyPages === false && (pageType === 'daily' || pageType === 'standard')) return false;
+      } else if (target === 'even') {
+          if (pageNumber !== undefined && pageNumber % 2 !== 0) return false;
+          if (bg.showOnIntroPages === false && (pageType === 'intro' || pageType === 'monthly_intro' || pageType === 'divider' || pageType === 'divider_verso')) return false;
+          if (bg.showOnDailyPages === false && (pageType === 'daily' || pageType === 'standard')) return false;
+      } else if (target === 'odd') {
+          if (pageNumber !== undefined && pageNumber % 2 === 0) return false;
+          if (bg.showOnIntroPages === false && (pageType === 'intro' || pageType === 'monthly_intro' || pageType === 'divider' || pageType === 'divider_verso')) return false;
+          if (bg.showOnDailyPages === false && (pageType === 'daily' || pageType === 'standard')) return false;
       }
 
-      // Parity & custom range filtering
+      // 2. Parity & Custom Page Range Filtering
       if (pageNumber !== undefined) {
-          const target = bg.targetType || 'all';
           const filter = bg.pageFilter || 'all';
 
-          if (target === 'even' || filter === 'even') {
+          if (filter === 'even') {
               if (pageNumber % 2 !== 0) return false;
-          }
-          if (target === 'odd' || filter === 'odd') {
+          } else if (filter === 'odd') {
               if (pageNumber % 2 === 0) return false;
-          }
-          if (target === 'custom' || (bg.customPages && bg.customPages.trim() !== '')) {
+          } else if (filter === 'custom' || target === 'custom' || (bg.customPages && bg.customPages.trim() !== '')) {
               if (bg.customPages && bg.customPages.trim() !== '') {
                   if (!isPageInRange(pageNumber, bg.customPages)) return false;
               }
@@ -1726,32 +1849,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const renderBackgroundsForPage = (
-      pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard',
+      pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard',
       pageNumber?: number,
-      pageSpecificBg?: BackgroundConfig
+      pageSpecificBg?: BackgroundConfig,
+      categoryRelativeIndex?: number
   ) => {
-      // 1. If pageSpecificBg is provided and not 'none', it overrides global backgrounds for this page
-      if (pageSpecificBg && pageSpecificBg.type && pageSpecificBg.type !== 'none') {
-          return renderSingleBackground(pageSpecificBg, pageNumber, 'page_specific');
-      }
+      const pageNum = pageNumber || 1;
+      const catRelIdx = categoryRelativeIndex !== undefined ? categoryRelativeIndex : pageNum;
 
-      // 2. Resolve global backgrounds array
-      const globalBgs = (config.backgrounds && config.backgrounds.length > 0)
-          ? config.backgrounds
-          : (config.background ? [config.background] : []);
+      let catKey: BackgroundCategoryType = 'miolo';
+      if (pageType === 'intro') catKey = 'iniciais';
+      else if (pageType === 'monthly_intro') catKey = 'mensais';
+      else if (pageType === 'divider' || pageType === 'divider_verso') catKey = 'divisorias';
 
-      if (globalBgs.length === 0) return null;
-
-      // 3. Filter all backgrounds that match this page context
-      const matchingBgs = globalBgs.filter(bg => isBgMatchingPage(bg, pageType, pageNumber));
-
-      if (matchingBgs.length === 0) return null;
-
-      return (
-          <>
-              {matchingBgs.map((bg, idx) => renderSingleBackground(bg, pageNumber, `global_${bg.id || idx}`))}
-          </>
+      const resolvedBg = getEffectiveBackgroundForPage(
+          pageNum,
+          catKey,
+          catRelIdx,
+          config.backgroundRules,
+          pageSpecificBg,
+          config.backgrounds || (config.background ? [config.background] : undefined)
       );
+
+      if (!resolvedBg) return null;
+      return renderSingleBackground(resolvedBg, pageNum, `resolved_${catKey}_${pageNum}`);
   };
 
   const cancelPrint = () => {
@@ -1955,11 +2076,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const getPageDimensions = () => {
-      const base = config.pageSize === 'Custom' && config.customPageSize 
-        ? config.customPageSize 
-        : PAGE_SIZES_MM[config.pageSize];
-      if (config.orientation === 'portrait') return base;
-      return { width: base.height, height: base.width };
+      let base: { width: number; height: number };
+      if (config.pageSize === 'Custom') {
+          if (config.customPageSize && typeof config.customPageSize.width === 'number' && typeof config.customPageSize.height === 'number' && config.customPageSize.width > 0 && config.customPageSize.height > 0) {
+              base = config.customPageSize;
+          } else {
+              base = { width: 148, height: 210 };
+          }
+      } else {
+          base = PAGE_SIZES_MM[config.pageSize] || { width: 148, height: 210 };
+      }
+
+      const w = Math.max(20, Number(base.width) || 148);
+      const h = Math.max(20, Number(base.height) || 210);
+
+      if (config.orientation === 'portrait') return { width: w, height: h };
+      return { width: h, height: w };
   };
 
   const { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM } = getPageDimensions();
@@ -2022,6 +2154,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const getActiveElements = () => {
       if (editMode === 'daily') {
+          if (editorViewMode === 'verso') {
+              return config.elementsVerso || config.elements;
+          }
           if (config.layoutType === '1_per_page_weekend_shared') {
               if (editorViewMode === 'saturday') return config.elementsSaturday || config.elements;
               if (editorViewMode === 'sunday') return config.elementsSunday || config.elements;
@@ -2033,10 +2168,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
               if (editorViewMode === 'weekly_left') return config.elementsWeeklyLeft ?? config.elements;
               if (editorViewMode === 'weekly_right') return config.elementsWeeklyRight ?? config.elements;
-              // Fallback for standard mode if it leaks
               if (editorViewMode === 'standard') return config.elementsWeeklyLeft ?? config.elements;
           }
-          return config.elements;
+
+          const filtered = config.elements.filter(el => el.type !== 'planner_day_box');
+          return filtered;
       }
       if (editMode === 'intro' && currentIntroPageId) {
           return config.introPages.find(p => p.id === currentIntroPageId)?.elements || [];
@@ -2101,6 +2237,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const updateActiveElements = (newElements: LayoutElement[], silent = false) => {
       const setter = silent ? setConfigSilent : setConfig;
       if (editMode === 'daily') {
+          if (editorViewMode === 'verso') {
+              setter(prev => ({ ...prev, elementsVerso: newElements }));
+              return;
+          }
           if (config.layoutType === '1_per_page_weekend_shared') {
               if (editorViewMode === 'saturday') {
                   setter(prev => ({ ...prev, elementsSaturday: newElements }));
@@ -2384,9 +2524,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setConfig(prev => ({
           ...prev,
           layoutType: type,
-          elements: single.length > 0 ? single : prev.elements,
-          elementsWeeklyLeft: left.length > 0 ? left : prev.elementsWeeklyLeft,
-          elementsWeeklyRight: right.length > 0 ? right : prev.elementsWeeklyRight
+          elements: single.length > 0 ? single : prev.elements.filter(el => el.type !== 'planner_day_box'),
+          elementsWeeklyLeft: left.length > 0 ? left : undefined,
+          elementsWeeklyRight: right.length > 0 ? right : undefined
       }));
       if (type === 'weekly_one_page_vertical' || type === 'weekly_one_page_horizontal') {
           setEditorViewMode('standard');
@@ -2676,7 +2816,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         if (type === 'table') {
-            const defaultRows = 10;
+            const isScheduleTable = !!(styleOverride as any)?.isScheduleTable;
+            const startH = (styleOverride as any)?.startHour ?? 7;
+            const endH = (styleOverride as any)?.endHour ?? 18;
+            const slotCount = isScheduleTable ? (endH - startH + 1) : 10;
+            const defaultRows = isScheduleTable ? (slotCount + 1) : 10;
             const defaultRowHeight = 20;
             const totalHeightPx = defaultRows * defaultRowHeight;
             newElement.w = 80; 
@@ -2684,15 +2828,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newElement.x = 10;
             newElement.style.borderWidth = 1;
             newElement.style.borderColor = '#d1d5db';
+
+            const cellContent: Record<string, string> = {};
+            if (isScheduleTable) {
+                cellContent['0-0'] = 'Horário';
+                cellContent['0-1'] = 'Atividade / Compromisso';
+                let r = 1;
+                for (let h = startH; h <= endH; h++) {
+                    cellContent[`${r}-0`] = `${h.toString().padStart(2, '0')}:00`;
+                    r++;
+                }
+            }
+
             newElement.style.table = {
                 rows: defaultRows,
                 cols: 2,
-                rowHeight: defaultRowHeight,
+                rowHeights: Array(defaultRows).fill(100 / defaultRows),
                 borderColor: '#d1d5db',
                 borderWidth: 1,
                 headerRow: true,
-                columnWidths: [50, 50],
-                cellContent: {},
+                columnWidths: isScheduleTable ? [25, 75] : [50, 50],
+                cellContent,
                 textStyle: {
                     fontFamily: 'Inter',
                     fontSize: 10,
@@ -2705,7 +2861,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     backgroundColor: 'transparent'
                 },
                 rowStyles: {},
-                colStyles: {},
+                colStyles: isScheduleTable ? {
+                    0: { fontWeight: 'bold' }
+                } : {},
                 borders: {
                     top: true, bottom: true, left: true, right: true,
                     insideHorizontal: true, insideVertical: true, headerSeparator: true
@@ -3014,7 +3172,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const newStyle = { ...e.style, ...styleUpdate };
         let newH = e.h;
         
-        if (e.type === 'lines') {
+        if (e.type === 'table') {
+            const updatedTextStyle = { ...(e.style.table?.textStyle || {}), ...styleUpdate };
+            let newColStyles = e.style.table?.colStyles ? { ...e.style.table.colStyles } : undefined;
+            if (styleUpdate.textAlign && newColStyles) {
+                const cleanedColStyles: any = {};
+                Object.keys(newColStyles).forEach(colKey => {
+                    if (newColStyles[colKey]) {
+                        const { textAlign, ...rest } = newColStyles[colKey];
+                        cleanedColStyles[colKey] = rest;
+                    }
+                });
+                newColStyles = cleanedColStyles;
+            }
+            if (styleUpdate.verticalAlign && newColStyles) {
+                const cleanedColStyles: any = {};
+                Object.keys(newColStyles).forEach(colKey => {
+                    if (newColStyles[colKey]) {
+                        const { verticalAlign, ...rest } = newColStyles[colKey];
+                        cleanedColStyles[colKey] = rest;
+                    }
+                });
+                newColStyles = cleanedColStyles;
+            }
+            newStyle.table = {
+                ...(e.style.table || {}),
+                textStyle: updatedTextStyle,
+                ...(newColStyles ? { colStyles: newColStyles } : {})
+            };
+        } else if (e.type === 'lines') {
             if (newStyle.showTimes) {
                 const startH = newStyle.startHour !== undefined ? newStyle.startHour : 7;
                 const endH = newStyle.endHour !== undefined ? newStyle.endHour : 18;
@@ -3045,6 +3231,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }), silent);
   };
 
+  const applyPlannerDayBoxStyleToAll = (sourceStyle: any) => {
+    if (!sourceStyle) return;
+    const updateBoxList = (list: LayoutElement[] | undefined) => {
+        if (!list) return list;
+        return list.map(e => {
+            if (e.type !== 'planner_day_box') return e;
+            const currentDayIndex = e.style.plannerDayBox?.dayIndex ?? 1;
+            return {
+                ...e,
+                style: {
+                    ...e.style,
+                    plannerDayBox: {
+                        ...e.style.plannerDayBox,
+                        ...sourceStyle,
+                        dayIndex: currentDayIndex
+                    }
+                }
+            };
+        });
+    };
+
+    setConfig(prev => ({
+        ...prev,
+        elements: updateBoxList(prev.elements) || [],
+        elementsWeeklyLeft: prev.elementsWeeklyLeft ? updateBoxList(prev.elementsWeeklyLeft) : undefined,
+        elementsWeeklyRight: prev.elementsWeeklyRight ? updateBoxList(prev.elementsWeeklyRight) : undefined,
+    }));
+  };
+
   const updateElementContent = (id: string, content: string) => {
     const activeList = getActiveElements();
     updateActiveElements(activeList.map(e => e.id === id ? { ...e, content } : e));
@@ -3057,6 +3272,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       
       let newTableStyle = { ...element.style.table, ...tableUpdate };
       let newH = element.h;
+
+      if (tableUpdate.rowHeights) {
+          delete (newTableStyle as any).rowHeight;
+      }
       
       if (tableUpdate.cols) {
           const newCols = tableUpdate.cols;
@@ -3092,6 +3311,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       
       updateActiveElements(activeList.map(e => e.id === id ? updatedElement : e));
   }
+
+  const applyScheduleToTable = (elementId: string, startHour: number, endHour: number, intervalMinutes: number = 60) => {
+      const activeList = getActiveElements();
+      const element = activeList.find(e => e.id === elementId);
+      if (!element || !element.style.table) return;
+
+      const currentTable = element.style.table;
+      const slots: string[] = [];
+      
+      if (intervalMinutes === 30) {
+          for (let h = startHour; h <= endHour; h++) {
+              slots.push(`${h.toString().padStart(2, '0')}:00`);
+              if (h < endHour) {
+                  slots.push(`${h.toString().padStart(2, '0')}:30`);
+              }
+          }
+      } else {
+          for (let h = startHour; h <= endHour; h++) {
+              slots.push(`${h.toString().padStart(2, '0')}:00`);
+          }
+      }
+
+      const hasHeader = currentTable.headerRow ?? true;
+      const totalRows = slots.length + (hasHeader ? 1 : 0);
+      const cols = Math.max(2, currentTable.cols || 2);
+
+      const updatedCellContent = { ...(currentTable.cellContent || {}) };
+      
+      if (hasHeader) {
+          if (!updatedCellContent['0-0']) updatedCellContent['0-0'] = 'Horário';
+          if (!updatedCellContent['0-1']) updatedCellContent['0-1'] = 'Atividade / Compromisso';
+      }
+
+      slots.forEach((slot, idx) => {
+          const rowIndex = hasHeader ? idx + 1 : idx;
+          updatedCellContent[`${rowIndex}-0`] = slot;
+      });
+
+      let colWidths = currentTable.columnWidths ? [...currentTable.columnWidths] : [25, 75];
+      if (colWidths.length < cols) {
+          colWidths = [25, ...Array(cols - 1).fill(75 / (cols - 1))];
+      } else {
+          colWidths[0] = 25;
+          const restWidth = 75 / (cols - 1);
+          for (let c = 1; c < cols; c++) colWidths[c] = restWidth;
+      }
+
+      updateTableConfig(elementId, {
+          rows: totalRows,
+          cols,
+          columnWidths: colWidths,
+          cellContent: updatedCellContent,
+          colStyles: {
+              ...(currentTable.colStyles || {}),
+              0: { ...((currentTable.colStyles || {})[0] || {}), textAlign: 'center', fontWeight: 'bold' }
+          }
+      });
+  };
 
   const addTableRow = (id: string, index: number, position: 'before' | 'after') => {
     const activeList = getActiveElements();
@@ -3142,14 +3419,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!element || !element.style.table || element.style.table.rows <= 1) return;
 
     const table = element.style.table;
+    const targetIdx = Math.max(0, Math.min(index, table.rows - 1));
     const newRows = table.rows - 1;
     const newCellContent: Record<string, string> = {};
     
     Object.entries(table.cellContent || {}).forEach(([key, value]) => {
       const cellValue = value as string;
       const [r, c] = key.split('-').map(Number);
-      if (r === index) return;
-      if (r > index) {
+      if (r === targetIdx) return;
+      if (r > targetIdx) {
         newCellContent[`${r - 1}-${c}`] = cellValue;
       } else {
         newCellContent[`${r}-${c}`] = cellValue;
@@ -3159,8 +3437,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const newRowStyles: Record<number, TextStyleConfig> = {};
     Object.entries(table.rowStyles || {}).forEach(([key, value]) => {
       const r = Number(key);
-      if (r === index) return;
-      if (r > index) {
+      if (r === targetIdx) return;
+      if (r > targetIdx) {
         newRowStyles[r - 1] = value;
       } else {
         newRowStyles[r] = value;
@@ -3168,7 +3446,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     });
 
     const newRowHeights = [...(table.rowHeights || Array(table.rows).fill(100/table.rows))];
-    newRowHeights.splice(index, 1);
+    newRowHeights.splice(targetIdx, 1);
 
     updateTableConfig(id, {
       rows: newRows,
@@ -3177,8 +3455,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       rowHeights: newRowHeights.map(() => 100 / newRows)
     });
     
-    if (activeTableCell && activeTableCell.r >= newRows) {
-        setActiveTableCell(null);
+    setTableTargetRow(prev => Math.max(0, Math.min(prev, newRows - 1)));
+    if (activeTableCell && activeTableCell.elementId === id && activeTableCell.r >= newRows) {
+        setActiveTableCell({ ...activeTableCell, r: Math.max(0, newRows - 1) });
     }
   };
 
@@ -3229,14 +3508,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!element || !element.style.table || element.style.table.cols <= 1) return;
 
     const table = element.style.table;
+    const targetIdx = Math.max(0, Math.min(index, table.cols - 1));
     const newCols = table.cols - 1;
     const newCellContent: Record<string, string> = {};
     
     Object.entries(table.cellContent || {}).forEach(([key, value]) => {
       const cellValue = value as string;
       const [r, c] = key.split('-').map(Number);
-      if (c === index) return;
-      if (c > index) {
+      if (c === targetIdx) return;
+      if (c > targetIdx) {
         newCellContent[`${r}-${c - 1}`] = cellValue;
       } else {
         newCellContent[`${r}-${c}`] = cellValue;
@@ -3246,8 +3526,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const newColStyles: Record<number, TextStyleConfig> = {};
     Object.entries(table.colStyles || {}).forEach(([key, value]) => {
       const c = Number(key);
-      if (c === index) return;
-      if (c > index) {
+      if (c === targetIdx) return;
+      if (c > targetIdx) {
         newColStyles[c - 1] = value;
       } else {
         newColStyles[c] = value;
@@ -3255,7 +3535,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     });
 
     const newColumnWidths = [...(table.columnWidths || Array(table.cols).fill(100/table.cols))];
-    newColumnWidths.splice(index, 1);
+    newColumnWidths.splice(targetIdx, 1);
 
     updateTableConfig(id, {
       cols: newCols,
@@ -3264,8 +3544,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       columnWidths: newColumnWidths.map(() => 100 / newCols)
     });
     
-    if (activeTableCell && activeTableCell.c >= newCols) {
-        setActiveTableCell(null);
+    setTableTargetCol(prev => Math.max(0, Math.min(prev, newCols - 1)));
+    if (activeTableCell && activeTableCell.elementId === id && activeTableCell.c >= newCols) {
+        setActiveTableCell({ ...activeTableCell, c: Math.max(0, newCols - 1) });
     }
   };
 
@@ -3616,17 +3897,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             if (!element) return;
             const initial = dragRef.current.initialStates.find((s: any) => s.id === currentId);
 
-            const { x, y, w, h } = calculateResize(deltaX, deltaY, initial.x, initial.y, initial.w, initial.h, editorRect.width, editorRect.height, resizeDir);
-            
-            let finalH = h;
-            let finalW = w;
-            let finalX = x;
-            let finalY = y;
-            
-            let newElementConfig = { ...element, x, y, w, h };
-
+            const rotation = element.style.rotation || 0;
             const unscaledEditorHeight = EDITOR_HEIGHT_PX;
             const unscaledEditorWidth = EDITOR_WIDTH_PX;
+
+            const isSingleLine = element.type === 'lines' && !element.style.showTimes && (
+                initial.h < 3 || 
+                (!element.style.rowCount || element.style.rowCount === 0) ||
+                (element.style.lineSpacing && (initial.h / 100 * unscaledEditorHeight) <= element.style.lineSpacing)
+            );
+
+            const { x, y, w, h } = calculateResize(
+                deltaX, deltaY, 
+                initial.x, initial.y, initial.w, initial.h, 
+                editorRect.width, editorRect.height, 
+                resizeDir,
+                rotation,
+                isSingleLine
+            );
+            
+            let finalH = isSingleLine ? initial.h : h;
+            let finalW = w;
+            
+            let newElementConfig = { ...element, x, y, w, h: finalH };
 
             if (element.type === 'circle') {
                 if (resizeDir.includes('n') || resizeDir.includes('s')) {
@@ -3635,10 +3928,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     finalH = w * (unscaledEditorWidth / unscaledEditorHeight);
                 }
             } else if (element.type === 'lines') {
-                const heightPx = (h / 100 * unscaledEditorHeight);
-                const spacing = element.style.lineSpacing || 24;
-                const lineCount = Math.max(1, Math.floor((heightPx - 1) / spacing));
-                finalH = ((lineCount * spacing + 1) / unscaledEditorHeight) * 100;
+                if (!element.style.showTimes && (!element.style.rowCount || element.style.rowCount === 0) && !isSingleLine) {
+                    const heightPx = (h / 100 * unscaledEditorHeight);
+                    const spacing = element.style.lineSpacing || 24;
+                    const lineCount = Math.max(1, Math.floor((heightPx - 1) / spacing));
+                    finalH = ((lineCount * spacing + 1) / unscaledEditorHeight) * 100;
+                }
             } else if (element.type === 'habit_tracker') {
                 const heightPx = (h / 100 * unscaledEditorHeight);
                 const rowHeight = (element.style.habitMarkerSize || 16) + (element.style.habitSpacing || 4);
@@ -3655,6 +3950,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     table: { ...newElementConfig.style.table, rowHeight: newRowHeight } 
                 };
                 finalH = ((newRowHeight * rows) / unscaledEditorHeight) * 100;
+            }
+
+            let finalX = x;
+            let finalY = y;
+
+            const diffW_px = ((finalW - w) / 100) * editorRect.width;
+            const diffH_px = ((finalH - h) / 100) * editorRect.height;
+
+            if (Math.abs(diffW_px) > 0.01 || Math.abs(diffH_px) > 0.01) {
+                let localShiftX_px = 0;
+                let localShiftY_px = 0;
+
+                if (resizeDir.includes('e')) localShiftX_px += diffW_px / 2;
+                if (resizeDir.includes('w')) localShiftX_px -= diffW_px / 2;
+                if (resizeDir.includes('s')) localShiftY_px += diffH_px / 2;
+                if (resizeDir.includes('n')) localShiftY_px -= diffH_px / 2;
+
+                const rad = (rotation * Math.PI) / 180;
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+
+                const screenShiftX_px = localShiftX_px * cos - localShiftY_px * sin;
+                const screenShiftY_px = localShiftX_px * sin + localShiftY_px * cos;
+
+                const x_px = (x / 100) * editorRect.width;
+                const y_px = (y / 100) * editorRect.height;
+                const w_px = (w / 100) * editorRect.width;
+                const h_px = (h / 100) * editorRect.height;
+                const finalW_px = (finalW / 100) * editorRect.width;
+                const finalH_px = (finalH / 100) * editorRect.height;
+
+                const initialCenterX_px = x_px + w_px / 2;
+                const initialCenterY_px = y_px + h_px / 2;
+
+                const finalCenterX_px = initialCenterX_px + screenShiftX_px;
+                const finalCenterY_px = initialCenterY_px + screenShiftY_px;
+
+                const finalX_px = finalCenterX_px - finalW_px / 2;
+                const finalY_px = finalCenterY_px - finalH_px / 2;
+
+                finalX = (finalX_px / editorRect.width) * 100;
+                finalY = (finalY_px / editorRect.height) * 100;
             }
 
             newElementConfig.x = finalX; newElementConfig.y = finalY; newElementConfig.w = finalW; newElementConfig.h = finalH;
@@ -3759,6 +4096,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       };
     }
   }, [isDragging, resizeDir, resizingTableCol, resizingTableRow, marquee]);
+
+  const getRotatedCursor = (dir: string, rotation: number) => {
+      const baseAngles: Record<string, number> = {
+          'n': 0, 'ne': 45, 'e': 90, 'se': 135,
+          's': 180, 'sw': 225, 'w': 270, 'nw': 315
+      };
+      const baseAngle = baseAngles[dir] ?? 0;
+      const totalAngle = (baseAngle + rotation) % 360;
+      const normalizedAngle = totalAngle < 0 ? totalAngle + 360 : totalAngle;
+
+      const cursors = [
+          'n-resize', 'ne-resize', 'e-resize', 'se-resize',
+          's-resize', 'sw-resize', 'w-resize', 'nw-resize'
+      ];
+
+      const index = Math.round(normalizedAngle / 45) % 8;
+      return cursors[index];
+  };
 
   const renderResizeHandle = (cursor: string, dir: string) => {
       const pos: React.CSSProperties = { position: 'absolute', width: '8px', height: '8px', backgroundColor: 'white', border: '1px solid #4f46e5', borderRadius: '50%', zIndex: 50 };
@@ -4012,7 +4367,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             >
                 {isEditor && selectedIds.length === 1 && selectedIds[0] === el.id && (
                     <div className="no-print">
-                        {['nw','n','ne','e','se','s','sw','w'].map(d => renderResizeHandle(d+'-resize', d))}
+                        {(() => {
+                            const isSingleLine = el.type === 'lines' && !el.style.showTimes && (
+                                el.h < 3 || 
+                                (!el.style.rowCount || el.style.rowCount === 0) ||
+                                (el.style.lineSpacing && (el.h / 100 * EDITOR_HEIGHT_PX) <= el.style.lineSpacing)
+                            );
+                            const handles = isSingleLine ? ['w', 'e'] : ['nw','n','ne','e','se','s','sw','w'];
+                            return handles.map(d => renderResizeHandle(getRotatedCursor(d, el.style.rotation || 0), d));
+                        })()}
                         
                         {/* Floating Action Toolbar */}
                         <div 
@@ -4032,6 +4395,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 title="Copiar"
                             >
                                 <icons.Copy className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                                onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    const currentRot = el.style.rotation || 0;
+                                    updateElementStyle(el.id, { rotation: (currentRot + 90) % 360 }); 
+                                }}
+                                className="p-1.5 hover:bg-indigo-50 rounded-full text-indigo-600 transition-colors"
+                                title="Girar 90° (Posição Vertical/Horizontal)"
+                            >
+                                <icons.RotateCw className="w-3.5 h-3.5" />
                             </button>
                             <button 
                                 onClick={(e) => { e.stopPropagation(); setShowProperties(true); }}
@@ -4190,13 +4564,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const renderEditorPage = () => {
-    let editorPageNum = editorViewMode === 'weekly_left' ? 2 : 1;
+    let editorPageNum = (editorViewMode === 'weekly_left' || editorViewMode === 'verso') ? 2 : 1;
     if (editorViewMode !== 'weekly_left') {
         const globalBgs = config.backgrounds && config.backgrounds.length > 0 ? config.backgrounds : (config.background ? [config.background] : []);
         const activeType = editMode === 'intro' ? 'intro' : editMode === 'monthly_intro' ? 'monthly_intro' : editMode === 'divider' ? 'divider' : 'daily';
-        const matchingForMode = globalBgs.filter(bg => isBgMatchingPage(bg, activeType));
-        if (matchingForMode.length === 1 && (matchingForMode[0].targetType === 'even' || matchingForMode[0].pageFilter === 'even')) {
+        
+        if (editMode === 'daily' && activeBgIndex !== undefined && globalBgs[activeBgIndex]) {
+            const activeBg = globalBgs[activeBgIndex];
+            if (activeBg.targetType === 'even' || activeBg.pageFilter === 'even') {
+                editorPageNum = 2;
+            } else if (activeBg.targetType === 'odd' || activeBg.pageFilter === 'odd') {
+                editorPageNum = 1;
+            }
+        } else {
+            const matchingForMode = globalBgs.filter(bg => isBgMatchingPage(bg, activeType));
+            if (matchingForMode.length === 1 && (matchingForMode[0].targetType === 'even' || matchingForMode[0].pageFilter === 'even')) {
+                editorPageNum = 2;
+            }
+        }
+
+        if (editorParityToggle === 'even') {
             editorPageNum = 2;
+        } else if (editorParityToggle === 'odd') {
+            editorPageNum = 1;
         }
     }
 
@@ -4242,7 +4632,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 widthMm={PAGE_WIDTH_MM}
                 heightMm={PAGE_HEIGHT_MM}
                 scale={EDITOR_SCALE}
-                enabled={showRulers && printStatus === 'idle'}
+                enabled={showRulers && printStatus === 'idle' && activeTab === 'editor'}
                 guides={guides}
                 setGuides={setGuides}
                 responsiveScale={responsiveScale}
@@ -4293,6 +4683,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             dayOfWeek: new Date(config.year, previewMonth, 1).getDay(),
             date: new Date(config.year, previewMonth, 1)
         };
+
+        if (dividerViewMode === 'verso') {
+            const versoContent = config.monthlyDividerVersoContent || 'blank';
+            let versoElements: LayoutElement[] = [];
+            if (versoContent === 'notes') {
+                versoElements = [
+                    { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Anotações do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                    { id: 'v-lines', type: 'lines', name: 'Pauta', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { lineSpacing: 25, color: '#d1d5db' } }
+                ];
+            } else if (versoContent === 'habit_tracker') {
+                versoElements = [
+                    { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Controle de Hábitos', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                    { id: 'v-ht', type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { habitLabel: 'Hábitos do Mês' } }
+                ];
+            } else if (versoContent === 'quote') {
+                versoElements = [
+                    { id: 'v-quote', type: 'text', name: 'Frase', x: 15, y: 40, w: 70, h: 20, content: '"Grandes resultados requerem grandes ambições."', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', fontStyle: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                ];
+            } else if (versoContent !== 'blank') {
+                const targetPage = config.monthlyIntroPages?.find(p => p.id === versoContent) || config.introPages?.find(p => p.id === versoContent);
+                if (targetPage) versoElements = targetPage.elements;
+            }
+
+            return wrapWithRuler(
+                <div className={containerClass} style={containerStyle}>
+                    {renderBackgroundsForPage('divider_verso', editorPageNum, dividerStyle.versoBackground)}
+                    <div className={usefulAreaClass}>
+                        {renderTemplate(versoElements, monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider_verso')}
+                    </div>
+                </div>
+            );
+        }
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
@@ -4418,7 +4840,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
-                    {renderTemplate(config.elements, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
+                    {renderTemplate(activeElements, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
                 </div>
             </div>
         );
@@ -4499,6 +4921,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const pageStyle = { width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm` };
     const borderStyle = showMargins ? 'border border-indigo-200 border-dashed' : '';
     let pageCount = 0;
+    const categoryRelativeCounters: Record<string, number> = {
+        iniciais: 0,
+        mensais: 0,
+        divisorias: 0,
+        miolo: 0
+    };
 
     const renderPageContainer = (
         children: React.ReactNode, 
@@ -4506,9 +4934,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         hideNumbers = false, 
         pageSpecificBg?: BackgroundConfig, 
         customPageStyle?: React.CSSProperties,
-        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'standard' = 'daily'
+        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard' = 'daily'
     ) => {
         pageCount++;
+        
+        let catKey: BackgroundCategoryType = 'miolo';
+        if (pageType === 'intro') catKey = 'iniciais';
+        else if (pageType === 'monthly_intro') catKey = 'mensais';
+        else if (pageType === 'divider' || pageType === 'divider_verso') catKey = 'divisorias';
+
+        categoryRelativeCounters[catKey] = (categoryRelativeCounters[catKey] || 0) + 1;
+        const catRelIndex = categoryRelativeCounters[catKey];
+
         if (countOnly) return <div key={key} />;
 
         if (limitStart !== undefined && limitEnd !== undefined) {
@@ -4526,7 +4963,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return (
             <div id={`preview-page-${pageCount}`} key={key} className="bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 transition-transform hover:scale-[1.01]" style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
-                {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg)}
+                {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg, catRelIndex)}
                 <div className="relative z-10 h-full w-full">
                     <div className="absolute -top-7 left-0 right-0 flex justify-between items-center no-print px-2 bg-indigo-900/5 py-1 rounded-t-lg">
                     <div className="flex items-center gap-1.5">
@@ -4556,7 +4993,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const renderMonthDivider = (month: number, year: number) => {
         const style = config.monthlyDividerStyle || {};
         const elements = style.elements || [];
-        const dividerBg = getEffectiveBg(style.background, introBg);
+        const dividerBg = getEffectiveBg(style.background);
 
         const monthDummyDay: DayData = {
             dayOfMonth: 1,
@@ -4582,14 +5019,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return renderPageContainer(
             <div className="w-full h-full box-border relative">
                 {renderTemplate(elementsToRender, monthDummyDay, false, false, targetPageNum, printW, printH, 'intro', 'divider')}
-            </div>
-            , `divider-${month}-${year}`, false, dividerBg, customStyle
+            </div>,
+            `divider-${month}-${year}`,
+            false,
+            dividerBg,
+            customStyle,
+            'divider'
         );
     };
 
     const renderDividerVersoPage = (month: number, year: number, pNum: number, content: string) => {
         let elements: LayoutElement[] = [];
-        let versoBg = dailyBg || introBg;
+        let versoBg: BackgroundConfig | undefined = undefined;
         
         if (content === 'notes') {
             elements = [
@@ -4609,12 +5050,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const introPage = config.introPages.find(p => p.id === content);
             if (introPage) {
                 elements = introPage.elements;
-                versoBg = getEffectiveBg(introPage.background, introBg);
+                versoBg = getEffectiveBg(introPage.background);
             } else {
                 const mPage = config.monthlyIntroPages?.find(p => p.id === content);
                 if (mPage) {
                     elements = mPage.elements;
-                    versoBg = getEffectiveBg(mPage.background, introBg);
+                    versoBg = getEffectiveBg(mPage.background);
                 }
             }
         }
@@ -4633,7 +5074,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             renderTemplate(elementsToRender, monthDummyDay, false, false, pNum, printW, printH, 'intro', content),
             `divider-verso-${month}-${year}-${pNum}`,
             false,
-            versoBg
+            versoBg,
+            undefined,
+            'divider_verso'
         );
     };
 
@@ -4644,7 +5087,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const renderFillerPage = (pNum: number) => {
         const content = config.fillerPageContent || 'blank';
         let elements: LayoutElement[] = [];
-        let fillerBg = dailyBg || introBg;
+        let fillerBg: BackgroundConfig | undefined = undefined;
         
         if (content === 'notes') {
             elements = [
@@ -4664,12 +5107,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const introPage = config.introPages.find(p => p.id === content);
             if (introPage) {
                 elements = introPage.elements;
-                fillerBg = getEffectiveBg(introPage.background, introBg);
+                fillerBg = getEffectiveBg(introPage.background);
             } else {
                 const mPage = config.monthlyIntroPages?.find(p => p.id === content);
                 if (mPage) {
                     elements = mPage.elements;
-                    fillerBg = getEffectiveBg(mPage.background, introBg);
+                    fillerBg = getEffectiveBg(mPage.background);
                 }
             }
         }
@@ -4681,7 +5124,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             renderTemplate(elementsToRender, null, false, false, pNum, printW, printH, (content !== 'blank' && content !== 'notes' && content !== 'habit_tracker' && content !== 'quote') ? 'intro' : undefined, (content !== 'blank' && content !== 'notes' && content !== 'habit_tracker' && content !== 'quote') ? content : undefined),
             `filler-${pNum}`,
             false,
-            fillerBg
+            fillerBg,
+            undefined,
+            'intro'
         );
     };
 
@@ -4721,7 +5166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                     if (hasDividers) {
                         // Ensure divider is on an ODD page (Right)
-                        if (pageCount % 2 !== 0) {
+                        if (pageCount % 2 !== 0 && !config.disableSequenceSkip) {
                             const filler = renderFillerPage(pageCount + 1);
                             if (filler) pages.push(filler);
                         }
@@ -4742,12 +5187,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = getEffectiveBg(mPage.background, introBg);
+                                const pageBg = getEffectiveBg(mPage.background);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
                                     false,
-                                    pageBg
+                                    pageBg,
+                                    undefined,
+                                    'monthly_intro'
                                 );
                                 if (container) pages.push(container);
                             });
@@ -4769,12 +5216,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = getEffectiveBg(mPage.background, introBg);
+                                    const pageBg = getEffectiveBg(mPage.background);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
                                         false,
-                                        pageBg
+                                        pageBg,
+                                        undefined,
+                                        'monthly_intro'
                                     );
                                     if (container) pages.push(container);
                                 });
@@ -4791,12 +5240,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = getEffectiveBg(mPage.background, introBg);
+                            const pageBg = getEffectiveBg(mPage.background);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
                                 false,
-                                pageBg
+                                pageBg,
+                                undefined,
+                                'monthly_intro'
                             );
                             if (container) pages.push(container);
                         });
@@ -4806,23 +5257,61 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 }
             }
             
-            if (config.startMonthOnRightPage && day.dayOfMonth === 1 && pageCount > 0) {
+            if (config.startMonthOnRightPage && day.dayOfMonth === 1 && pageCount > 0 && !config.disableSequenceSkip) {
                 if (pageCount % 2 !== 0) {
                     const filler = renderFillerPage(pageCount + 1);
                     if (filler) pages.push(filler);
                 }
             }
 
-            const isEven = (pageCount + 1) % 2 === 0;
-            const elementsToRender = isEven ? getMirroredElements(config.elements) : config.elements;
-            const container = renderPageContainer(
-                renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
-                day.date.toISOString() + i, 
-                false, 
-                dailyBg
-            );
-            if(container) pages.push(container);
-            i += daysPerPage;
+            const dateKey = (day && day.date && typeof day.date.toISOString === 'function') ? day.date.toISOString() : `generic-${i}`;
+
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Página Frente (Ímpar) com a data/sequência atual
+                const isEvenFrente = (pageCount + 1) % 2 === 0;
+                const frenteElements = isEvenFrente ? getMirroredElements(config.elements) : config.elements;
+                const containerFrente = renderPageContainer(
+                    renderTemplate(frenteElements, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
+                    `frente-${dateKey}-${i}`, 
+                    false, 
+                    undefined,
+                    undefined,
+                    'daily'
+                );
+                if(containerFrente) pages.push(containerFrente);
+
+                // Página Verso (Par) com a MESMA data/sequência atual
+                const isEvenVerso = (pageCount + 1) % 2 === 0;
+                const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                    ? config.elementsVerso
+                    : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
+                const containerVerso = renderPageContainer(
+                    renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
+                    `verso-${dateKey}-${i}`, 
+                    false, 
+                    undefined,
+                    undefined,
+                    'daily'
+                );
+                if(containerVerso) pages.push(containerVerso);
+
+                i += daysPerPage;
+            } else {
+                const isEven = (pageCount + 1) % 2 === 0;
+                const elementsToRender = (isEven && config.customVerso && config.elementsVerso && config.elementsVerso.length > 0)
+                    ? config.elementsVerso
+                    : (isEven ? getMirroredElements(config.elements) : config.elements);
+                const container = renderPageContainer(
+                    renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
+                    `${dateKey}-${i}`, 
+                    false, 
+                    undefined,
+                    undefined,
+                    'daily'
+                );
+                if(container) pages.push(container);
+                i += daysPerPage;
+            }
         }
     } else if (layoutType === '2_per_page') {
         let i = 0;
@@ -4843,7 +5332,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                     if (hasDividers) {
                         // Ensure divider is on an ODD page (Right)
-                        if (pageCount % 2 !== 0) {
+                        if (pageCount % 2 !== 0 && !config.disableSequenceSkip) {
                             const filler = renderFillerPage(pageCount + 1);
                             if (filler) pages.push(filler);
                         }
@@ -4957,7 +5446,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 Página de Transição
                             </div>
                         </div>
-                    , `transition-${dayTop.date.toISOString()}`, false, dailyBg);
+                    , `transition-${dayTop.date.toISOString()}`, false, undefined, undefined, 'daily');
                     if(container) pages.push(container);
                     i += 1; // Only consumed dayTop
                     continue;
@@ -4980,7 +5469,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 Página de Transição
                             </div>
                         </div>
-                    , `transition-${dayTop.date.toISOString()}`, false, dailyBg);
+                    , `transition-${dayTop.date.toISOString()}`, false, undefined, undefined, 'daily');
                     if(container) pages.push(container);
                     
                     // Now pageCount is ODD (Right). Insert filler on EVEN (Left).
@@ -5008,7 +5497,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         {dayBottom ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(bottomToRender, dayBottom, false, false, pageCount + 1, printW, printH / 2, 'bottom')}</div>) : null}
                     </div>
                 </div>
-            , i, false, dailyBg);
+            , i, false, undefined, undefined, 'daily');
             if(container) pages.push(container);
             i += 2;
         }
@@ -5052,12 +5541,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = getEffectiveBg(mPage.background, introBg);
+                                const pageBg = getEffectiveBg(mPage.background);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
                                     false,
-                                    pageBg
+                                    pageBg,
+                                    undefined,
+                                    'monthly_intro'
                                 );
                                 if (container) pages.push(container);
                             });
@@ -5079,12 +5570,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = getEffectiveBg(mPage.background, introBg);
+                                    const pageBg = getEffectiveBg(mPage.background);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
                                         false,
-                                        pageBg
+                                        pageBg,
+                                        undefined,
+                                        'monthly_intro'
                                     );
                                     if (container) pages.push(container);
                                 });
@@ -5101,12 +5594,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = getEffectiveBg(mPage.background, introBg);
+                            const pageBg = getEffectiveBg(mPage.background);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
                                 false,
-                                pageBg
+                                pageBg,
+                                undefined,
+                                'monthly_intro'
                             );
                             if (container) pages.push(container);
                         });
@@ -5140,7 +5635,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 Página de Transição
                             </div>
                         </div>
-                     , `we-trans-${i}`, false, dailyBg);
+                     , `we-trans-${i}`, false, undefined, undefined, 'daily');
                      if(container) pages.push(container);
                      
                      if (pageCount % 2 !== 0) {
@@ -5169,12 +5664,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             {effectiveDays[i+1] ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, effectiveDays[i+1], false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
                         </div>
                     </div>
-                , `we-${i}`, false, dailyBg);
+                , `we-${i}`, false, undefined, undefined, 'daily');
                 if(container) pages.push(container);
                 i += 2;
             } else {
-                const elementsToRender = isEven ? getMirroredElements(config.elements) : config.elements;
-                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, dailyBg);
+                const elementsToRender = (isEven && config.customVerso && config.elementsVerso)
+                    ? config.elementsVerso
+                    : (isEven ? getMirroredElements(config.elements) : config.elements);
+                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, undefined, undefined, 'daily');
                 if(container) pages.push(container);
                 i += 1;
             }
@@ -5226,12 +5723,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = getEffectiveBg(mPage.background, introBg);
+                                const pageBg = getEffectiveBg(mPage.background);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
                                     false,
-                                    pageBg
+                                    pageBg,
+                                    undefined,
+                                    'monthly_intro'
                                 );
                                 if (container) pages.push(container);
                             });
@@ -5251,12 +5750,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return;
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = getEffectiveBg(mPage.background, introBg);
+                                    const pageBg = getEffectiveBg(mPage.background);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
                                         false,
-                                        pageBg
+                                        pageBg,
+                                        undefined,
+                                        'monthly_intro'
                                     );
                                     if (container) pages.push(container);
                                 });
@@ -5273,12 +5774,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = getEffectiveBg(mPage.background, introBg);
+                            const pageBg = getEffectiveBg(mPage.background);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
                                 false,
-                                pageBg
+                                pageBg,
+                                undefined,
+                                'monthly_intro'
                             );
                             if (container) pages.push(container);
                         });
@@ -5288,17 +5791,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 }
             }
 
-            const isEven = (pageCount + 1) % 2 === 0;
-            const elementsToRender = isEven ? getMirroredElements(config.elements) : config.elements;
-            const container = renderPageContainer(
-                <div className="w-full h-full relative overflow-visible">
-                    {renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
-                </div>,
-                `week-single-${weekIndex}`,
-                false,
-                dailyBg
-            );
-            if (container) pages.push(container);
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Frente Page (Odd) for current week
+                const isEvenFrente = (pageCount + 1) % 2 === 0;
+                const frenteElements = isEvenFrente ? getMirroredElements(config.elements) : config.elements;
+                const containerFrente = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(frenteElements, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
+                    </div>,
+                    `week-single-frente-${weekIndex}`,
+                    false, undefined, undefined, 'daily'
+                );
+                if (containerFrente) pages.push(containerFrente);
+
+                // Verso Page (Even) for SAME week
+                const isEvenVerso = (pageCount + 1) % 2 === 0;
+                const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                    ? config.elementsVerso
+                    : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
+                const containerVerso = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(versoElements, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
+                    </div>,
+                    `week-single-verso-${weekIndex}`,
+                    false, undefined, undefined, 'daily'
+                );
+                if (containerVerso) pages.push(containerVerso);
+            } else {
+                const isEven = (pageCount + 1) % 2 === 0;
+                const elementsToRender = (isEven && config.customVerso && config.elementsVerso && config.elementsVerso.length > 0)
+                    ? config.elementsVerso
+                    : (isEven ? getMirroredElements(config.elements) : config.elements);
+                const container = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
+                    </div>,
+                    `week-single-${weekIndex}`,
+                    false,
+                    undefined,
+                    undefined,
+                    'daily'
+                );
+                if (container) pages.push(container);
+            }
         });
     } else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
         // Group effectiveDays into weeks (Mon-Sun)
@@ -5354,12 +5889,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             config.monthlyIntroPages.forEach(mPage => {
                                 const isEven = (pageCount + 1) % 2 === 0;
                                 const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                const pageBg = getEffectiveBg(mPage.background, introBg);
+                                const pageBg = getEffectiveBg(mPage.background);
                                 const container = renderPageContainer(
                                     renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                     `monthly-intro-${currentMonth}-${mPage.id}`,
                                     false,
-                                    pageBg
+                                    pageBg,
+                                    undefined,
+                                    'monthly_intro'
                                 );
                                 if (container) pages.push(container);
                             });
@@ -5381,12 +5918,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     if (mPage.id === versoContent) return; // Não duplicar se ela foi usada para o verso
                                     const isEven = (pageCount + 1) % 2 === 0;
                                     const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                                    const pageBg = getEffectiveBg(mPage.background, introBg);
+                                    const pageBg = getEffectiveBg(mPage.background);
                                     const container = renderPageContainer(
                                         renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                         `monthly-intro-${currentMonth}-${mPage.id}`,
                                         false,
-                                        pageBg
+                                        pageBg,
+                                        undefined,
+                                        'monthly_intro'
                                     );
                                     if (container) pages.push(container);
                                 });
@@ -5403,12 +5942,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         config.monthlyIntroPages.forEach(mPage => {
                             const isEven = (pageCount + 1) % 2 === 0;
                             const elementsToRender = isEven ? getMirroredElements(mPage.elements) : mPage.elements;
-                            const pageBg = getEffectiveBg(mPage.background, introBg);
+                            const pageBg = getEffectiveBg(mPage.background);
                             const container = renderPageContainer(
                                 renderTemplate(elementsToRender, monthDummyDay, false, false, pageCount + 1, printW, printH, 'intro', mPage.id),
                                 `monthly-intro-${currentMonth}-${mPage.id}`,
                                 false,
-                                pageBg
+                                pageBg,
+                                undefined,
+                                'monthly_intro'
                             );
                             if (container) pages.push(container);
                         });
@@ -5420,7 +5961,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             // Ensure Week Left Page is on an EVEN page (Left)
             // To make the next page EVEN, current pageCount must be ODD.
-            if (pageCount % 2 === 0) {
+            if (pageCount % 2 === 0 && !config.disableSequenceSkip) {
                 const filler = renderFillerPage(pageCount + 1);
                 if (filler) pages.push(filler);
             }
@@ -5433,7 +5974,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 </div>,
                 `week-l-${weekIndex}`,
                 false,
-                dailyBg
+                undefined,
+                undefined,
+                'daily'
             );
             if (containerL) pages.push(containerL);
 
@@ -5445,7 +5988,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 </div>,
                 `week-r-${weekIndex}`,
                 false,
-                dailyBg
+                undefined,
+                undefined,
+                'daily'
             );
             if (containerR) pages.push(containerR);
         });
@@ -5456,17 +6001,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const renderBorderControls = (style: LayoutElement['style'], onChange: (update: Partial<LayoutElement['style']>) => void) => (
       <div className="space-y-3 pt-3 border-t border-gray-100">
           <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Borda e Contorno</h4>
-          <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold text-gray-500">Espessura (px)</label>
-              <input 
-                  type="number" 
-                  min="0" 
-                  max="20" 
-                  step="0.5" 
-                  value={style.borderWidth ?? 0} 
-                  onChange={(e) => onChange({ borderWidth: parseFloat(e.target.value) || 0 })} 
-                  className="w-16 text-xs p-1 border rounded" 
-              />
+          <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-gray-500">Espessura</label>
+                  <span className="text-[10px] font-mono text-gray-400">{(style.borderWidth ?? 0)}px</span>
+              </div>
+              <div className="flex items-center gap-2">
+                  <input 
+                      type="range" 
+                      min="0" 
+                      max="10" 
+                      step="0.1" 
+                      value={style.borderWidth ?? 0} 
+                      onChange={(e) => onChange({ borderWidth: parseFloat(e.target.value) || 0 })} 
+                      className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
+                  />
+                  <input 
+                      type="number" 
+                      min="0" 
+                      max="20" 
+                      step="0.1" 
+                      value={style.borderWidth ?? 0} 
+                      onChange={(e) => onChange({ borderWidth: parseFloat(e.target.value) || 0 })} 
+                      className="w-14 text-xs p-1 border rounded text-center font-mono" 
+                  />
+              </div>
           </div>
           {(style.borderWidth ?? 0) > 0 && (
               <>
@@ -5640,13 +6199,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const progressPercent = Math.min(100, Math.round(((config.introPages.length + (config.monthlyIntroPages?.length || 0) * 12 + renderedPrintCount) / Math.max(1, totalPages)) * 100));
 
   const executePrint = useCallback(async () => {
-      const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
-        config.year !== 2026 && 
-        config.year !== 2027 && 
-        !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(
+          config.projectType,
+          config.year,
+          config.startMonth ?? 0,
+          config.durationMonths ?? 12,
+          user.plan
+      );
 
       if (isYearRestricted) {
-          alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
+          alert(`Desculpe! As configurações do arquivo englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
       setPdfExporting(true);
@@ -5765,13 +6327,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [actualTotalPagesCount, config, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, pdfScaleMode]);
 
   const executeVectorPrint = useCallback(async () => {
-      const isYearRestricted = !(config.projectType === 'notebook' || config.projectType === 'devotional') && 
-        config.year !== 2026 && 
-        config.year !== 2027 && 
-        !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')));
+      const isYearRestricted = isProjectYearRestricted(
+          config.projectType,
+          config.year,
+          config.startMonth ?? 0,
+          config.durationMonths ?? 12,
+          user.plan
+      );
 
       if (isYearRestricted) {
-          alert(`Desculpe! O ano de referência do seu arquivo (${config.year}) não está liberado no seu plano anual. Para gerar o PDF e arquivos finais deste ano, é necessária a renovação da sua assinatura. Atualmente você pode gerar planners de 2026 e 2027.`);
+          alert(`Desculpe! As configurações do arquivo englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
       
@@ -7225,8 +7790,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       className="flex items-center text-xs font-medium text-indigo-700 hover:text-indigo-850 bg-indigo-50/50 hover:bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded shadow-sm transition-colors"
                       title="Instalar Agenda Master no Computador ou Celular"
                     >
-                      <Smartphone className="w-4 h-4 mr-1.5 text-indigo-600" />
-                      <span>Instalar App</span>
+                      <Monitor className="w-4 h-4 mr-1.5 text-indigo-600" />
+                      <span>Instalar no Computador</span>
                     </button>
                     <div className="h-5 w-px bg-gray-200"></div>
                   </>
@@ -7293,7 +7858,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 value={config.year} 
                                                 onChange={(e) => setConfig({ ...config, year: parseInt(e.target.value) || 2027 })} 
                                                 className={`flex-1 p-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold ${
-                                                  config.year !== 2026 && config.year !== 2027 && !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')))
+                                                  isProjectYearRestricted(config.projectType, config.year, config.startMonth ?? 0, config.durationMonths ?? 12, user.plan)
                                                     ? 'border-amber-400 bg-amber-50/25 text-amber-900' 
                                                     : 'border-gray-200 text-gray-700'
                                                 }`}
@@ -7303,25 +7868,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             </div>
                                         </div>
 
-                                        {(config.year !== 2026 && config.year !== 2027 && !(config.year === 2028 && (user.plan?.toLowerCase().includes('2028') || user.plan?.toLowerCase().includes('renovad') || user.plan?.toLowerCase().includes('master')))) && (
+                                        {(isProjectYearRestricted(config.projectType, config.year, config.startMonth ?? 0, config.durationMonths ?? 12, user.plan)) && (
                                             <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 leading-normal shadow-sm">
                                                 <p className="font-bold flex items-center gap-1 mb-1 text-amber-955">
-                                                    <Lock className="w-3 h-3 text-amber-600" /> Ano {config.year} Bloqueado
+                                                    <Lock className="w-3 h-3 text-amber-600" /> Período/Ano Restrito
                                                 </p>
-                                                <p>Geração de arquivos liberada apenas para <strong>2026 e 2027</strong> neste plano de assinatura.</p>
-                                                <p className="mt-1 font-semibold">Os botões de exportação e download do PDF foram desabilitados para este ano.</p>
+                                                <p>Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
+                                                <p className="mt-1 font-semibold">Os botões de exportação e download do PDF foram desabilitados para esta configuração.</p>
                                                 <div className="mt-2 flex gap-1.5">
                                                     <button 
-                                                        onClick={() => setConfig({ ...config, year: 2027 })} 
+                                                        onClick={() => setConfig({ ...config, year: 2027, startMonth: 0, durationMonths: 12 })} 
                                                         className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-0.5 px-2 rounded text-[9px] transition-colors"
                                                     >
-                                                        Voltar para 2027
+                                                        Ajustar para 2027 (12 Meses)
                                                     </button>
                                                     <button 
-                                                        onClick={() => setConfig({ ...config, year: 2026 })} 
+                                                        onClick={() => setConfig({ ...config, year: 2027, startMonth: 0, durationMonths: 13 })} 
                                                         className="bg-white hover:bg-gray-100 text-gray-700 font-bold py-0.5 px-2 rounded text-[9px] border border-gray-200 transition-colors"
                                                     >
-                                                        Voltar para 2026
+                                                        Jan/27 a Jan/28 (13 Meses)
                                                     </button>
                                                 </div>
                                             </div>
@@ -7391,7 +7956,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             onChange={(e) => setConfig({ ...config, durationMonths: parseInt(e.target.value) })} 
                                             className="w-full p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700 bg-white"
                                         >
-                                            {Array.from({ length: 24 }, (_, i) => i + 1).map(m => (
+                                            {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
                                                 <option key={m} value={m}>{m} {m === 1 ? 'mês' : 'meses'}</option>
                                             ))}
                                         </select>
@@ -7403,37 +7968,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             value={config.layoutType} 
                                             onChange={(e) => {
                                                 const newType = e.target.value as PageLayoutType;
-                                                
+                                                if (newType === config.layoutType) return;
+
                                                 const isNewWeeklyTwoPage = newType === 'weekly_vertical' || newType === 'weekly_horizontal';
                                                 const isNewWeeklyOnePage = newType === 'weekly_one_page_vertical' || newType === 'weekly_one_page_horizontal';
 
-                                                if (config.layoutType.startsWith('weekly') && newType.startsWith('weekly') && config.layoutType !== newType) {
-                                                    const currentStyle = (config.elementsWeeklyLeft || config.elements)?.find(el => el.type === 'planner_day_box')?.style?.plannerDayBox?.contentStyle || 'blank';
-                                                    if (isNewWeeklyTwoPage || isNewWeeklyOnePage) {
-                                                        applyPlannerTemplate(newType as any, currentStyle);
-                                                    }
+                                                if (isNewWeeklyTwoPage || isNewWeeklyOnePage) {
+                                                    const currentStyle = (config.elementsWeeklyLeft || config.elements)?.find(el => el.type === 'planner_day_box')?.style?.plannerDayBox?.contentStyle || 'lines';
+                                                    applyPlannerTemplate(newType as any, currentStyle);
                                                     return;
                                                 }
 
-                                                if (isNewWeeklyTwoPage && (!config.elementsWeeklyLeft || config.elementsWeeklyLeft.length === 0)) {
-                                                    applyPlannerTemplate(newType as any, 'lines');
-                                                    return;
-                                                } else if (isNewWeeklyOnePage && (!config.elements || config.elements.length === 0)) {
-                                                    applyPlannerTemplate(newType as any, 'lines');
-                                                    return;
-                                                }
-                                                
-                                                if (isNewWeeklyTwoPage) {
-                                                    if (editorViewMode === 'standard' || editorViewMode === 'top' || editorViewMode === 'bottom' || editorViewMode === 'saturday' || editorViewMode === 'sunday') {
-                                                        setEditorViewMode('weekly_left');
-                                                    }
-                                                } else if (isNewWeeklyOnePage) {
-                                                    setEditorViewMode('standard');
-                                                } else if (editorViewMode === 'weekly_left' || editorViewMode === 'weekly_right') {
-                                                     setEditorViewMode('standard');
-                                                }
-
-                                                setConfig({ ...config, layoutType: newType });
+                                                const cleanElements = config.elements.filter(el => el.type !== 'planner_day_box');
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    layoutType: newType,
+                                                    elements: cleanElements.length > 0 ? cleanElements : getDefaultElements(),
+                                                    elementsWeeklyLeft: undefined,
+                                                    elementsWeeklyRight: undefined
+                                                }));
+                                                setEditorViewMode('standard');
                                             }}
                                             className="w-full p-2 text-xs border border-gray-200 rounded bg-white font-medium shadow-sm transition-all focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                                         >
@@ -7458,21 +8012,82 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         </select>
                                         <p className="text-[8px] text-gray-400 mt-1 italic">Mudar o layout no menu acima preserva seus elementos personalizados.</p>
                                     </div>
+                                </>
+                            )}
 
-                                    <div className="pt-2">
+                            <div className="pt-2 border-t border-gray-100 mt-2 space-y-3">
+                                <div>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={config.mirrorEvenPages} 
+                                            onChange={(e) => setConfig({ ...config, mirrorEvenPages: e.target.checked })} 
+                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
+                                        />
+                                        <span className="text-xs text-gray-700 font-medium">Espelhar margens em páginas pares</span>
+                                    </label>
+                                    <p className="text-[9px] text-gray-400 mt-0.5">Inverte as margens interna/externa para encadernação.</p>
+                                </div>
+
+                                <div>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={!!config.customVerso} 
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    customVerso: checked,
+                                                    elementsVerso: (checked && (!prev.elementsVerso || prev.elementsVerso.length === 0))
+                                                        ? prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
+                                                        : prev.elementsVerso
+                                                }));
+                                                if (checked) {
+                                                    setEditorViewMode('verso');
+                                                } else {
+                                                    setEditorViewMode('standard');
+                                                }
+                                            }} 
+                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
+                                        />
+                                        <span className="text-xs font-semibold text-gray-800">Diferenciar Frente e Verso (Costas)</span>
+                                    </label>
+                                    <p className="text-[9px] text-gray-400 mt-0.5">Permite criar um layout exclusivo para o verso (páginas pares) do miolo.</p>
+                                </div>
+
+                                {config.customVerso && (
+                                    <div className="pl-6 space-y-2 pt-1 border-l-2 border-indigo-100">
                                         <label className="flex items-center gap-2 cursor-pointer">
                                             <input 
                                                 type="checkbox" 
-                                                checked={config.mirrorEvenPages} 
-                                                onChange={(e) => setConfig({ ...config, mirrorEvenPages: e.target.checked })} 
-                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
+                                                checked={config.versoAdvancesSequence === false} 
+                                                onChange={(e) => setConfig({ ...config, versoAdvancesSequence: !e.target.checked })} 
+                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
                                             />
-                                            <span className="text-xs text-gray-700">Espelhar margens em páginas pares</span>
+                                            <span className="text-xs font-medium text-gray-700">Não pular sequência no verso</span>
                                         </label>
-                                        <p className="text-[9px] text-gray-400 mt-1">Inverte as margens interna/externa para encadernação.</p>
+                                        <p className="text-[9px] text-gray-400">
+                                            {config.versoAdvancesSequence === false 
+                                                ? 'O verso de cada dia/semana manterá a mesma data/conteúdo da frente.' 
+                                                : 'Cada página (frente e verso) avançará para o próximo dia/semana na sequência.'}
+                                        </p>
+
+                                        <label className="flex items-center gap-2 cursor-pointer pt-1">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={!!config.disableSequenceSkip} 
+                                                onChange={(e) => setConfig({ ...config, disableSequenceSkip: e.target.checked })} 
+                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
+                                            />
+                                            <span className="text-xs font-medium text-gray-700">Não inserir páginas de preenchimento</span>
+                                        </label>
+                                        <p className="text-[9px] text-gray-400">
+                                            Desativa páginas em branco/preenchimento automáticas ao alinhar divisórias de mês.
+                                        </p>
                                     </div>
-                                </>
-                            )}
+                                )}
+                            </div>
 
                             {(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                 <div>
@@ -7984,6 +8599,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <button onClick={() => addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linhas Simples (Pautas)"><ListTodo className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('lines', 'Horários', { showTimes: true, startHour: 7, lineSpacing: 28, color: '#e5e7eb' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela de Horários (Linhas)"><Clock className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('table', 'Tabela')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela Customizável"><TableIcon className="w-4 h-4 text-indigo-600"/></button>
+                                <button onClick={() => addElement('table', 'Tabela de Horários', { isScheduleTable: true })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela com Horários (Grade)"><CalendarClock className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('holiday', 'Confraternização Universal')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Informação do Feriado do Dia"><Flag className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('note_grid', 'Grid', { variant: 'dots', color: '#ccc', opacity: 0.5 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Grid de Notas"><Grid3X3 className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('mini_calendar', 'Calendário')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Mini Calendário"><CalendarDays className="w-4 h-4 text-indigo-600"/></button>
@@ -8134,6 +8750,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'bottom' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
                                     Parte Inferior
+                                </button>
+                            </div>
+                        )}
+
+                        {editMode === 'daily' && config.customVerso && (
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Editando Página do Miolo:</span>
+                                <button 
+                                    onClick={() => setEditorViewMode('standard')} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>Frente (Ímpar)</span>
+                                </button>
+                                <button 
+                                    onClick={() => setEditorViewMode('verso')} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'verso' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>Verso / Costas (Par)</span>
+                                </button>
+                                
+                                <button
+                                    title={editorViewMode === 'verso' ? "Copiar todos os elementos da Frente para o Verso" : "Copiar todos os elementos do Verso para a Frente"}
+                                    onClick={() => {
+                                        if (editorViewMode === 'verso') {
+                                            if (confirm("Deseja substituir os elementos do Verso pelos elementos da Frente?")) {
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    elementsVerso: prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
+                                                }));
+                                            }
+                                        } else {
+                                            if (confirm("Deseja substituir os elementos da Frente pelos elementos do Verso?")) {
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    elements: (prev.elementsVerso || []).map(el => ({ ...el, id: 'recto_' + Math.random().toString(36).substring(2, 9) }))
+                                                }));
+                                            }
+                                        }
+                                    }}
+                                    className="ml-2 px-2.5 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                                >
+                                    <Copy className="w-3 h-3" />
+                                    <span>{editorViewMode === 'verso' ? 'Copiar da Frente' : 'Copiar do Verso'}</span>
                                 </button>
                             </div>
                         )}
@@ -8321,85 +8980,143 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
 
 
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    
-                                                 
+                                            {(() => {
+                                                const vis = getVisualBounds(selectedElement, usableWidthMM, usableHeightMM);
+                                                return (
+                                                    <div className="space-y-3 mb-3">
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição X (mm)</label>
+                                                                <input 
+                                                                    type="number" 
+                                                                    step="1"
+                                                                    value={Math.round(vis.x)} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        if (!isNaN(val)) {
+                                                                            const newRaw = setVisualBounds(selectedElement, { x: val }, usableWidthMM, usableHeightMM);
+                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                        }
+                                                                    }} 
+                                                                    className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição Y (mm)</label>
+                                                                <input 
+                                                                    type="number" 
+                                                                    step="1"
+                                                                    value={Math.round(vis.y)} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        if (!isNaN(val)) {
+                                                                            const newRaw = setVisualBounds(selectedElement, { y: val }, usableWidthMM, usableHeightMM);
+                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                        }
+                                                                    }} 
+                                                                    className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                />
+                                                            </div>
+                                                        </div>
 
-
-                                             <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição X (mm)</label>
-                                                    <input 
-                                                        type="number" 
-                                                        step="1"
-                                                        value={Math.round((selectedElement.x / 100) * usableWidthMM)} 
-                                                        onChange={(e) => {
-                                                            const val = parseFloat(e.target.value);
-                                                            if (!isNaN(val)) {
-                                                                const percentage = (val / usableWidthMM) * 100;
-                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, x: percentage} : el));
-                                                            }
-                                                        }} 
-                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição Y (mm)</label>
-                                                    <input 
-                                                        type="number" 
-                                                        step="1"
-                                                        value={Math.round((selectedElement.y / 100) * usableHeightMM)} 
-                                                        onChange={(e) => {
-                                                            const val = parseFloat(e.target.value);
-                                                            if (!isNaN(val)) {
-                                                                const percentage = (val / usableHeightMM) * 100;
-                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, y: percentage} : el));
-                                                            }
-                                                        }} 
-                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Largura (mm)</label>
-                                                    <div className="flex items-center gap-1">
-                                                        <input 
-                                                            type="number" 
-                                                            min="5" 
-                                                            max={usableWidthMM} 
-                                                            step="1"
-                                                            value={Math.round((selectedElement.w / 100) * usableWidthMM)} 
-                                                            onChange={(e) => {
-                                                                const val = parseFloat(e.target.value);
-                                                                if (!isNaN(val)) {
-                                                                    const percentage = (val / usableWidthMM) * 100;
-                                                                    updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, w: percentage} : el));
-                                                                }
-                                                            }} 
-                                                            className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                        />
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Largura (mm)</label>
+                                                                <div className="flex items-center gap-1">
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="1" 
+                                                                        max={usableWidthMM * 2} 
+                                                                        step="1"
+                                                                        value={Math.round(vis.w)} 
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            if (!isNaN(val)) {
+                                                                                const newRaw = setVisualBounds(selectedElement, { w: val }, usableWidthMM, usableHeightMM);
+                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                            }
+                                                                        }} 
+                                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Altura (mm)</label>
+                                                                <div className="flex items-center gap-1">
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="1" 
+                                                                        max={usableHeightMM * 2} 
+                                                                        step="1"
+                                                                        value={Math.round(vis.h)} 
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            if (!isNaN(val)) {
+                                                                                const newRaw = setVisualBounds(selectedElement, { h: val }, usableWidthMM, usableHeightMM);
+                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                            }
+                                                                        }} 
+                                                                        className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
+                                                );
+                                            })()}
+
+                                            <div className="pt-2 border-t border-gray-100">
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Rotação / Orientação</label>
+                                                    <span className="text-[10px] font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                                                        {selectedElement.style.rotation || 0}°
+                                                    </span>
                                                 </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Altura (mm)</label>
-                                                    <div className="flex items-center gap-1">
-                                                        <input 
-                                                            type="number" 
-                                                            min="2" 
-                                                            max={usableHeightMM} 
-                                                            step="1"
-                                                            value={Math.round((selectedElement.h / 100) * usableHeightMM)} 
-                                                            onChange={(e) => {
-                                                                const val = parseFloat(e.target.value);
-                                                                if (!isNaN(val)) {
-                                                                    const percentage = (val / usableHeightMM) * 100;
-                                                                    updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, h: percentage} : el));
-                                                                }
-                                                            }} 
-                                                            className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
-                                                        />
-                                                    </div>
+                                                <div className="flex items-center gap-1.5 mb-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateElementStyle(selectedElement.id, { rotation: 0 })}
+                                                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-bold border transition-colors ${
+                                                            (selectedElement.style.rotation || 0) % 360 === 0
+                                                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        Horiz. (0°)
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateElementStyle(selectedElement.id, { rotation: 90 })}
+                                                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-bold border transition-colors ${
+                                                            (selectedElement.style.rotation || 0) === 90
+                                                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        Vert. (90°)
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const currentRot = selectedElement.style.rotation || 0;
+                                                            updateElementStyle(selectedElement.id, { rotation: (currentRot + 90) % 360 });
+                                                        }}
+                                                        className="p-1 rounded bg-white hover:bg-indigo-50 border border-gray-200 text-indigo-600 transition-colors"
+                                                        title="Girar +90°"
+                                                    >
+                                                        <icons.RotateCw className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <input 
+                                                        type="range" 
+                                                        min="0" 
+                                                        max="360" 
+                                                        step="5" 
+                                                        value={selectedElement.style.rotation || 0} 
+                                                        onChange={(e) => updateElementStyle(selectedElement.id, { rotation: parseInt(e.target.value) || 0 })} 
+                                                        className="w-full accent-indigo-600 h-1 bg-gray-200 rounded cursor-pointer" 
+                                                    />
                                                 </div>
                                             </div>
                                             
@@ -8514,7 +9231,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     </div>
                                                                 )}
 
-                                                                <div className="flex items-center justify-between"><label className="text-[10px] font-bold text-gray-500">Borda (px)</label><input type="number" min="0" max="5" step="0.25" value={selectedElement.style.table.borderWidth || 0} onChange={(e) => updateTableConfig(selectedElement.id, { borderWidth: parseFloat(e.target.value) })} className="w-16 text-xs p-1 border rounded" /></div>
+                                                                <div className="space-y-1">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura da Borda</label>
+                                                                        <span className="text-[10px] font-mono text-gray-400">{(selectedElement.style.table.borderWidth || 0)}px</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input 
+                                                                            type="range" 
+                                                                            min="0" 
+                                                                            max="10" 
+                                                                            step="0.1" 
+                                                                            value={selectedElement.style.table.borderWidth || 0} 
+                                                                            onChange={(e) => updateTableConfig(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                            className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
+                                                                        />
+                                                                        <input 
+                                                                            type="number" 
+                                                                            min="0" 
+                                                                            max="10" 
+                                                                            step="0.1" 
+                                                                            value={selectedElement.style.table.borderWidth || 0} 
+                                                                            onChange={(e) => updateTableConfig(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                            className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                                        />
+                                                                    </div>
+                                                                </div>
                                                                 <div className="flex items-center justify-between">
                                                                     <label className="text-[10px] font-bold text-gray-500">Estilo Borda</label>
                                                                     <select 
@@ -8530,6 +9272,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 <div className="flex items-center justify-between"><label className="text-[10px] font-bold text-gray-500">Cor Borda</label><div className="flex h-6 border border-gray-200 rounded overflow-hidden"><input type="color" value={selectedElement.style.table.borderColor || '#e5e7eb'} onChange={(e) => updateTableConfig(selectedElement.id, { borderColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" /></div></div>
                                                                 <div className="flex items-center justify-between"><label className="text-[10px] font-bold text-gray-500">Arredondar (px)</label><input type="number" min="0" max="50" step="1" value={selectedElement.style.table.borderRadius || 0} onChange={(e) => updateTableConfig(selectedElement.id, { borderRadius: parseInt(e.target.value) || 0 })} className="w-16 text-xs p-1 border rounded" /></div>
                                                                 <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={selectedElement.style.table.headerRow} onChange={(e) => updateTableConfig(selectedElement.id, { headerRow: e.target.checked })} className="rounded text-indigo-600" /><span className="text-[10px] text-gray-600">Linha de Cabeçalho</span></label>
+                                                                
+                                                                <div className="pt-3 mt-3 border-t border-gray-100 bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100/80 space-y-2.5">
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                                                                        <h4 className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">Gerar Horários na Coluna 1</h4>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        <div>
+                                                                            <label className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">Hora Inicial</label>
+                                                                            <select 
+                                                                                value={tableScheduleStart} 
+                                                                                onChange={(e) => setTableScheduleStart(parseInt(e.target.value))}
+                                                                                className="w-full text-xs p-1 border border-gray-200 rounded bg-white"
+                                                                            >
+                                                                                {Array.from({ length: 24 }).map((_, i) => (
+                                                                                    <option key={i} value={i}>{i.toString().padStart(2, '0')}:00</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">Hora Final</label>
+                                                                            <select 
+                                                                                value={tableScheduleEnd} 
+                                                                                onChange={(e) => setTableScheduleEnd(parseInt(e.target.value))}
+                                                                                className="w-full text-xs p-1 border border-gray-200 rounded bg-white"
+                                                                            >
+                                                                                {Array.from({ length: 24 }).map((_, i) => (
+                                                                                    <option key={i} value={i}>{i.toString().padStart(2, '0')}:00</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[9px] font-bold text-gray-500 uppercase">Intervalo</label>
+                                                                        <select 
+                                                                            value={tableScheduleInterval} 
+                                                                            onChange={(e) => setTableScheduleInterval(parseInt(e.target.value))}
+                                                                            className="text-xs p-1 border border-gray-200 rounded bg-white w-28"
+                                                                        >
+                                                                            <option value={60}>1 Hora</option>
+                                                                            <option value={30}>30 Minutos</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => applyScheduleToTable(selectedElement.id, tableScheduleStart, tableScheduleEnd, tableScheduleInterval)}
+                                                                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded text-[10px] font-bold uppercase tracking-wider transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
+                                                                    >
+                                                                        <Clock className="w-3 h-3" /> Preencher Coluna de Horários
+                                                                    </button>
+                                                                </div>
                                                                 
                                                                 <div className="pt-3 mt-3 border-t border-gray-100 bg-gray-50 p-2 rounded">
                                                                     <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Bordas do Grid</h4>
@@ -8549,94 +9342,544 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     {renderTypographyControls(selectedElement.style.table.textStyle || { fontFamily: 'Inter', fontSize: 10, fontWeight: 'normal', color: '#666', textAlign: 'left', verticalAlign: 'top', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' }, (updates) => updateTableConfig(selectedElement.id, { textStyle: { ...selectedElement.style.table?.textStyle, ...updates } }))}
                                                                 </div>
                                                             </>
-                                                        ) : (
-                                                            <div className="space-y-4">
-                                                                <div className="p-3 bg-amber-50 border border-amber-100 rounded text-[10px] text-amber-800 leading-tight">
-                                                                    Para editar uma <strong>{tableStyleScope === 'row' ? 'linha' : 'coluna'}</strong> específica, selecione primeiro uma célula da tabela.
-                                                                </div>
-                                                                
-                                                                {activeTableCell ? (
-                                                                    <div className="space-y-4">
-                                                                        <div className="flex flex-col p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100">
-                                                                           <div className="flex items-center justify-between mb-2">
-                                                                               <span className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
-                                                                                   <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                                                                                   {tableStyleScope === 'row' ? `Editando Linha ${activeTableCell.r + 1}` : `Editando Coluna ${activeTableCell.c + 1}`}
-                                                                               </span>
-                                                                               <button 
-                                                                                   onClick={() => setActiveTableCell(null)}
-                                                                                   className="p-1 hover:bg-white rounded-md text-indigo-400 hover:text-indigo-600 transition-colors"
-                                                                                   title="Desmarcar Célula"
-                                                                               >
-                                                                                   <X className="w-3 h-3" />
-                                                                               </button>
-                                                                           </div>
-                                                                            <div className="grid grid-cols-2 gap-2">
-                                                                                <button 
-                                                                                    onClick={() => tableStyleScope === 'row' ? addTableRow(selectedElement.id, activeTableCell.r, 'before') : addTableColumn(selectedElement.id, activeTableCell.c, 'before')}
-                                                                                    className="p-1.5 hover:bg-white rounded-md border border-indigo-200 text-indigo-600 bg-white/50 shadow-sm transition-all flex items-center justify-center gap-1.5"
-                                                                                    title="Inserir Antes"
-                                                                                >
-                                                                                    <Plus className="w-2.5 h-2.5" /> <span className="text-[10px] font-bold">Adicionar Antes</span>
-                                                                                </button>
-                                                                                <button 
-                                                                                    onClick={() => tableStyleScope === 'row' ? addTableRow(selectedElement.id, activeTableCell.r, 'after') : addTableColumn(selectedElement.id, activeTableCell.c, 'after')}
-                                                                                    className="p-1.5 hover:bg-white rounded-md border border-indigo-200 text-indigo-600 bg-white/50 shadow-sm transition-all flex items-center justify-center gap-1.5"
-                                                                                    title="Inserir Depois"
-                                                                                >
-                                                                                    <Plus className="w-2.5 h-2.5" /> <span className="text-[10px] font-bold">Adicionar Depois</span>
-                                                                                </button>
-                                                                                <button 
-                                                                                    onClick={() => {
-                                                                                        if (confirm(`Tem certeza que deseja excluir esta ${tableStyleScope === 'row' ? 'linha' : 'coluna'}?`)) {
-                                                                                            tableStyleScope === 'row' ? deleteTableRow(selectedElement.id, activeTableCell.r) : deleteTableColumn(selectedElement.id, activeTableCell.c);
-                                                                                        }
+                                                        ) : (() => {
+                                                            const totalRows = selectedElement.style.table?.rows || 1;
+                                                            const totalCols = selectedElement.style.table?.cols || 1;
+                                                            const effectiveRow = (activeTableCell && activeTableCell.elementId === selectedElement.id) 
+                                                                ? Math.min(activeTableCell.r, totalRows - 1) 
+                                                                : Math.min(tableTargetRow, totalRows - 1);
+                                                            const effectiveCol = (activeTableCell && activeTableCell.elementId === selectedElement.id) 
+                                                                ? Math.min(activeTableCell.c, totalCols - 1) 
+                                                                : Math.min(tableTargetCol, totalCols - 1);
+
+                                                            return (
+                                                                <div className="space-y-4 pt-1">
+                                                                    {tableStyleScope === 'row' ? (
+                                                                        <div className="space-y-3">
+                                                                            {/* Target Row Selector */}
+                                                                            <div className="flex items-center justify-between bg-indigo-50/70 p-2 rounded-lg border border-indigo-100">
+                                                                                <label className="text-[10px] font-bold text-indigo-900 uppercase">Linha Selecionada:</label>
+                                                                                <select 
+                                                                                    value={effectiveRow} 
+                                                                                    onChange={(e) => {
+                                                                                        const newR = parseInt(e.target.value);
+                                                                                        setTableTargetRow(newR);
+                                                                                        setActiveTableCell({ elementId: selectedElement.id, r: newR, c: effectiveCol });
                                                                                     }}
-                                                                                    className="col-span-2 p-1.5 hover:bg-red-50 rounded-md border border-red-100 text-red-500 hover:text-red-600 bg-white/50 transition-all flex items-center justify-center gap-1.5"
-                                                                                    title="Excluir"
+                                                                                    className="text-xs p-1 font-bold border border-indigo-200 rounded bg-white text-indigo-900 focus:ring-1 focus:ring-indigo-500 w-36"
                                                                                 >
-                                                                                    <Trash2 className="w-2.5 h-2.5" /> <span className="text-[10px] font-bold">Excluir {tableStyleScope === 'row' ? 'esta Linha' : 'esta Coluna'}</span>
+                                                                                    {Array.from({ length: totalRows }).map((_, idx) => (
+                                                                                        <option key={idx} value={idx}>
+                                                                                            {idx === 0 && selectedElement.style.table?.headerRow ? `Linha 1 (Cabeçalho)` : `Linha ${idx + 1}`}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+
+                                                                            {/* Row Height Control */}
+                                                                            <div className="p-2.5 bg-gray-50/80 rounded-lg border border-gray-100 space-y-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <label className="text-[10px] font-bold text-gray-600 uppercase">Altura da Linha {effectiveRow + 1} (%)</label>
+                                                                                    <div className="flex items-center gap-1.5">
+                                                                                        <input 
+                                                                                            type="number"
+                                                                                            min="2"
+                                                                                            max="95"
+                                                                                            step="0.5"
+                                                                                            value={Math.round((selectedElement.style.table?.rowHeights?.[effectiveRow] ?? (100 / totalRows)) * 10) / 10}
+                                                                                            onChange={(e) => {
+                                                                                                const val = Math.max(2, Math.min(95, parseFloat(e.target.value) || 5));
+                                                                                                const currentHeights = [...(selectedElement.style.table?.rowHeights || Array(totalRows).fill(100 / totalRows))];
+                                                                                                while (currentHeights.length < totalRows) currentHeights.push(100 / totalRows);
+                                                                                                const sumOther = currentHeights.reduce((acc, h, idx) => idx === effectiveRow ? acc : acc + h, 0);
+                                                                                                const remainingTarget = 100 - val;
+                                                                                                const nextHeights = currentHeights.map((h, idx) => {
+                                                                                                    if (idx === effectiveRow) return val;
+                                                                                                    if (sumOther <= 0 || (totalRows - 1) <= 0) return remainingTarget / Math.max(1, totalRows - 1);
+                                                                                                    return Math.max(1, (h / sumOther) * remainingTarget);
+                                                                                                });
+                                                                                                const sumNext = nextHeights.reduce((a, b) => a + b, 0);
+                                                                                                const normalized = nextHeights.map(h => Math.round((h / sumNext) * 1000) / 10);
+                                                                                                updateTableConfig(selectedElement.id, { rowHeights: normalized });
+                                                                                            }}
+                                                                                            className="w-16 text-xs p-1 border border-gray-200 rounded text-center bg-white font-bold"
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+                                                                                <input 
+                                                                                    type="range"
+                                                                                    min="2"
+                                                                                    max="90"
+                                                                                    step="0.5"
+                                                                                    value={(selectedElement.style.table?.rowHeights?.[effectiveRow] ?? (100 / totalRows))}
+                                                                                    onChange={(e) => {
+                                                                                        const val = parseFloat(e.target.value);
+                                                                                        const currentHeights = [...(selectedElement.style.table?.rowHeights || Array(totalRows).fill(100 / totalRows))];
+                                                                                        while (currentHeights.length < totalRows) currentHeights.push(100 / totalRows);
+                                                                                        const sumOther = currentHeights.reduce((acc, h, idx) => idx === effectiveRow ? acc : acc + h, 0);
+                                                                                        const remainingTarget = 100 - val;
+                                                                                        const nextHeights = currentHeights.map((h, idx) => {
+                                                                                            if (idx === effectiveRow) return val;
+                                                                                            if (sumOther <= 0 || (totalRows - 1) <= 0) return remainingTarget / Math.max(1, totalRows - 1);
+                                                                                            return Math.max(1, (h / sumOther) * remainingTarget);
+                                                                                        });
+                                                                                        const sumNext = nextHeights.reduce((a, b) => a + b, 0);
+                                                                                        const normalized = nextHeights.map(h => Math.round((h / sumNext) * 1000) / 10);
+                                                                                        updateTableConfig(selectedElement.id, { rowHeights: normalized });
+                                                                                    }}
+                                                                                    className="w-full accent-indigo-600 h-1 bg-gray-200 rounded cursor-pointer"
+                                                                                />
+
+                                                                                {/* Multi-Row Height List */}
+                                                                                <details className="pt-1 text-[10px]">
+                                                                                    <summary className="font-bold text-indigo-700 cursor-pointer hover:underline py-1 select-none flex items-center justify-between">
+                                                                                        <span>Ajustar Todas as Linhas Manualmente</span>
+                                                                                        <span className="text-[9px] text-gray-400 font-normal">({totalRows} linhas)</span>
+                                                                                    </summary>
+                                                                                    <div className="space-y-1.5 mt-2 max-h-48 overflow-y-auto pr-1">
+                                                                                        {Array.from({ length: totalRows }).map((_, rIdx) => {
+                                                                                            const rowH = Math.round((selectedElement.style.table?.rowHeights?.[rIdx] ?? (100 / totalRows)) * 10) / 10;
+                                                                                            return (
+                                                                                                <div key={rIdx} className={`flex items-center gap-2 p-1 rounded border ${rIdx === effectiveRow ? 'bg-indigo-50/80 border-indigo-200' : 'bg-white border-gray-100'}`}>
+                                                                                                    <span className="w-16 font-bold text-gray-600 text-[9px] truncate">
+                                                                                                        {rIdx === 0 && selectedElement.style.table?.headerRow ? 'Linha 1 (Cab.)' : `Linha ${rIdx + 1}`}
+                                                                                                    </span>
+                                                                                                    <input 
+                                                                                                        type="range"
+                                                                                                        min="2"
+                                                                                                        max="90"
+                                                                                                        step="0.5"
+                                                                                                        value={rowH}
+                                                                                                        onChange={(e) => {
+                                                                                                            const val = parseFloat(e.target.value);
+                                                                                                            const currentHeights = [...(selectedElement.style.table?.rowHeights || Array(totalRows).fill(100 / totalRows))];
+                                                                                                            while (currentHeights.length < totalRows) currentHeights.push(100 / totalRows);
+                                                                                                            const sumOther = currentHeights.reduce((acc, h, idx) => idx === rIdx ? acc : acc + h, 0);
+                                                                                                            const remainingTarget = 100 - val;
+                                                                                                            const nextHeights = currentHeights.map((h, idx) => {
+                                                                                                                if (idx === rIdx) return val;
+                                                                                                                if (sumOther <= 0 || (totalRows - 1) <= 0) return remainingTarget / Math.max(1, totalRows - 1);
+                                                                                                                return Math.max(1, (h / sumOther) * remainingTarget);
+                                                                                                            });
+                                                                                                            const sumNext = nextHeights.reduce((a, b) => a + b, 0);
+                                                                                                            const normalized = nextHeights.map(h => Math.round((h / sumNext) * 1000) / 10);
+                                                                                                            updateTableConfig(selectedElement.id, { rowHeights: normalized });
+                                                                                                        }}
+                                                                                                        className="flex-1 accent-indigo-600 h-1 bg-gray-200 rounded cursor-pointer"
+                                                                                                    />
+                                                                                                    <input 
+                                                                                                        type="number"
+                                                                                                        min="2"
+                                                                                                        max="95"
+                                                                                                        step="0.5"
+                                                                                                        value={rowH}
+                                                                                                        onChange={(e) => {
+                                                                                                            const val = Math.max(2, Math.min(95, parseFloat(e.target.value) || 5));
+                                                                                                            const currentHeights = [...(selectedElement.style.table?.rowHeights || Array(totalRows).fill(100 / totalRows))];
+                                                                                                            while (currentHeights.length < totalRows) currentHeights.push(100 / totalRows);
+                                                                                                            const sumOther = currentHeights.reduce((acc, h, idx) => idx === rIdx ? acc : acc + h, 0);
+                                                                                                            const remainingTarget = 100 - val;
+                                                                                                            const nextHeights = currentHeights.map((h, idx) => {
+                                                                                                                if (idx === rIdx) return val;
+                                                                                                                if (sumOther <= 0 || (totalRows - 1) <= 0) return remainingTarget / Math.max(1, totalRows - 1);
+                                                                                                                return Math.max(1, (h / sumOther) * remainingTarget);
+                                                                                                            });
+                                                                                                            const sumNext = nextHeights.reduce((a, b) => a + b, 0);
+                                                                                                            const normalized = nextHeights.map(h => Math.round((h / sumNext) * 1000) / 10);
+                                                                                                            updateTableConfig(selectedElement.id, { rowHeights: normalized });
+                                                                                                        }}
+                                                                                                        className="w-12 text-[9px] p-0.5 border border-gray-200 rounded text-center bg-white"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            );
+                                                                                        })}
+                                                                                    </div>
+                                                                                </details>
+
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => {
+                                                                                        updateTableConfig(selectedElement.id, { rowHeights: Array(totalRows).fill(100 / totalRows) });
+                                                                                    }}
+                                                                                    className="w-full py-1 bg-white hover:bg-gray-100 border border-gray-200 rounded text-[9px] font-bold text-gray-600 uppercase cursor-pointer"
+                                                                                >
+                                                                                    Distribuir Alturas das Linhas Igualmente
                                                                                 </button>
                                                                             </div>
-                                                                        </div>
 
+                                                                            {/* Row Structure Actions */}
+                                                                            <div className="grid grid-cols-2 gap-1.5">
+                                                                                <button 
+                                                                                    onClick={() => addTableRow(selectedElement.id, effectiveRow, 'before')}
+                                                                                    className="p-1.5 hover:bg-white rounded border border-indigo-200 text-indigo-700 bg-white/70 shadow-2xs text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                                                                >
+                                                                                    <Plus className="w-3 h-3" /> Inserir Antes
+                                                                                </button>
+                                                                                <button 
+                                                                                    onClick={() => addTableRow(selectedElement.id, effectiveRow, 'after')}
+                                                                                    className="p-1.5 hover:bg-white rounded border border-indigo-200 text-indigo-700 bg-white/70 shadow-2xs text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                                                                >
+                                                                                    <Plus className="w-3 h-3" /> Inserir Depois
+                                                                                </button>
+                                                                                <button 
+                                                                                    onClick={() => deleteTableRow(selectedElement.id, effectiveRow)}
+                                                                                    className="col-span-2 p-1.5 hover:bg-red-50 rounded border border-red-200 text-red-600 bg-white shadow-2xs text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                                                                >
+                                                                                    <Trash2 className="w-3 h-3" /> Excluir Linha {effectiveRow + 1}
+                                                                                </button>
+                                                                            </div>
 
-                                                                        <div className="space-y-2">
-                                                                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Customizar Estilo</h4>
-                                                                            {renderTypographyControls(
-                                                                                (tableStyleScope === 'row' 
-                                                                                    ? (selectedElement.style.table.rowStyles?.[activeTableCell.r] || selectedElement.style.table.textStyle) 
-                                                                                    : (selectedElement.style.table.colStyles?.[activeTableCell.c] || selectedElement.style.table.textStyle)) || { fontFamily: 'Inter', fontSize: 10, fontWeight: 'normal', color: '#666', textAlign: 'left', verticalAlign: 'top', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' }, 
-                                                                                (updates) => {
-                                                                                    if (tableStyleScope === 'row') {
-                                                                                        const current = selectedElement.style.table!.rowStyles?.[activeTableCell.r] || selectedElement.style.table!.textStyle || {};
-                                                                                        updateTableConfig(selectedElement.id, { 
-                                                                                            rowStyles: { 
-                                                                                                ...selectedElement.style.table!.rowStyles, 
-                                                                                                [activeTableCell.r]: { ...current, ...updates } 
-                                                                                            } 
-                                                                                        });
-                                                                                    } else {
-                                                                                        const current = selectedElement.style.table!.colStyles?.[activeTableCell.c] || selectedElement.style.table!.textStyle || {};
-                                                                                        updateTableConfig(selectedElement.id, { 
-                                                                                            colStyles: { 
-                                                                                                ...selectedElement.style.table!.colStyles, 
-                                                                                                [activeTableCell.c]: { ...current, ...updates } 
-                                                                                            } 
+                                                                            {/* Background Color for Row */}
+                                                                            <div className="p-2.5 bg-gray-50/80 rounded-lg border border-gray-100 space-y-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <label className="text-[10px] font-bold text-gray-600 uppercase">Cor de Fundo da Linha</label>
+                                                                                    <div className="flex items-center gap-1.5">
+                                                                                        <input 
+                                                                                            type="color" 
+                                                                                            value={selectedElement.style.table?.rowStyles?.[effectiveRow]?.backgroundColor || '#ffffff'} 
+                                                                                            onChange={(e) => {
+                                                                                                const current = selectedElement.style.table!.rowStyles?.[effectiveRow] || selectedElement.style.table!.textStyle || {};
+                                                                                                updateTableConfig(selectedElement.id, {
+                                                                                                    rowStyles: {
+                                                                                                        ...selectedElement.style.table!.rowStyles,
+                                                                                                        [effectiveRow]: { ...current, backgroundColor: e.target.value }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="w-7 h-6 border-0 p-0 cursor-pointer rounded"
+                                                                                        />
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                const current = selectedElement.style.table!.rowStyles?.[effectiveRow] || {};
+                                                                                                updateTableConfig(selectedElement.id, {
+                                                                                                    rowStyles: {
+                                                                                                        ...selectedElement.style.table!.rowStyles,
+                                                                                                        [effectiveRow]: { ...current, backgroundColor: 'transparent' }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="text-[9px] text-gray-500 hover:text-red-500 underline"
+                                                                                        >
+                                                                                            Limpar
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                                    {['#ffffff', '#f3f4f6', '#e0e7ff', '#fef3c7', '#dcfce7', '#fee2e2', '#f3e8ff', '#e0f2fe'].map(hex => (
+                                                                                        <button
+                                                                                            key={hex}
+                                                                                            onClick={() => {
+                                                                                                const current = selectedElement.style.table!.rowStyles?.[effectiveRow] || selectedElement.style.table!.textStyle || {};
+                                                                                                updateTableConfig(selectedElement.id, {
+                                                                                                    rowStyles: {
+                                                                                                        ...selectedElement.style.table!.rowStyles,
+                                                                                                        [effectiveRow]: { ...current, backgroundColor: hex }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="w-5 h-5 rounded border border-gray-300 shadow-2xs hover:scale-110 transition-transform cursor-pointer"
+                                                                                            style={{ backgroundColor: hex }}
+                                                                                            title={hex}
+                                                                                        />
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* Typography for Row */}
+                                                                            <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Estilo de Texto da Linha</h4>
+                                                                                    {selectedElement.style.table?.rowStyles?.[effectiveRow] && (
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                const newRowStyles = { ...(selectedElement.style.table!.rowStyles || {}) };
+                                                                                                delete newRowStyles[effectiveRow];
+                                                                                                updateTableConfig(selectedElement.id, { rowStyles: newRowStyles });
+                                                                                            }}
+                                                                                            className="text-[9px] text-red-500 hover:underline"
+                                                                                        >
+                                                                                            Resetar
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                                {renderTypographyControls(
+                                                                                    (selectedElement.style.table?.rowStyles?.[effectiveRow] || selectedElement.style.table?.textStyle) || { fontFamily: 'Inter', fontSize: 10, fontWeight: 'normal', color: '#666', textAlign: 'left', verticalAlign: 'top', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' },
+                                                                                    (updates) => {
+                                                                                        const current = selectedElement.style.table!.rowStyles?.[effectiveRow] || selectedElement.style.table!.textStyle || {};
+                                                                                        updateTableConfig(selectedElement.id, {
+                                                                                            rowStyles: {
+                                                                                                ...selectedElement.style.table!.rowStyles,
+                                                                                                [effectiveRow]: { ...current, ...updates }
+                                                                                            }
                                                                                         });
                                                                                     }
-                                                                                }
-                                                                            )}
+                                                                                )}
+                                                                            </div>
                                                                         </div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="flex flex-col items-center justify-center py-6 text-gray-400 border border-dashed border-gray-200 rounded">
-                                                                        <MousePointer2 className="w-5 h-5 mb-2 opacity-20" />
-                                                                        <span className="text-[10px]">Clique em uma célula</span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
+                                                                    ) : (
+                                                                        <div className="space-y-3">
+                                                                            {/* Target Col Selector */}
+                                                                            <div className="flex items-center justify-between bg-indigo-50/70 p-2 rounded-lg border border-indigo-100">
+                                                                                <label className="text-[10px] font-bold text-indigo-900 uppercase">Coluna Selecionada:</label>
+                                                                                <select 
+                                                                                    value={effectiveCol} 
+                                                                                    onChange={(e) => {
+                                                                                        const newC = parseInt(e.target.value);
+                                                                                        setTableTargetCol(newC);
+                                                                                        setActiveTableCell({ elementId: selectedElement.id, r: effectiveRow, c: newC });
+                                                                                    }}
+                                                                                    className="text-xs p-1 font-bold border border-indigo-200 rounded bg-white text-indigo-900 focus:ring-1 focus:ring-indigo-500 w-36"
+                                                                                >
+                                                                                    {Array.from({ length: totalCols }).map((_, idx) => (
+                                                                                        <option key={idx} value={idx}>
+                                                                                            Coluna {idx + 1}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+
+                                                                            {/* Column Width & Multi-Column Controls */}
+                                                                            <div className="p-2.5 bg-gray-50/80 rounded-lg border border-gray-100 space-y-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <label className="text-[10px] font-bold text-gray-600 uppercase">Largura da Coluna {effectiveCol + 1} (%)</label>
+                                                                                    <input 
+                                                                                        type="number"
+                                                                                        min="3"
+                                                                                        max="95"
+                                                                                        step="0.5"
+                                                                                        value={Math.round((selectedElement.style.table?.columnWidths?.[effectiveCol] ?? (100 / totalCols)) * 10) / 10}
+                                                                                        onChange={(e) => {
+                                                                                            const val = Math.max(3, Math.min(95, parseFloat(e.target.value) || 5));
+                                                                                            const currentWidths = [...(selectedElement.style.table?.columnWidths || Array(totalCols).fill(100 / totalCols))];
+                                                                                            while (currentWidths.length < totalCols) currentWidths.push(100 / totalCols);
+                                                                                            const sumOther = currentWidths.reduce((acc, w, idx) => idx === effectiveCol ? acc : acc + w, 0);
+                                                                                            const remainingTarget = 100 - val;
+                                                                                            const nextWidths = currentWidths.map((w, idx) => {
+                                                                                                if (idx === effectiveCol) return val;
+                                                                                                if (sumOther <= 0 || (totalCols - 1) <= 0) return remainingTarget / Math.max(1, totalCols - 1);
+                                                                                                return Math.max(2, (w / sumOther) * remainingTarget);
+                                                                                            });
+                                                                                            const sumNext = nextWidths.reduce((a, b) => a + b, 0);
+                                                                                            const normalized = nextWidths.map(w => Math.round((w / sumNext) * 1000) / 10);
+                                                                                            updateTableConfig(selectedElement.id, { columnWidths: normalized });
+                                                                                        }}
+                                                                                        className="w-16 text-xs p-1 border border-gray-200 rounded text-center bg-white font-bold"
+                                                                                    />
+                                                                                </div>
+                                                                                <input 
+                                                                                    type="range"
+                                                                                    min="3"
+                                                                                    max="90"
+                                                                                    step="0.5"
+                                                                                    value={(selectedElement.style.table?.columnWidths?.[effectiveCol] ?? (100 / totalCols))}
+                                                                                    onChange={(e) => {
+                                                                                        const val = parseFloat(e.target.value);
+                                                                                        const currentWidths = [...(selectedElement.style.table?.columnWidths || Array(totalCols).fill(100 / totalCols))];
+                                                                                        while (currentWidths.length < totalCols) currentWidths.push(100 / totalCols);
+                                                                                        const sumOther = currentWidths.reduce((acc, w, idx) => idx === effectiveCol ? acc : acc + w, 0);
+                                                                                        const remainingTarget = 100 - val;
+                                                                                        const nextWidths = currentWidths.map((w, idx) => {
+                                                                                            if (idx === effectiveCol) return val;
+                                                                                            if (sumOther <= 0 || (totalCols - 1) <= 0) return remainingTarget / Math.max(1, totalCols - 1);
+                                                                                            return Math.max(2, (w / sumOther) * remainingTarget);
+                                                                                        });
+                                                                                        const sumNext = nextWidths.reduce((a, b) => a + b, 0);
+                                                                                        const normalized = nextWidths.map(w => Math.round((w / sumNext) * 1000) / 10);
+                                                                                        updateTableConfig(selectedElement.id, { columnWidths: normalized });
+                                                                                    }}
+                                                                                    className="w-full accent-indigo-600 h-1 bg-gray-200 rounded cursor-pointer"
+                                                                                />
+
+                                                                                {/* Multi-Column Width List */}
+                                                                                <details className="pt-1 text-[10px]" open={totalCols <= 8}>
+                                                                                    <summary className="font-bold text-indigo-700 cursor-pointer hover:underline py-1 select-none flex items-center justify-between">
+                                                                                        <span>Ajustar Todas as Colunas Manualmente</span>
+                                                                                        <span className="text-[9px] text-gray-400 font-normal">({totalCols} colunas)</span>
+                                                                                    </summary>
+                                                                                    <div className="space-y-1.5 mt-2 max-h-48 overflow-y-auto pr-1">
+                                                                                        {Array.from({ length: totalCols }).map((_, cIdx) => {
+                                                                                            const colW = Math.round((selectedElement.style.table?.columnWidths?.[cIdx] ?? (100 / totalCols)) * 10) / 10;
+                                                                                            return (
+                                                                                                <div key={cIdx} className={`flex items-center gap-2 p-1 rounded border ${cIdx === effectiveCol ? 'bg-indigo-50/80 border-indigo-200' : 'bg-white border-gray-100'}`}>
+                                                                                                    <span className="w-14 font-bold text-gray-600 text-[9px] truncate">
+                                                                                                        Col. {cIdx + 1}
+                                                                                                    </span>
+                                                                                                    <input 
+                                                                                                        type="range"
+                                                                                                        min="3"
+                                                                                                        max="90"
+                                                                                                        step="0.5"
+                                                                                                        value={colW}
+                                                                                                        onChange={(e) => {
+                                                                                                            const val = parseFloat(e.target.value);
+                                                                                                            const currentWidths = [...(selectedElement.style.table?.columnWidths || Array(totalCols).fill(100 / totalCols))];
+                                                                                                            while (currentWidths.length < totalCols) currentWidths.push(100 / totalCols);
+                                                                                                            const sumOther = currentWidths.reduce((acc, w, idx) => idx === cIdx ? acc : acc + w, 0);
+                                                                                                            const remainingTarget = 100 - val;
+                                                                                                            const nextWidths = currentWidths.map((w, idx) => {
+                                                                                                                if (idx === cIdx) return val;
+                                                                                                                if (sumOther <= 0 || (totalCols - 1) <= 0) return remainingTarget / Math.max(1, totalCols - 1);
+                                                                                                                return Math.max(2, (w / sumOther) * remainingTarget);
+                                                                                                            });
+                                                                                                            const sumNext = nextWidths.reduce((a, b) => a + b, 0);
+                                                                                                            const normalized = nextWidths.map(w => Math.round((w / sumNext) * 1000) / 10);
+                                                                                                            updateTableConfig(selectedElement.id, { columnWidths: normalized });
+                                                                                                        }}
+                                                                                                        className="flex-1 accent-indigo-600 h-1 bg-gray-200 rounded cursor-pointer"
+                                                                                                    />
+                                                                                                    <input 
+                                                                                                        type="number"
+                                                                                                        min="3"
+                                                                                                        max="95"
+                                                                                                        step="0.5"
+                                                                                                        value={colW}
+                                                                                                        onChange={(e) => {
+                                                                                                            const val = Math.max(3, Math.min(95, parseFloat(e.target.value) || 5));
+                                                                                                            const currentWidths = [...(selectedElement.style.table?.columnWidths || Array(totalCols).fill(100 / totalCols))];
+                                                                                                            while (currentWidths.length < totalCols) currentWidths.push(100 / totalCols);
+                                                                                                            const sumOther = currentWidths.reduce((acc, w, idx) => idx === cIdx ? acc : acc + w, 0);
+                                                                                                            const remainingTarget = 100 - val;
+                                                                                                            const nextWidths = currentWidths.map((w, idx) => {
+                                                                                                                if (idx === cIdx) return val;
+                                                                                                                if (sumOther <= 0 || (totalCols - 1) <= 0) return remainingTarget / Math.max(1, totalCols - 1);
+                                                                                                                return Math.max(2, (w / sumOther) * remainingTarget);
+                                                                                                            });
+                                                                                                            const sumNext = nextWidths.reduce((a, b) => a + b, 0);
+                                                                                                            const normalized = nextWidths.map(w => Math.round((w / sumNext) * 1000) / 10);
+                                                                                                            updateTableConfig(selectedElement.id, { columnWidths: normalized });
+                                                                                                        }}
+                                                                                                        className="w-12 text-[9px] p-0.5 border border-gray-200 rounded text-center bg-white"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            );
+                                                                                        })}
+                                                                                    </div>
+                                                                                </details>
+
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => {
+                                                                                        updateTableConfig(selectedElement.id, { columnWidths: Array(totalCols).fill(100 / totalCols) });
+                                                                                    }}
+                                                                                    className="w-full py-1 bg-white hover:bg-gray-100 border border-gray-200 rounded text-[9px] font-bold text-gray-600 uppercase cursor-pointer"
+                                                                                >
+                                                                                    Distribuir Larguras Igualmente
+                                                                                </button>
+                                                                            </div>
+
+                                                                            {/* Col Structure Actions */}
+                                                                            <div className="grid grid-cols-2 gap-1.5">
+                                                                                <button 
+                                                                                    onClick={() => addTableColumn(selectedElement.id, effectiveCol, 'before')}
+                                                                                    className="p-1.5 hover:bg-white rounded border border-indigo-200 text-indigo-700 bg-white/70 shadow-2xs text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                                                                >
+                                                                                    <Plus className="w-3 h-3" /> Inserir Antes
+                                                                                </button>
+                                                                                <button 
+                                                                                    onClick={() => addTableColumn(selectedElement.id, effectiveCol, 'after')}
+                                                                                    className="p-1.5 hover:bg-white rounded border border-indigo-200 text-indigo-700 bg-white/70 shadow-2xs text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                                                                >
+                                                                                    <Plus className="w-3 h-3" /> Inserir Depois
+                                                                                </button>
+                                                                                <button 
+                                                                                    onClick={() => deleteTableColumn(selectedElement.id, effectiveCol)}
+                                                                                    className="col-span-2 p-1.5 hover:bg-red-50 rounded border border-red-200 text-red-600 bg-white shadow-2xs text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                                                                >
+                                                                                    <Trash2 className="w-3 h-3" /> Excluir Coluna {effectiveCol + 1}
+                                                                                </button>
+                                                                            </div>
+
+                                                                            {/* Background Color for Column */}
+                                                                            <div className="p-2.5 bg-gray-50/80 rounded-lg border border-gray-100 space-y-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <label className="text-[10px] font-bold text-gray-600 uppercase">Cor de Fundo da Coluna</label>
+                                                                                    <div className="flex items-center gap-1.5">
+                                                                                        <input 
+                                                                                            type="color" 
+                                                                                            value={selectedElement.style.table?.colStyles?.[effectiveCol]?.backgroundColor || '#ffffff'} 
+                                                                                            onChange={(e) => {
+                                                                                                const current = selectedElement.style.table!.colStyles?.[effectiveCol] || selectedElement.style.table!.textStyle || {};
+                                                                                                updateTableConfig(selectedElement.id, {
+                                                                                                    colStyles: {
+                                                                                                        ...selectedElement.style.table!.colStyles,
+                                                                                                        [effectiveCol]: { ...current, backgroundColor: e.target.value }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="w-7 h-6 border-0 p-0 cursor-pointer rounded"
+                                                                                        />
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                const current = selectedElement.style.table!.colStyles?.[effectiveCol] || {};
+                                                                                                updateTableConfig(selectedElement.id, {
+                                                                                                    colStyles: {
+                                                                                                        ...selectedElement.style.table!.colStyles,
+                                                                                                        [effectiveCol]: { ...current, backgroundColor: 'transparent' }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="text-[9px] text-gray-500 hover:text-red-500 underline"
+                                                                                        >
+                                                                                            Limpar
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                                    {['#ffffff', '#f3f4f6', '#e0e7ff', '#fef3c7', '#dcfce7', '#fee2e2', '#f3e8ff', '#e0f2fe'].map(hex => (
+                                                                                        <button
+                                                                                            key={hex}
+                                                                                            onClick={() => {
+                                                                                                const current = selectedElement.style.table!.colStyles?.[effectiveCol] || selectedElement.style.table!.textStyle || {};
+                                                                                                updateTableConfig(selectedElement.id, {
+                                                                                                    colStyles: {
+                                                                                                        ...selectedElement.style.table!.colStyles,
+                                                                                                        [effectiveCol]: { ...current, backgroundColor: hex }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="w-5 h-5 rounded border border-gray-300 shadow-2xs hover:scale-110 transition-transform cursor-pointer"
+                                                                                            style={{ backgroundColor: hex }}
+                                                                                            title={hex}
+                                                                                        />
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* Typography for Column */}
+                                                                            <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Estilo de Texto da Coluna</h4>
+                                                                                    {selectedElement.style.table?.colStyles?.[effectiveCol] && (
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                const newColStyles = { ...(selectedElement.style.table!.colStyles || {}) };
+                                                                                                delete newColStyles[effectiveCol];
+                                                                                                updateTableConfig(selectedElement.id, { colStyles: newColStyles });
+                                                                                            }}
+                                                                                            className="text-[9px] text-red-500 hover:underline"
+                                                                                        >
+                                                                                            Resetar
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                                {renderTypographyControls(
+                                                                                    (selectedElement.style.table?.colStyles?.[effectiveCol] || selectedElement.style.table?.textStyle) || { fontFamily: 'Inter', fontSize: 10, fontWeight: 'normal', color: '#666', textAlign: 'left', verticalAlign: 'top', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' },
+                                                                                    (updates) => {
+                                                                                        const current = selectedElement.style.table!.colStyles?.[effectiveCol] || selectedElement.style.table!.textStyle || {};
+                                                                                        updateTableConfig(selectedElement.id, {
+                                                                                            colStyles: {
+                                                                                                ...selectedElement.style.table!.colStyles,
+                                                                                                [effectiveCol]: { ...current, ...updates }
+                                                                                            }
+                                                                                        });
+                                                                                    }
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </div>
                                             )}
@@ -8897,6 +10140,90 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         className="w-16 text-xs p-1.5 border border-gray-200 rounded" 
                                                                     />
                                                                 </div>
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Hora Final</label>
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="0" 
+                                                                        max="23" 
+                                                                        value={selectedElement.style.plannerDayBox?.endHour ?? 18} 
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, endHour: parseInt(e.target.value) || 0 } 
+                                                                        })} 
+                                                                        className="w-16 text-xs p-1.5 border border-gray-200 rounded" 
+                                                                    />
+                                                                </div>
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Intervalo</label>
+                                                                    <select 
+                                                                        value={selectedElement.style.plannerDayBox?.timeInterval ?? 60} 
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, timeInterval: parseInt(e.target.value) || 60 } 
+                                                                        })} 
+                                                                        className="w-20 text-xs p-1 border rounded bg-white text-gray-700"
+                                                                    >
+                                                                        <option value={15}>15 min</option>
+                                                                        <option value={30}>30 min</option>
+                                                                        <option value={45}>45 min</option>
+                                                                        <option value={60}>1 hora</option>
+                                                                        <option value={120}>2 horas</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 pt-1">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Área dos Horários</label>
+                                                                        <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1 py-0.5 rounded">
+                                                                            {selectedElement.style.plannerDayBox?.timetableHeightPercent ?? 100}%
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input 
+                                                                            type="range" 
+                                                                            min="10" 
+                                                                            max="100" 
+                                                                            step="5" 
+                                                                            value={selectedElement.style.plannerDayBox?.timetableHeightPercent ?? 100} 
+                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, timetableHeightPercent: parseInt(e.target.value) || 100 } 
+                                                                            })} 
+                                                                            className="flex-1 accent-indigo-600" 
+                                                                        />
+                                                                        <input 
+                                                                            type="number" 
+                                                                            min="10" 
+                                                                            max="100" 
+                                                                            value={selectedElement.style.plannerDayBox?.timetableHeightPercent ?? 100} 
+                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, timetableHeightPercent: Math.min(100, Math.max(10, parseInt(e.target.value) || 100)) } 
+                                                                            })} 
+                                                                            className="w-12 text-[10px] p-1 border rounded text-right font-mono" 
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center justify-between pt-1">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Modo Linhas</label>
+                                                                    <select 
+                                                                        value={selectedElement.style.plannerDayBox?.timetableFit ?? 'fixed'} 
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, timetableFit: e.target.value as 'fixed' | 'distribute' } 
+                                                                        })} 
+                                                                        className="w-28 text-xs p-1 border rounded bg-white text-gray-700"
+                                                                    >
+                                                                        <option value="fixed">Fixo (Espaçamento)</option>
+                                                                        <option value="distribute">Distribuir na Área</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div className="flex items-center justify-between pt-1">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Ocultar Linhas</label>
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        checked={selectedElement.style.plannerDayBox?.hideLines || false} 
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, hideLines: e.target.checked } 
+                                                                        })} 
+                                                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" 
+                                                                    />
+                                                                </div>
                                                                 <div className="pt-2 border-t border-gray-100/50">
                                                                     <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte dos Horários</label>
                                                                     {renderTypographyControls({
@@ -8974,147 +10301,238 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 />
                                                             </div>
                                                         </div>
-                                                        <div className="grid grid-cols-3 gap-2">
-                                                            <label className="flex items-center gap-1.5 cursor-pointer">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={selectedElement.style.plannerDayBox?.showDayNumber !== false} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showDayNumber: e.target.checked } })} 
-                                                                    className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
-                                                                />
-                                                                <span className="text-[10px] font-bold text-gray-500 uppercase">Nº</span>
-                                                            </label>
-                                                            <label className="flex items-center gap-1.5 cursor-pointer">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={selectedElement.style.plannerDayBox?.showDayName !== false} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showDayName: e.target.checked } })} 
-                                                                    className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
-                                                                />
-                                                                <span className="text-[10px] font-bold text-gray-500 uppercase">Nome</span>
-                                                            </label>
-                                                            <label className="flex items-center gap-1.5 cursor-pointer">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={selectedElement.style.plannerDayBox?.showMoonPhase === true} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showMoonPhase: e.target.checked } })} 
-                                                                    className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
-                                                                />
-                                                                <span className="text-[10px] font-bold text-gray-500 uppercase">Lua</span>
-                                                            </label>
-                                                        </div>
-
                                                         <div className="pt-3 border-t border-gray-100 space-y-3">
-                                                            <div className="flex items-center justify-between">
-                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Fundo do Cabeçalho</label>
-                                                                <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
-                                                                    <input 
-                                                                        type="color" 
-                                                                        value={selectedElement.style.plannerDayBox?.headerBackgroundColor || '#f9fafb'} 
-                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBackgroundColor: e.target.value } 
-                                                                        })} 
-                                                                        className="w-8 h-full p-0 border-0 cursor-pointer" 
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex items-center justify-between">
-                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Texto do Cabeçalho</label>
-                                                                <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
-                                                                    <input 
-                                                                        type="color" 
-                                                                        value={selectedElement.style.plannerDayBox?.headerTextColor || '#374151'} 
-                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, headerTextColor: e.target.value } 
-                                                                        })} 
-                                                                        className="w-8 h-full p-0 border-0 cursor-pointer" 
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                            <div className="space-y-1">
-                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase">Fonte do Cabeçalho</label>
-                                                                <select 
-                                                                    value={selectedElement.style.plannerDayBox?.headerFontFamily || 'Inter'} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, headerFontFamily: e.target.value } 
-                                                                    })} 
-                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"
-                                                                >
-                                                                    <optgroup label="Padrão">
-                                                                        {AVAILABLE_FONTS.map(font => (
-                                                                            <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
-                                                                        ))}
-                                                                    </optgroup>
-                                                                    <optgroup label="Fontes do PC (Instaladas)">
-                                                                        {SYSTEM_FONTS.map(font => (
-                                                                            <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
-                                                                        ))}
-                                                                    </optgroup>
-                                                                    {customFonts.length > 0 && (
-                                                                        <optgroup label="Minhas Fontes">
-                                                                            {customFonts.map(font => (
-                                                                                <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
-                                                                            ))}
-                                                                        </optgroup>
-                                                                    )}
-                                                                </select>
-                                                            </div>
-
-                                                            <div className="pt-2 border-t border-gray-50 space-y-2">
+                                                            <div className="flex items-center justify-between bg-indigo-50/60 p-2 rounded border border-indigo-100">
                                                                 <label className="flex items-center gap-2 cursor-pointer">
                                                                     <input 
                                                                         type="checkbox" 
-                                                                        checked={selectedElement.style.plannerDayBox?.showHeaderBorder !== false} 
+                                                                        checked={selectedElement.style.plannerDayBox?.showHeader !== false} 
                                                                         onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, showHeaderBorder: e.target.checked } 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, showHeader: e.target.checked } 
                                                                         })} 
-                                                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
                                                                     />
-                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase">Borda do Cabeçalho</span>
+                                                                    <span className="text-xs font-bold text-indigo-950">Exibir Cabeçalho</span>
                                                                 </label>
-
-                                                                {selectedElement.style.plannerDayBox?.showHeaderBorder !== false && (
-                                                                    <div className="space-y-2 pl-5">
-                                                                        <div className="flex items-center justify-between">
-                                                                            <label className="text-[10px] font-bold text-gray-400 uppercase">Cor</label>
-                                                                            <input 
-                                                                                type="color" 
-                                                                                value={selectedElement.style.plannerDayBox?.headerBorderColor || '#e5e7eb'} 
-                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderColor: e.target.value } 
-                                                                                })} 
-                                                                                className="w-6 h-5 p-0 border-0 cursor-pointer rounded"
-                                                                            />
-                                                                        </div>
-                                                                        <div className="flex items-center justify-between">
-                                                                            <label className="text-[10px] font-bold text-gray-400 uppercase">Espessura</label>
-                                                                            <input 
-                                                                                type="number" 
-                                                                                min="0" 
-                                                                                max="5" 
-                                                                                step="0.5" 
-                                                                                value={selectedElement.style.plannerDayBox?.headerBorderWidth ?? 1} 
-                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderWidth: parseFloat(e.target.value) || 0 } 
-                                                                                })} 
-                                                                                className="w-12 text-[10px] p-1 border rounded"
-                                                                            />
-                                                                        </div>
-                                                                        <select 
-                                                                            value={selectedElement.style.plannerDayBox?.headerBorderStyle || 'solid'} 
-                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderStyle: e.target.value as any } 
-                                                                            })} 
-                                                                            className="w-full text-[10px] p-1 border border-gray-200 rounded"
-                                                                        >
-                                                                            <option value="solid">Sólida</option>
-                                                                            <option value="dashed">Tracejada</option>
-                                                                            <option value="dotted">Pontilhada</option>
-                                                                        </select>
-                                                                    </div>
-                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => applyPlannerDayBoxStyleToAll(selectedElement.style.plannerDayBox)}
+                                                                    className="text-[10px] bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-medium px-2 py-1 rounded shadow-xs transition-colors"
+                                                                    title="Aplicar estilo e visibilidade deste cabeçalho a todas as colunas do planner"
+                                                                >
+                                                                    Aplicar a Todas
+                                                                </button>
                                                             </div>
 
+                                                            {selectedElement.style.plannerDayBox?.showHeader !== false && (
+                                                                <>
+                                                                    <div className="space-y-1.5 pb-2 border-b border-gray-100">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">
+                                                                                Altura do Cabeçalho
+                                                                            </label>
+                                                                            <span className="text-[10px] font-mono text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded">
+                                                                                {selectedElement.style.plannerDayBox?.headerHeight ?? 15}%
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input 
+                                                                                type="range" 
+                                                                                min="5" 
+                                                                                max="40" 
+                                                                                step="1" 
+                                                                                value={selectedElement.style.plannerDayBox?.headerHeight ?? 15} 
+                                                                                onChange={(e) => {
+                                                                                    const val = parseInt(e.target.value) || 15;
+                                                                                    updateElementStyle(selectedElement.id, { 
+                                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, headerHeight: val } 
+                                                                                    });
+                                                                                }} 
+                                                                                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                                                            />
+                                                                            <input 
+                                                                                type="number" 
+                                                                                min="5" 
+                                                                                max="40" 
+                                                                                value={selectedElement.style.plannerDayBox?.headerHeight ?? 15} 
+                                                                                onChange={(e) => {
+                                                                                    const val = Math.min(40, Math.max(5, parseInt(e.target.value) || 15));
+                                                                                    updateElementStyle(selectedElement.id, { 
+                                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, headerHeight: val } 
+                                                                                    });
+                                                                                }} 
+                                                                                className="w-12 text-[10px] p-1 border border-gray-200 rounded text-center font-medium"
+                                                                            />
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1 pt-1">
+                                                                            {[
+                                                                                { label: 'Pequeno', val: 10 },
+                                                                                { label: 'Padrão', val: 15 },
+                                                                                { label: 'Médio', val: 22 },
+                                                                                { label: 'Grande', val: 30 },
+                                                                            ].map(preset => (
+                                                                                <button
+                                                                                    key={preset.val}
+                                                                                    type="button"
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, { 
+                                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, headerHeight: preset.val } 
+                                                                                    })}
+                                                                                    className={`flex-1 text-[9px] py-1 rounded border transition-colors ${
+                                                                                        (selectedElement.style.plannerDayBox?.headerHeight ?? 15) === preset.val
+                                                                                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
+                                                                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                                                    }`}
+                                                                                >
+                                                                                    {preset.label}
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-3 gap-2">
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                checked={selectedElement.style.plannerDayBox?.showDayNumber !== false} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showDayNumber: e.target.checked } })} 
+                                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                                                            />
+                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Nº</span>
+                                                                        </label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                checked={selectedElement.style.plannerDayBox?.showDayName !== false} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showDayName: e.target.checked } })} 
+                                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                                                            />
+                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Nome</span>
+                                                                        </label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                checked={selectedElement.style.plannerDayBox?.showMoonPhase === true} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showMoonPhase: e.target.checked } })} 
+                                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                                                            />
+                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Lua</span>
+                                                                        </label>
+                                                                    </div>
+
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Fundo do Cabeçalho</label>
+                                                                        <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
+                                                                            <input 
+                                                                                type="color" 
+                                                                                value={selectedElement.style.plannerDayBox?.headerBackgroundColor || '#f9fafb'} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBackgroundColor: e.target.value } 
+                                                                                })} 
+                                                                                className="w-8 h-full p-0 border-0 cursor-pointer" 
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Texto do Cabeçalho</label>
+                                                                        <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
+                                                                            <input 
+                                                                                type="color" 
+                                                                                value={selectedElement.style.plannerDayBox?.headerTextColor || '#374151'} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, headerTextColor: e.target.value } 
+                                                                                })} 
+                                                                                className="w-8 h-full p-0 border-0 cursor-pointer" 
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="space-y-1">
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Fonte do Cabeçalho</label>
+                                                                        <select 
+                                                                            value={selectedElement.style.plannerDayBox?.headerFontFamily || 'Inter'} 
+                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, headerFontFamily: e.target.value } 
+                                                                            })} 
+                                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"
+                                                                        >
+                                                                            <optgroup label="Padrão">
+                                                                                {AVAILABLE_FONTS.map(font => (
+                                                                                    <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                                ))}
+                                                                            </optgroup>
+                                                                            <optgroup label="Fontes do PC (Instaladas)">
+                                                                                {SYSTEM_FONTS.map(font => (
+                                                                                    <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                                ))}
+                                                                            </optgroup>
+                                                                            {customFonts.length > 0 && (
+                                                                                <optgroup label="Minhas Fontes">
+                                                                                    {customFonts.map(font => (
+                                                                                        <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                                    ))}
+                                                                                </optgroup>
+                                                                            )}
+                                                                        </select>
+                                                                    </div>
+
+                                                                    <div className="pt-2 border-t border-gray-50 space-y-2">
+                                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                checked={selectedElement.style.plannerDayBox?.showHeaderBorder !== false} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, showHeaderBorder: e.target.checked } 
+                                                                                })} 
+                                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                                                            />
+                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Borda do Cabeçalho</span>
+                                                                        </label>
+
+                                                                        {selectedElement.style.plannerDayBox?.showHeaderBorder !== false && (
+                                                                            <div className="space-y-2 pl-5">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Cor</label>
+                                                                                    <input 
+                                                                                        type="color" 
+                                                                                        value={selectedElement.style.plannerDayBox?.headerBorderColor || '#e5e7eb'} 
+                                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderColor: e.target.value } 
+                                                                                        })} 
+                                                                                        className="w-6 h-5 p-0 border-0 cursor-pointer rounded"
+                                                                                    />
+                                                                                </div>
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Espessura</label>
+                                                                                    <input 
+                                                                                        type="number" 
+                                                                                        min="0" 
+                                                                                        max="5" 
+                                                                                        step="0.1" 
+                                                                                        value={selectedElement.style.plannerDayBox?.headerBorderWidth ?? 1} 
+                                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderWidth: parseFloat(e.target.value) || 0 } 
+                                                                                        })} 
+                                                                                        className="w-12 text-[10px] p-1 border rounded" 
+                                                                                    />
+                                                                                </div>
+                                                                                <select 
+                                                                                    value={selectedElement.style.plannerDayBox?.headerBorderStyle || 'solid'} 
+                                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderStyle: e.target.value as any } 
+                                                                                    })} 
+                                                                                    className="w-full text-[10px] p-1 border border-gray-200 rounded"
+                                                                                >
+                                                                                    <option value="solid">Sólida</option>
+                                                                                    <option value="dashed">Tracejada</option>
+                                                                                    <option value="dotted">Pontilhada</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="pt-3 border-t border-gray-100 space-y-3">
                                                             <div className="flex items-center justify-between">
                                                                 <label className="text-[10px] font-bold text-gray-500 uppercase">Cor do Traço</label>
                                                                 <input 
@@ -10177,6 +11595,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </select>
                                                         </div>
                                                     )}
+                                                    {((selectedElement.type === 'day_name' || selectedElement.type === 'month_name') || 
+                                                      (selectedElement.type === 'date_placeholder' && ['day_name', 'month_name'].includes(selectedElement.style.variant || '')) ||
+                                                      selectedElement.type === 'permanent_day_header' ||
+                                                      selectedElement.type === 'planner_day_box') && (
+                                                        <div className="space-y-1 mb-2 pt-2 border-t border-gray-100">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Formato / Abreviação</label>
+                                                            <select 
+                                                                value={selectedElement.style.nameFormat || 'full'} 
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    if (selectedElement.type === 'planner_day_box') {
+                                                                        updateElementStyle(selectedElement.id, { 
+                                                                            nameFormat: val,
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, nameFormat: val }
+                                                                        });
+                                                                    } else {
+                                                                        updateElementStyle(selectedElement.id, { nameFormat: val });
+                                                                    }
+                                                                }} 
+                                                                className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white shadow-sm font-medium text-gray-700"
+                                                            >
+                                                                <option value="full">Nome Completo (ex: Terça-feira / Janeiro)</option>
+                                                                <option value="no_feira">Sem "-feira" (ex: Terça / Segunda)</option>
+                                                                <option value="short">Abreviação 3 Letras (ex: Ter / Jan)</option>
+                                                                <option value="two_letters">Abreviação 2 Letras (ex: Te / Ja)</option>
+                                                                <option value="initial">Abreviação 1 Letra (ex: T / J)</option>
+                                                                <option value="ordinal_full">Ordinal Completo (ex: 3ª-feira)</option>
+                                                                <option value="ordinal_short">Ordinal Curto (ex: 3ª / 2ª)</option>
+                                                            </select>
+                                                        </div>
+                                                    )}
                                                     {selectedElement.type === 'moon' && (
                                                         <div className="space-y-1 mb-2">
                                                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Estilo da Lua</label>
@@ -10293,6 +11742,115 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             {selectedElement.type === 'lines' && (
                                                 <div className="space-y-3 pt-3 border-t border-gray-100">
                                                     <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Configuração das Linhas</h4>
+
+                                                    {/* Card de Orientação e Girar para Vertical */}
+                                                    <div className="bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-100 space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-indigo-900 uppercase flex items-center gap-1">
+                                                                <icons.RotateCw className="w-3 h-3 text-indigo-600" />
+                                                                <span>Orientação da Linha</span>
+                                                            </label>
+                                                            <span className="text-[10px] font-mono font-bold text-indigo-600 bg-white px-1.5 py-0.5 rounded border border-indigo-200">
+                                                                {selectedElement.style.rotation || 0}°
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-2 gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateElementStyle(selectedElement.id, { rotation: 0 })}
+                                                                className={`py-1.5 px-2 rounded-md border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                                                                    (selectedElement.style.rotation || 0) % 360 === 0
+                                                                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                                                }`}
+                                                            >
+                                                                <icons.Minus className="w-3.5 h-3.5" />
+                                                                <span>Horizontal (0°)</span>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateElementStyle(selectedElement.id, { rotation: 90 })}
+                                                                className={`py-1.5 px-2 rounded-md border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                                                                    (selectedElement.style.rotation || 0) === 90
+                                                                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                                                }`}
+                                                            >
+                                                                <icons.Minus className="w-3.5 h-3.5 rotate-90" />
+                                                                <span>Vertical (90°)</span>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateElementStyle(selectedElement.id, { rotation: 270 })}
+                                                                className={`py-1.5 px-2 rounded-md border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                                                                    (selectedElement.style.rotation || 0) === 270
+                                                                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                                                }`}
+                                                            >
+                                                                <icons.Minus className="w-3.5 h-3.5 -rotate-90" />
+                                                                <span>Vertical (270°)</span>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateElementStyle(selectedElement.id, { rotation: 180 })}
+                                                                className={`py-1.5 px-2 rounded-md border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                                                                    (selectedElement.style.rotation || 0) === 180
+                                                                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                                                }`}
+                                                            >
+                                                                <icons.Minus className="w-3.5 h-3.5" />
+                                                                <span>Invertida (180°)</span>
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-1.5 pt-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const currentRot = selectedElement.style.rotation || 0;
+                                                                    updateElementStyle(selectedElement.id, { rotation: (currentRot + 90) % 360 });
+                                                                }}
+                                                                className="flex-1 py-1 px-2 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+                                                            >
+                                                                <icons.RotateCw className="w-3 h-3" />
+                                                                <span>Girar +90°</span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const activeList = getActiveElements();
+                                                                    updateActiveElements(activeList.map(e => e.id === selectedElement.id ? { ...e, w: e.h, h: e.w } : e));
+                                                                }}
+                                                                className="flex-1 py-1 px-2 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+                                                                title="Inverter Proporções Largura e Altura"
+                                                            >
+                                                                <icons.RefreshCw className="w-3 h-3" />
+                                                                <span>Inverter L ↔ A</span>
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="space-y-1 pt-1">
+                                                            <div className="flex justify-between items-center text-[9px] font-bold text-gray-500 uppercase">
+                                                                <span>Ajuste Fino</span>
+                                                                <span>{selectedElement.style.rotation || 0}°</span>
+                                                            </div>
+                                                            <input 
+                                                                type="range" 
+                                                                min="0" 
+                                                                max="360" 
+                                                                step="5" 
+                                                                value={selectedElement.style.rotation || 0} 
+                                                                onChange={(e) => updateElementStyle(selectedElement.id, { rotation: parseInt(e.target.value) || 0 })} 
+                                                                className="w-full accent-indigo-600 h-1 bg-gray-200 rounded cursor-pointer" 
+                                                            />
+                                                        </div>
+                                                    </div>
                                                     <div className="flex items-center justify-between">
                                                         <label className="text-[10px] font-bold text-gray-500">Modo de Espaçamento</label>
                                                         <select 
@@ -10366,7 +11924,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             type="checkbox" 
                                                             checked={selectedElement.style.showTimes || false} 
                                                             onChange={(e) => updateElementStyle(selectedElement.id, { showTimes: e.target.checked })} 
-                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
+                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" 
+                                                        />
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500">Ocultar Linhas</label>
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={selectedElement.style.hideLines || false} 
+                                                            onChange={(e) => updateElementStyle(selectedElement.id, { hideLines: e.target.checked })} 
+                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" 
                                                         />
                                                     </div>
                                                     {selectedElement.style.showTimes && (
@@ -10407,8 +11974,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     <option value={120}>2 horas</option>
                                                                 </select>
                                                             </div>
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="text-[10px] font-bold text-gray-500">Posição Horários</label>
+                                                                <select 
+                                                                    value={selectedElement.style.timePosition || 'left'} 
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { timePosition: e.target.value as 'left' | 'right' })} 
+                                                                    className="w-20 text-xs p-1 border rounded bg-white text-gray-700"
+                                                                >
+                                                                    <option value="left">Esquerda</option>
+                                                                    <option value="right">Direita</option>
+                                                                </select>
+                                                            </div>
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="text-[10px] font-bold text-gray-500">Largura Bloco (px)</label>
+                                                                <input 
+                                                                    type="number" 
+                                                                    min="20" 
+                                                                    max="200" 
+                                                                    step="2"
+                                                                    value={selectedElement.style.timeWidth !== undefined ? selectedElement.style.timeWidth : 36} 
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { timeWidth: parseInt(e.target.value) || 36 })} 
+                                                                    className="w-16 text-xs p-1 border rounded" 
+                                                                />
+                                                            </div>
                                                             <div className="pt-2 border-t border-gray-100/50 mt-2">
-                                                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte dos Horários</label>
+                                                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte & Alinhamento dos Horários</label>
                                                                 {renderTypographyControls({
                                                                     fontFamily: selectedElement.style.fontFamily || 'monospace',
                                                                     fontSize: selectedElement.style.fontSize || 10,
@@ -10670,17 +12260,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             <input type="color" value={selectedElement.style.borderColor || '#000000'} onChange={(e) => updateElementStyle(selectedElement.id, { borderColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura ({selectedElement.style.borderWidth ?? 1})</label>
-                                                        <input 
-                                                            type="range" 
-                                                            min="0" 
-                                                            max="10" 
-                                                            step="0.5" 
-                                                            value={selectedElement.style.borderWidth ?? 1} 
-                                                            onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) })} 
-                                                            className="w-24" 
-                                                        />
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura da Borda</label>
+                                                            <span className="text-[10px] font-mono text-gray-400">{(selectedElement.style.borderWidth ?? 1)}px</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <input 
+                                                                type="range" 
+                                                                min="0" 
+                                                                max="10" 
+                                                                step="0.1" 
+                                                                value={selectedElement.style.borderWidth ?? 1} 
+                                                                onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
+                                                            />
+                                                            <input 
+                                                                type="number" 
+                                                                min="0" 
+                                                                max="10" 
+                                                                step="0.1" 
+                                                                value={selectedElement.style.borderWidth ?? 1} 
+                                                                onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                            />
+                                                        </div>
                                                     </div>
                                                     <div className="flex items-center justify-between font-mono">
                                                         <label className="text-[10px] font-bold text-gray-500 uppercase">Border Style</label>
@@ -10755,6 +12359,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             onChange={(e) => updateElementStyle(selectedElement.id, { rotation: parseInt(e.target.value) })} 
                                                             className="w-24" 
                                                         />
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Sombra</label>
+                                                        <select 
+                                                            value={selectedElement.style.boxShadow || 'none'} 
+                                                            onChange={(e) => updateElementStyle(selectedElement.id, { boxShadow: e.target.value as any })}
+                                                            className="w-24 text-[10px] p-1 border rounded bg-white"
+                                                        >
+                                                            <option value="none">Nenhuma</option>
+                                                            <option value="sm">Suave (sm)</option>
+                                                            <option value="md">Média (md)</option>
+                                                            <option value="lg">Marcante (lg)</option>
+                                                        </select>
                                                     </div>
                                                     <div className="grid grid-cols-2 gap-2 pt-2">
                                                         <button 
@@ -10836,6 +12453,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         />
                                                     </div>
 
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Sombra</label>
+                                                        <select 
+                                                            value={selectedElement.style.boxShadow || 'none'} 
+                                                            onChange={(e) => updateElementStyle(selectedElement.id, { boxShadow: e.target.value as any })}
+                                                            className="w-24 text-[10px] p-1 border rounded bg-white"
+                                                        >
+                                                            <option value="none">Nenhuma</option>
+                                                            <option value="sm">Suave (sm)</option>
+                                                            <option value="md">Média (md)</option>
+                                                            <option value="lg">Marcante (lg)</option>
+                                                        </select>
+                                                    </div>
+
                                                     <div className="pt-2">
                                                         <label className="flex items-center gap-2 cursor-pointer">
                                                             <input 
@@ -10864,75 +12495,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 <div>
                                                     <h4 className="text-xs font-bold text-indigo-900 uppercase leading-none">Fundo da Página</h4>
                                                     <p className="text-[9px] text-indigo-700 opacity-70 uppercase tracking-tight mt-1 font-semibold">
-                                                        {editMode === 'intro' ? 'Customizando esta Página Inicial' : editMode === 'monthly_intro' ? 'Customizando esta Página Mensal' : editMode === 'divider' ? 'Customizando as Divisórias' : 'Customizando Miolo / Global'}
+                                                        {editMode === 'intro' ? 'Customizando esta Página Inicial' : editMode === 'monthly_intro' ? 'Customizando esta Página Mensal' : editMode === 'divider' ? (dividerViewMode === 'verso' ? 'Customizando Verso da Divisória' : 'Customizando Frente da Divisória') : 'Customizando Miolo / Global'}
                                                     </p>
                                                 </div>
                                             </div>
                                             
+                                            {editMode === 'divider' && (
+                                                <div className="flex bg-indigo-100/60 p-1 rounded-xl gap-1 mb-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDividerViewMode('front')}
+                                                        className={`flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                                            dividerViewMode === 'front' ? 'bg-white text-indigo-700 shadow-xs' : 'text-indigo-900/60 hover:text-indigo-950'
+                                                        }`}
+                                                    >
+                                                        📑 Frente (Capa)
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDividerViewMode('verso')}
+                                                        className={`flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                                            dividerViewMode === 'verso' ? 'bg-white text-indigo-700 shadow-xs' : 'text-indigo-900/60 hover:text-indigo-950'
+                                                        }`}
+                                                    >
+                                                        📄 Verso da Divisória
+                                                    </button>
+                                                </div>
+                                            )}
+                                            
                                             <BackgroundSettings 
-                                                config={editMode === 'intro' 
-                                                    ? config.introPages.find(p => p.id === currentIntroPageId)?.background || config.background 
-                                                    : editMode === 'monthly_intro'
-                                                    ? config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId)?.background || config.background
-                                                    : editMode === 'divider'
-                                                    ? config.monthlyDividerStyle?.background || config.background
-                                                    : (config.backgrounds?.[0] || config.background)
-                                                }
-                                                configs={editMode === 'daily' 
-                                                    ? (config.backgrounds && config.backgrounds.length > 0 
-                                                        ? config.backgrounds 
-                                                        : [config.background || { id: 'bg_default', type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true, targetType: 'all', pageFilter: 'all' }]) 
-                                                    : undefined
-                                                }
-                                                onConfigsChange={editMode === 'daily' ? (newConfigs) => {
+                                                agendaConfig={config}
+                                                onAgendaConfigChange={(newCfg) => {
                                                     pushHistory();
-                                                    setConfig(prev => ({
-                                                        ...prev,
-                                                        backgrounds: newConfigs,
-                                                        background: newConfigs[0] || prev.background
-                                                    }));
-                                                } : undefined}
-                                                onChange={(updates) => {
-                                                    pushHistory();
-                                                    if (editMode === 'intro' && currentIntroPageId) {
-                                                        setConfig(prev => ({
-                                                            ...prev,
-                                                            introPages: prev.introPages.map(p => p.id === currentIntroPageId 
-                                                                ? { ...p, background: { ...(p.background || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates } } 
-                                                                : p
-                                                            )
-                                                        }));
-                                                    } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
-                                                        setConfig(prev => ({
-                                                            ...prev,
-                                                            monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId 
-                                                                ? { ...p, background: { ...(p.background || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates } } 
-                                                                : p
-                                                            )
-                                                        }));
-                                                    } else if (editMode === 'divider') {
-                                                        setConfig(prev => ({
-                                                            ...prev,
-                                                            monthlyDividerStyle: {
-                                                                ...(prev.monthlyDividerStyle || {}),
-                                                                background: { ...(prev.monthlyDividerStyle?.background || prev.background || { type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true }), ...updates }
-                                                            }
-                                                        }));
-                                                    } else {
-                                                        setConfig(prev => {
-                                                            const currentBgs = prev.backgrounds && prev.backgrounds.length > 0 
-                                                                ? prev.backgrounds 
-                                                                : [prev.background || { id: 'bg_1', type: 'none', opacity: 1, showOnIntroPages: true, showOnDailyPages: true, targetType: 'all', pageFilter: 'all' }];
-                                                            const updatedBgs = [...currentBgs];
-                                                            updatedBgs[0] = { ...updatedBgs[0], ...updates };
-                                                            return {
-                                                                ...prev,
-                                                                backgrounds: updatedBgs,
-                                                                background: updatedBgs[0]
-                                                            };
-                                                        });
-                                                    }
+                                                    setConfig(newCfg);
                                                 }}
+                                                currentEditorPageNum={editorParityToggle === 'even' ? 2 : 1}
+                                                pushHistory={pushHistory}
                                             />
 
                                             {editMode !== 'daily' && (
@@ -10945,7 +12543,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 ? config.introPages.find(p => p.id === currentIntroPageId)?.background
                                                                 : editMode === 'monthly_intro'
                                                                 ? config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId)?.background
-                                                                : config.monthlyDividerStyle?.background;
+                                                                : (dividerViewMode === 'verso' ? config.monthlyDividerStyle?.versoBackground : config.monthlyDividerStyle?.background);
                                                             if (currentBg) {
                                                                 setConfig(prev => ({
                                                                     ...prev,
@@ -10973,10 +12571,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId ? { ...p, background: undefined } : p)
                                                                 }));
                                                             } else if (editMode === 'divider') {
-                                                                setConfig(prev => ({
-                                                                    ...prev,
-                                                                    monthlyDividerStyle: { ...(prev.monthlyDividerStyle || {}), background: undefined }
-                                                                }));
+                                                                if (dividerViewMode === 'verso') {
+                                                                    setConfig(prev => ({
+                                                                        ...prev,
+                                                                        monthlyDividerStyle: { ...(prev.monthlyDividerStyle || {}), versoBackground: undefined }
+                                                                    }));
+                                                                } else {
+                                                                    setConfig(prev => ({
+                                                                        ...prev,
+                                                                        monthlyDividerStyle: { ...(prev.monthlyDividerStyle || {}), background: undefined }
+                                                                    }));
+                                                                }
                                                             }
                                                         }}
                                                         className="w-full py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-bold transition-all border border-gray-200 flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-tight"
@@ -11007,13 +12612,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                             )
                                                                         }));
                                                                     } else if (editMode === 'divider') {
-                                                                        setConfig(prev => ({
-                                                                            ...prev,
-                                                                            monthlyDividerStyle: {
-                                                                                ...(prev.monthlyDividerStyle || {}),
-                                                                                background: prev.background ? { ...prev.background } : undefined
-                                                                            }
-                                                                        }));
+                                                                        if (dividerViewMode === 'verso') {
+                                                                            setConfig(prev => ({
+                                                                                ...prev,
+                                                                                monthlyDividerStyle: {
+                                                                                    ...(prev.monthlyDividerStyle || {}),
+                                                                                    versoBackground: prev.background ? { ...prev.background } : undefined
+                                                                                }
+                                                                            }));
+                                                                        } else {
+                                                                            setConfig(prev => ({
+                                                                                ...prev,
+                                                                                monthlyDividerStyle: {
+                                                                                    ...(prev.monthlyDividerStyle || {}),
+                                                                                    background: prev.background ? { ...prev.background } : undefined
+                                                                                }
+                                                                            }));
+                                                                        }
                                                                     }
                                                                 }
                                                             }}
@@ -11035,27 +12650,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                         {/* Controles de Zoom */}
                         {!isMobile && (
-                            <div className={`fixed bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 px-4 py-2 gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 ${showProperties ? 'right-[312px]' : 'right-6'}`}>
-                                <div className="flex bg-gray-100 p-0.5 rounded-full border border-gray-200 select-none">
-                                    <button
-                                        onClick={() => setPanMode(false)}
-                                        className={`p-1.5 rounded-full transition-all cursor-pointer ${!panMode ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                        title="Ferramenta Seleção (Atalho: V)"
-                                    >
-                                        <MousePointer2 className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => setPanMode(true)}
-                                        className={`p-1.5 rounded-full transition-all cursor-pointer ${panMode ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                        title="Ferramenta Mão / Arrastar (Atalho: H ou Segurar Espaço)"
-                                    >
-                                        <Hand className="w-4 h-4" />
-                                    </button>
-                                </div>
-                                <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                            <div className={`fixed bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 px-4 py-2 gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 ${showProperties && activeTab === 'editor' ? 'right-[312px]' : 'right-6'}`}>
+                                {activeTab === 'editor' && (
+                                    <>
+                                        <div className="flex bg-gray-100 p-0.5 rounded-full border border-gray-200 select-none">
+                                            <button
+                                                onClick={() => setPanMode(false)}
+                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${!panMode ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                                title="Ferramenta Seleção (Atalho: V)"
+                                            >
+                                                <MousePointer2 className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => setPanMode(true)}
+                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${panMode ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                                title="Ferramenta Mão / Arrastar (Atalho: H ou Segurar Espaço)"
+                                            >
+                                                <Hand className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                        <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                    </>
+                                )}
                                 <button 
                                     onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} 
-                                    className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500 hover:text-indigo-600 disabled:opacity-30"
+                                    className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
                                     title="Diminuir Zoom"
                                     disabled={zoom <= 0.3}
                                 >
@@ -11067,7 +12686,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 </div>
                                 <button 
                                     onClick={() => setZoom(Math.min(3, zoom + 0.1))} 
-                                    className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500 hover:text-indigo-600 disabled:opacity-30"
+                                    className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
                                     title="Aumentar Zoom"
                                     disabled={zoom >= 3}
                                 >
@@ -11076,7 +12695,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <div className="w-px h-6 bg-gray-200 mx-1"></div>
                                 <button 
                                     onClick={() => setZoom(1)} 
-                                    className="text-[9px] font-bold text-gray-500 hover:text-indigo-600 uppercase tracking-widest px-2 py-1 hover:bg-gray-50 rounded transition-colors"
+                                    className="text-[9px] font-bold text-gray-500 hover:text-indigo-600 uppercase tracking-widest px-2 py-1 hover:bg-gray-50 rounded transition-colors cursor-pointer"
                                 >
                                     Reset
                                 </button>
@@ -11085,12 +12704,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                 )}
                 {activeTab === 'preview' && (
-                    <div className="flex-1 w-full overflow-y-auto p-8 custom-scrollbar bg-gray-500">
+                    <div className="flex-1 w-full overflow-auto p-8 custom-scrollbar bg-gray-500">
                         <div className="max-w-[95vw] md:max-w-6xl mx-auto">
                             <div id="print-area">
                                 {generatedData.length === 0 ? (<div className="text-center py-20 text-white">Carregando visualização...</div>) : (
                                     <div className="space-y-4">
-                                        <div className="p-2 bg-white/90 backdrop-blur-sm rounded-lg shadow-md sticky top-2 z-50 flex items-center justify-between no-print border border-gray-100 max-w-2xl mx-auto mb-6">
+                                        <div className="p-2 bg-white/90 backdrop-blur-sm rounded-lg shadow-md sticky top-2 z-50 flex items-center justify-between no-print border border-gray-100 max-w-3xl mx-auto mb-6">
                                             <div className="flex items-center gap-3 pl-2">
                                                 <div className="w-1.5 h-6 bg-indigo-600 rounded-full"></div>
                                                 <div className="flex flex-col">
@@ -11100,7 +12719,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     </span>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-3">
+                                                {/* Zoom nos controles superiores do modo visualizar */}
+                                                <div className="flex items-center gap-1 bg-gray-100/90 p-1 rounded-lg border border-gray-200 shadow-xs">
+                                                    <button
+                                                        onClick={() => setZoom(Math.max(0.3, zoom - 0.1))}
+                                                        className="p-1 hover:bg-white rounded transition-colors text-gray-600 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                                        title="Diminuir Zoom"
+                                                        disabled={zoom <= 0.3}
+                                                    >
+                                                        <Minus className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <div className="px-1.5 text-center min-w-[46px] select-none">
+                                                        <span className="text-xs font-black text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setZoom(Math.min(3, zoom + 0.1))}
+                                                        className="p-1 hover:bg-white rounded transition-colors text-gray-600 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                                        title="Aumentar Zoom"
+                                                        disabled={zoom >= 3}
+                                                    >
+                                                        <Plus className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setZoom(1)}
+                                                        className="text-[9px] font-bold text-gray-500 hover:text-indigo-600 uppercase px-2 py-0.5 hover:bg-white rounded transition-colors border-l border-gray-200 ml-0.5 cursor-pointer"
+                                                        title="Resetar Zoom"
+                                                    >
+                                                        100%
+                                                    </button>
+                                                </div>
+
                                                 <div className="relative">
                                                     <Search className="w-3 h-3 absolute left-2 top-2 text-gray-400 pointer-events-none" />
                                                     <select 
@@ -11108,12 +12757,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         onChange={(e) => handleScrollToMonth(parseInt(e.target.value))}
                                                     >
                                                         <option value="">Pular para Mês...</option>
-                                                        {Array.from({length: 12}).map((_, i) => (<option key={i} value={i}>{getMonthName(i)}</option>))}
+                                                        {Array.from({length: config.durationMonths || 12}).map((_, i) => {
+                                                            const mIdx = ((config.startMonth ?? 0) + i) % 12;
+                                                            const yearOffset = Math.floor(((config.startMonth ?? 0) + i) / 12);
+                                                            const mYear = config.year + yearOffset;
+                                                            const mName = getMonthName(mIdx);
+                                                            return (
+                                                                <option key={i} value={i}>
+                                                                    {mName} {(config.durationMonths > 12 || yearOffset > 0) ? `(${mYear})` : ''}
+                                                                </option>
+                                                            );
+                                                        })}
                                                     </select>
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="no-print flex flex-col items-center gap-16 pb-40 max-w-[95vw] mx-auto overflow-x-hidden">
+                                        <div className="no-print flex flex-col items-center gap-16 pb-40 max-w-[95vw] mx-auto overflow-x-auto">
                                             {(() => {
                                                 const renderedPages = renderPrintLayout(undefined, undefined, renderedPreviewCount);
                                                 if (!Array.isArray(renderedPages)) return renderedPages;
@@ -11121,7 +12780,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 if (config.orientation === 'landscape') {
                                                     return renderedPages.map((page, idx) => (
                                                         <div key={`page-landscape-${idx}`} className="w-full max-w-4xl flex justify-center print:contents">
-                                                            <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM}>
+                                                            <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
                                                                 {page}
                                                             </PreviewPageScaleWrapper>
                                                         </div>
@@ -11136,7 +12795,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         <div key="spread-initial" className="flex items-start justify-center w-full print:contents">
                                                             <div className="hidden lg:block w-[45%] opacity-0 pointer-events-none" /> {/* Placeholder for empty left */}
                                                             <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
-                                                                <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM}>
+                                                                <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
                                                                     {renderedPages[0]}
                                                                 </PreviewPageScaleWrapper>
                                                             </div>
@@ -11152,13 +12811,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     spreads.push(
                                                         <div key={`spread-${i}`} className="flex flex-col lg:flex-row items-center lg:items-start justify-center w-full gap-8 lg:gap-0 print:contents">
                                                             <div className="w-full lg:w-[45%] flex justify-center lg:justify-end pr-0 lg:pr-[2mm]">
-                                                                <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM}>
+                                                                <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
                                                                     {left}
                                                                 </PreviewPageScaleWrapper>
                                                             </div>
                                                             <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
                                                                 {right ? (
-                                                                    <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM}>
+                                                                    <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
                                                                         {right}
                                                                     </PreviewPageScaleWrapper>
                                                                 ) : (
@@ -11268,6 +12927,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     <button onClick={() => { addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><ListTodo className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Pautas</span></button>
                                     <button onClick={() => { addElement('lines', 'Horários', { showTimes: true, startHour: 7, lineSpacing: 28, color: '#e5e7eb' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Clock className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Horários</span></button>
                                     <button onClick={() => { addElement('table', 'Tabela'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><TableIcon className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Tabela</span></button>
+                                    <button onClick={() => { addElement('table', 'Tabela de Horários', { isScheduleTable: true }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CalendarClock className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Tab. Horários</span></button>
                                     <button onClick={() => { addElement('note_grid', 'Grid', { variant: 'dots', color: '#ccc', opacity: 0.5 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Grid3X3 className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Grid Notas</span></button>
                                     <button onClick={() => { addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Minus className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Divisória</span></button>
                                 </div>

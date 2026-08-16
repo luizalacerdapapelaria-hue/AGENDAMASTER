@@ -173,8 +173,10 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     }
 
     if (element.type === 'holiday') {
-        if (dayData.dayOfMonth === 0) return null;
-        const content = isSentenceOrCapitalize ? applyTextTransform(dayData.holiday || (isEditor ? 'Confraternização Universal' : ''), textTransform) : (dayData.holiday || (isEditor ? 'Confraternização Universal' : ''));
+        if (!dayData || dayData.dayOfMonth === 0) return null;
+        const holidayText = dayData.holiday || (isEditor ? 'Confraternização Universal' : '');
+        if (!holidayText && !isEditor) return null;
+        const content = isSentenceOrCapitalize ? applyTextTransform(holidayText, textTransform) : holidayText;
         return <div style={{...style, ...alignmentStyles, lineHeight: style.lineHeight || 1.5, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{content}</div>;
     }
 

@@ -106,9 +106,12 @@ export interface LayoutElement {
     gridSpacing?: number; // Para grids de notas
     rowCount?: number; // Novo: Número de linhas fixo para pautas
     showTimes?: boolean; // Para pautas com horário
+    hideLines?: boolean; // Ocultar linhas da pauta / tabela de horários
     startHour?: number; // Hora inicial para pautas
     endHour?: number; // Hora final para pautas
     timeInterval?: number; // Intervalo em minutos para pautas
+    timePosition?: 'left' | 'right'; // Posição dos horários (esquerda ou direita)
+    timeWidth?: number; // Largura do bloco/coluna de horários em px
     rotation?: number; // Em graus
     displayOn?: 'all' | 'even' | 'odd' | 'weekdays' | 'weekends' | 'custom';
     dayIndex?: number;
@@ -121,6 +124,7 @@ export interface LayoutElement {
     autoMirrorImage?: boolean; // Novo: Espelhar automaticamente em páginas espelhadas (pares)
     simulateMaxSpace?: boolean; // Novo: Simular maior ocupação de espaço para testes de layout
     variant?: string;
+    nameFormat?: 'full' | 'short' | 'initial' | string; // Formato de nome/abreviação (Completo, 3 letras, 1 letra)
     fillOpacity?: number; // Transparência do preenchimento (0 a 1)
     strokeOpacity?: number; // Transparência da borda (0 a 1)
     shapeType?: 'rectangle' | 'circle' | 'triangle' | 'star' | 'heart' | 'arrow' | 'diamond' | 'hexagon' | 'octagon' | 'pentagon' | 'parallelogram' | 'trapezoid' | 'cloud' | 'shield'; // Tipos de formas vetoriais
@@ -158,12 +162,15 @@ export interface LayoutElement {
         headerRow: boolean;
         rowHeight?: number; // Altura mínima da linha em px (no editor)
         borderRadius?: number; // Arredondamento das bordas
+        zebraRows?: boolean; // Opção de linhas intercaladas
+        zebraColor?: string; // Cor das linhas intercaladas
         columnWidths?: number[]; // Array de porcentagens para largura das colunas
         rowHeights?: number[]; // Novo: Array de porcentagens para altura das linhas
         cellContent?: Record<string, string>; // Mapa "row-col" -> "texto"
         textStyle?: TextStyleConfig; // Estilo de texto global da tabela
         rowStyles?: Record<number, TextStyleConfig>; // Estilos específicos por índice de linha
         colStyles?: Record<number, TextStyleConfig>; // Estilos específicos por índice de coluna
+        cellStyles?: Record<string, TextStyleConfig>; // Estilos específicos por chave de célula "r-c"
         borders?: {
             top: boolean;
             bottom: boolean;
@@ -216,6 +223,7 @@ export interface LayoutElement {
         contentStyle: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable';
         lineSpacing?: number;
         gridSpacing?: number;
+        showHeader?: boolean;
         showDayNumber?: boolean;
         showDayName?: boolean;
         dayNameCase?: 'uppercase' | 'lowercase' | 'capitalize';
@@ -232,6 +240,11 @@ export interface LayoutElement {
         strokeStyle?: 'solid' | 'dashed' | 'dotted';
         showMoonPhase?: boolean;
         startHour?: number;
+        endHour?: number;
+        timeInterval?: number;
+        timetableHeightPercent?: number;
+        timetableFit?: 'fixed' | 'distribute';
+        hideLines?: boolean;
         fontFamily?: string;
         headerFontFamily?: string;
         fontSize?: number;
@@ -239,6 +252,21 @@ export interface LayoutElement {
         color?: string;
     };
   };
+}
+
+export interface CategoryBackgroundConfig {
+    default?: BackgroundConfig; // Fundo padrão da categoria
+    even?: BackgroundConfig;    // Fundo das páginas pares da categoria (Esquerda)
+    odd?: BackgroundConfig;     // Fundo das páginas ímpares da categoria (Direita)
+}
+
+export interface BackgroundRulesConfig {
+    global?: BackgroundConfig;                             // 1. Fundo de toda a agenda
+    miolo?: CategoryBackgroundConfig;                      // 2. Fundo do Miolo
+    mensais?: CategoryBackgroundConfig;                    // 3. Fundo das Páginas Mensais
+    divisorias?: CategoryBackgroundConfig;                 // 4. Fundo das Divisórias Mensais
+    iniciais?: CategoryBackgroundConfig;                   // 5. Fundo das Páginas Iniciais
+    specificPages?: Record<number, BackgroundConfig>;      // 6. Fundo de Páginas Específicas (ex: página 37)
 }
 
 export interface BackgroundConfig {
@@ -263,8 +291,8 @@ export interface BackgroundConfig {
     opacity?: number; // Opacidade global do fundo
     showOnIntroPages?: boolean;
     showOnDailyPages?: boolean;
-    pageFilter?: 'all' | 'even' | 'odd'; // Filtro de exibição por paridade: 'all' (todas), 'even' (pares), 'odd' (ímpares)
-    targetType?: 'all' | 'intro' | 'daily' | 'even' | 'odd' | 'custom'; // Alvo específico de exibição
+    pageFilter?: 'all' | 'even' | 'odd' | 'custom'; // Filtro de exibição por paridade: 'all' (todas), 'even' (pares), 'odd' (ímpares), 'custom' (específica)
+    targetType?: 'all' | 'universal' | 'intro' | 'daily' | 'monthly' | 'monthly_intro' | 'divider' | 'divider_verso' | 'even' | 'odd' | 'custom'; // Alvo específico de exibição
     customPages?: string; // Intervalo de páginas manual (ex: "1, 3, 5-10")
 }
 
@@ -319,6 +347,7 @@ export interface AgendaConfig {
     titleText?: string;
     elements?: LayoutElement[];
     background?: BackgroundConfig;
+    versoBackground?: BackgroundConfig;
   };
   margins: PageMargins;
   startMonth?: number; // Mês inicial (0-11)
@@ -326,7 +355,12 @@ export interface AgendaConfig {
   startOfWeekDay?: number; // Dia de início da semana para calendários (0-6)
   background?: BackgroundConfig; // Fundo global padrão (legado)
   backgrounds?: BackgroundConfig[]; // Lista de múltiplos planos de fundo globais
-  elements: LayoutElement[]; // Lista de elementos que compõem o template do dia (MIOLO)
+  backgroundRules?: BackgroundRulesConfig; // Sistema de regras hierárquicas de plano de fundo
+  customVerso?: boolean; // Se true, permite personalizar o verso com um layout diferente da frente
+  versoAdvancesSequence?: boolean; // Se false, mantém a mesma data da frente no verso (não pula a sequência de dias)
+  disableSequenceSkip?: boolean; // Se true, não insere páginas em branco/preenchimento para alinhar sequência
+  elements: LayoutElement[]; // Lista de elementos que compõem o template do dia / frente (MIOLO)
+  elementsVerso?: LayoutElement[]; // Template específico para o Verso / Página Par (opcional)
   elementsSaturday?: LayoutElement[]; // Template específico para Sábado (opcional)
   elementsSunday?: LayoutElement[]; // Template específico para Domingo (opcional)
   elementsTop?: LayoutElement[]; // Template específico para a parte superior (2 dias por página)
@@ -342,5 +376,6 @@ export enum AppState {
   LOGIN,
   INITIAL_SETUP,
   DASHBOARD,
-  PREVIEW
+  PREVIEW,
+  LANDING
 }
