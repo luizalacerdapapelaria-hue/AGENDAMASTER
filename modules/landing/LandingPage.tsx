@@ -63,7 +63,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                   Agenda Master <span className="text-orange-500">AI</span>
                 </span>
                 <span className="bg-orange-50 text-orange-700 border border-orange-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Artesã v0.9
+                  Artesã v1.1.9
                 </span>
               </div>
               <p className="text-[10px] text-stone-500 font-medium">Sua fábrica de miolos e planners em PDF</p>
@@ -414,7 +414,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                       <h4 className="text-xs font-bold text-stone-900">Programa Windows (.EXE)</h4>
                       <p className="text-[10px] text-stone-500">Aplicativo nativo otimizado para exportar PDFs pesados com velocidade máxima.</p>
                       <a 
-                        href={exeUrl || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.0.9/Agenda.Master.Setup.0.9.0.exe'}
+                        href={exeUrl || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.1.9/Agenda.Master.Setup.1.1.9.exe'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[9px] rounded-lg uppercase cursor-pointer text-center block transition-colors"
