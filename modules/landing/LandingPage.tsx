@@ -414,7 +414,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                       <h4 className="text-xs font-bold text-stone-900">Programa Windows (.EXE)</h4>
                       <p className="text-[10px] text-stone-500">Aplicativo nativo otimizado para exportar PDFs pesados com velocidade máxima.</p>
                       <a 
-                        href={exeUrl || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.1.9/Agenda.Master.Setup.1.1.9.exe'}
+                        href={exeUrl || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/V1.1.9/Agenda.Master.Setup.1.1.9.rar'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[9px] rounded-lg uppercase cursor-pointer text-center block transition-colors"
