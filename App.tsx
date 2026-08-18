@@ -24,7 +24,13 @@ const App: React.FC = () => {
       const search = new URLSearchParams(window.location.search);
       const pageParam = (search.get('page') || '').toLowerCase();
 
-      if (path === '/agendamaster' || path.endsWith('/agendamaster') || pageParam === 'agendamaster' || pageParam === 'landing') {
+      if (
+        path === '/agendamaster' || 
+        path.endsWith('/agendamaster') || 
+        path.includes('/agendamaster') ||
+        pageParam === 'agendamaster' || 
+        pageParam === 'landing'
+      ) {
         return AppState.LANDING;
       }
       if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
@@ -314,7 +320,12 @@ const App: React.FC = () => {
       } else {
         verifiedEmailRef.current = null;
         setCurrentUser(null);
-        setAppState(current => current === AppState.WELCOME ? AppState.WELCOME : AppState.LOGIN);
+        setAppState(current => {
+          if (current === AppState.LANDING || current === AppState.WELCOME) {
+            return current;
+          }
+          return AppState.LOGIN;
+        });
       }
     });
 

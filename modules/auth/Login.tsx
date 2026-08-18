@@ -560,6 +560,18 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   )}
                 </button>
 
+                <div className="pt-1 text-center">
+                  <a
+                    href="https://pay.herospark.com/agenda-master-523399"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-orange-600 hover:text-orange-700 font-semibold hover:underline inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                    <span>Ainda não é aluno? Adquira seu acesso aqui</span>
+                  </a>
+                </div>
+
               </form>
             </>
           )}

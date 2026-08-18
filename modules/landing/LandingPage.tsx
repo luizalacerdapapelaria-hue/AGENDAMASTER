@@ -13,9 +13,14 @@ import { AppState } from '../../types';
 interface LandingPageProps {
   onNavigate: (state: AppState) => void;
   exeUrl?: string;
+  checkoutUrl?: string;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ 
+  onNavigate, 
+  exeUrl,
+  checkoutUrl = 'https://pay.herospark.com/agenda-master-523399'
+}) => {
   const [liveVideoUrl] = useState<string>('https://www.youtube.com/live/FBqMHhpH8pg');
 
   const getYouTubeEmbedUrl = (url: string) => {
@@ -115,14 +120,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
               <span>Entrar</span>
             </button>
 
-            <button
-              onClick={() => onNavigate(AppState.DASHBOARD)}
-              className="text-xs font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 px-4 py-2 rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+            <a
+              href={checkoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 px-4 py-2 rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer inline-flex"
             >
-              <Wand2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Criar Meu Miolo</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Quero Adquirir</span>
+              <span className="sm:hidden">Adquirir</span>
               <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            </a>
           </div>
         </div>
       </header>
@@ -362,14 +370,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                 </p>
 
                 <div className="pt-2">
-                  <button
-                    onClick={() => onNavigate(AppState.LOGIN)}
-                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                  <a
+                    href={checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer inline-flex"
                   >
                     <Sparkles className="w-4 h-4 text-white" />
                     <span>Quero Adquirir o Meu Acesso</span>
                     <ArrowRight className="w-4 h-4" />
-                  </button>
+                  </a>
                 </div>
               </div>
 
@@ -453,14 +463,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                 </p>
 
                 <div className="pt-2">
-                  <button
-                    onClick={() => onNavigate(AppState.LOGIN)}
-                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                  <a
+                    href={checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer inline-flex"
                   >
                     <Sparkles className="w-4 h-4 text-white" />
                     <span>Quero Adquirir o Meu Acesso</span>
                     <ArrowRight className="w-4 h-4" />
-                  </button>
+                  </a>
                 </div>
               </div>
 
@@ -538,14 +550,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                 </p>
 
                 <div className="pt-2">
-                  <button
-                    onClick={() => onNavigate(AppState.LOGIN)}
-                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                  <a
+                    href={checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer inline-flex"
                   >
                     <Sparkles className="w-4 h-4 text-white" />
                     <span>Quero Adquirir o Meu Acesso</span>
                     <ArrowRight className="w-4 h-4" />
-                  </button>
+                  </a>
                 </div>
               </div>
 
@@ -593,14 +607,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
                 </p>
 
                 <div className="pt-2">
-                  <button
-                    onClick={() => onNavigate(AppState.LOGIN)}
-                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                  <a
+                    href={checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer inline-flex"
                   >
                     <Sparkles className="w-4 h-4 text-white" />
                     <span>Quero Adquirir o Meu Acesso</span>
                     <ArrowRight className="w-4 h-4" />
-                  </button>
+                  </a>
                 </div>
               </div>
 
@@ -657,14 +673,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
               </p>
 
               <div className="pt-1 flex flex-col sm:flex-row items-center gap-3">
-                <button
-                  onClick={() => onNavigate(AppState.LOGIN)}
-                  className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                <a
+                  href={checkoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer inline-flex"
                 >
                   <Sparkles className="w-4 h-4" />
                   <span>Quero Adquirir com 7 Dias de Garantia</span>
                   <ArrowRight className="w-4 h-4" />
-                </button>
+                </a>
               </div>
             </div>
           </div>
@@ -756,14 +774,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, exeUrl }) 
           </p>
 
           <div className="pt-1 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <button
-              onClick={() => onNavigate(AppState.LOGIN)}
-              className="w-full sm:w-auto py-3.5 px-8 bg-white hover:bg-stone-100 text-orange-600 font-extrabold text-xs sm:text-sm rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+            <a
+              href={checkoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto py-3.5 px-8 bg-white hover:bg-stone-100 text-orange-600 font-extrabold text-xs sm:text-sm rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 inline-flex"
             >
               <Sparkles className="w-4 h-4 text-orange-500" />
               <span>Quero Adquirir o Meu Acesso</span>
               <ArrowRight className="w-4 h-4" />
-            </button>
+            </a>
           </div>
         </div>
       </section>
