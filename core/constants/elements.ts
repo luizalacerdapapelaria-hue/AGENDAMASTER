@@ -23,11 +23,11 @@ export interface ElementVariant {
 
 export const ELEMENT_VARIANTS: Record<string, ElementVariant[]> = {
     'date_placeholder': [
-        { name: 'Número Padrão', description: 'Número do dia em negrito', styleOverride: { variant: 'day_number', fontSize: 42, fontWeight: 'bold' } },
-        { name: 'Dia da Semana', description: 'Nome do dia por extenso', styleOverride: { variant: 'day_name', fontSize: 14, fontWeight: '600' } },
-        { name: 'Mês', description: 'Nome do mês', styleOverride: { variant: 'month_name', fontSize: 12, fontWeight: 'normal' } },
-        { name: 'Ano', description: 'Ano do planner', styleOverride: { variant: 'year', fontSize: 12, fontWeight: 'normal' } },
-        { name: 'Data Minimalista', description: 'Número + Nome do Mês', styleOverride: { variant: 'day_number', fontSize: 18, color: '#9ca3af' } },
+        { name: 'Número Padrão', description: 'Número do dia em negrito', styleOverride: { variant: 'day_number', fontSize: 32, fontWeight: 'bold' }, defaultSize: { w: 18, h: 10 } },
+        { name: 'Dia da Semana', description: 'Nome do dia por extenso', styleOverride: { variant: 'day_name', fontSize: 18, fontWeight: '600' }, defaultSize: { w: 45, h: 10 } },
+        { name: 'Mês', description: 'Nome do mês', styleOverride: { variant: 'month_name', fontSize: 22, fontWeight: 'bold' }, defaultSize: { w: 42, h: 10 } },
+        { name: 'Ano', description: 'Ano do planner', styleOverride: { variant: 'year', fontSize: 20, fontWeight: 'normal' }, defaultSize: { w: 24, h: 10 } },
+        { name: 'Data Minimalista', description: 'Número + Nome do Mês', styleOverride: { variant: 'day_number', fontSize: 18, color: '#9ca3af' }, defaultSize: { w: 20, h: 10 } },
     ],
     'moon': [
         { name: 'Completo', description: 'Ícone + Texto', styleOverride: { variant: 'full_info', fontSize: 12, color: '#6b7280' }, defaultSize: { w: 20, h: 5 } },

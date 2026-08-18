@@ -32,7 +32,8 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
         return <Circle color={color} className="w-full h-full" strokeWidth={1.5} />;
     };
 
-    const d = (dayData || { dayOfMonth: 20, month: 0, dayOfWeek: 1, year: 2025 }) as DayData;
+    const currentYear = new Date().getFullYear();
+    const d = (dayData || { dayOfMonth: 1, month: 0, dayOfWeek: new Date(currentYear, 0, 1).getDay(), year: currentYear }) as DayData;
 
     const { 
         contentStyle, 

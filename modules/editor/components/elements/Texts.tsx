@@ -163,12 +163,14 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     }
 
     if (element.type === 'quote') {
-        const content = isSentenceOrCapitalize ? applyTextTransform(quote || (isEditor ? '"Frase Inspiradora"' : ''), textTransform) : (quote || (isEditor ? '"Frase Inspiradora"' : ''));
+        const quoteText = quote || element.content || (isEditor ? '"Frase Inspiradora"' : '');
+        const content = isSentenceOrCapitalize ? applyTextTransform(quoteText, textTransform) : quoteText;
         return <div style={{...style, ...alignmentStyles, lineHeight: style.lineHeight || 1.5, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{content}</div>;
     }
 
     if (element.type === 'verse') {
-        const content = isSentenceOrCapitalize ? applyTextTransform(verse || (isEditor ? '"Versículo Bíblico"' : ''), textTransform) : (verse || (isEditor ? '"Versículo Bíblico"' : ''));
+        const verseText = verse || element.content || (isEditor ? '"Versículo Bíblico"' : '');
+        const content = isSentenceOrCapitalize ? applyTextTransform(verseText, textTransform) : verseText;
         return <div style={{...style, ...alignmentStyles, lineHeight: style.lineHeight || 1.5, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{content}</div>;
     }
 

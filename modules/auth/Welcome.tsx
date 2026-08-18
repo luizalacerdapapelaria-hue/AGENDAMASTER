@@ -68,7 +68,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl }) => 
                   Agenda Master AI
                 </h1>
                 <span className="bg-orange-50 text-orange-600 border border-orange-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  v1.1.9
+                  v1.1.2
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 font-medium">Plataforma Profissional de Miolos e Planners</p>

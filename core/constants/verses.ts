@@ -488,19 +488,25 @@ export const BIBLE_VERSES = [
   "O espírito de Deus me fez; e a inspiração do Todo-Poderoso me deu vida. (Jó 33:4)"
 ];
 
-export function getVerseForDay(dayOfYear: number): string {
+export function getVerseForDay(dayOfYear: number, month?: number): string {
     try {
         if (typeof window !== 'undefined') {
             const custom = window.localStorage.getItem('agendamaster_custom_verses');
             if (custom) {
                 const parsed = JSON.parse(custom);
                 if (Array.isArray(parsed) && parsed.length > 0) {
+                    if (month !== undefined && month >= 0 && month < 12) {
+                        return parsed[month % parsed.length];
+                    }
                     return parsed[dayOfYear % parsed.length];
                 }
             }
         }
     } catch (e) {
         console.error('Error loading custom verses', e);
+    }
+    if (month !== undefined && month >= 0 && month < 12 && BIBLE_VERSES.length > 0) {
+        return BIBLE_VERSES[month % BIBLE_VERSES.length];
     }
     return BIBLE_VERSES[dayOfYear % BIBLE_VERSES.length];
 }

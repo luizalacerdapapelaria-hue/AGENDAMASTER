@@ -99,7 +99,7 @@ if (typeof window !== 'undefined') {
   };
 
   // Autocorreção e atualização automática de versão se houver nova implantação
-  const CURRENT_SYSTEM_VERSION = 'agendamaster-v1.3.0';
+  const CURRENT_SYSTEM_VERSION = 'agendamaster-v1.1.2';
   const lastSavedVersion = localStorage.getItem('agendamaster_system_version');
   
   if (lastSavedVersion !== CURRENT_SYSTEM_VERSION) {

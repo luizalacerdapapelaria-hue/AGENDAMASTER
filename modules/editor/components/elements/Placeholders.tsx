@@ -21,6 +21,7 @@ const getAlignmentStyles = (style: any): React.CSSProperties => {
     const styles: React.CSSProperties = {
         display: 'flex',
         flexDirection: 'column',
+        whiteSpace: 'nowrap',
     };
 
     if (style.verticalAlign === 'middle') styles.justifyContent = 'center';
@@ -38,7 +39,8 @@ const getAlignmentStyles = (style: any): React.CSSProperties => {
 };
 
 export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayData, style, isEditor, pageHeight, pageWidth }) => {
-    let d = { ...(dayData || { dayOfMonth: 20, month: 0, dayOfWeek: 1, year: 2025 }) };
+    const currentYear = new Date().getFullYear();
+    let d = { ...(dayData || { dayOfMonth: 1, month: 0, dayOfWeek: new Date(currentYear, 0, 1).getDay(), year: currentYear }) };
     
     if (style?.simulateMaxSpace) {
         d.dayOfMonth = 30;
@@ -55,7 +57,21 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
 
     const renderContent = (content: string | number) => {
         const transformedContent = isSentenceOrCapitalize ? applyTextTransform(content, textTransform) : content;
-        return <div style={{...style, ...alignmentStyles, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{transformedContent}</div>;
+        return (
+            <div 
+                style={{
+                    ...style, 
+                    ...alignmentStyles, 
+                    display: 'flex', 
+                    width: '100%', 
+                    height: '100%', 
+                    whiteSpace: 'nowrap',
+                    textTransform: cssTransform as any
+                }}
+            >
+                {transformedContent}
+            </div>
+        );
     };
 
     switch (element.type) {

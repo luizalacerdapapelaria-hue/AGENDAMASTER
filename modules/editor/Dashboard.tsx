@@ -3,9 +3,10 @@ import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
 import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, IntroPage, BackgroundConfig } from '../../types';
-import { generateCalendarYear, getMonthName, generatePlannerDays, generateGenericPages, isProjectYearRestricted } from '../../core/backend/calendar';
+import { generateCalendarYear, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
+import { MOTIVATIONAL_QUOTES, getQuoteForDay } from '../../core/constants/quotes';
 import { calculateDragPosition, calculateResize, SnapGuide } from '../../core/logic/interaction';
 import { ELEMENT_VARIANTS, AVAILABLE_FONTS, SYSTEM_FONTS } from '../../core/constants/elements';
 import { ElementRenderer } from './components/ElementRenderer';
@@ -860,6 +861,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
   });
   const [versesModalOpen, setVersesModalOpen] = useState(false);
+  const [quotesModalOpen, setQuotesModalOpen] = useState(false);
   const [reqModalOpen, setReqModalOpen] = useState(false);
   const [customVerses, setCustomVerses] = useState<string[]>(() => {
       try {
@@ -869,6 +871,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           }
       } catch (e) {
           console.error('Error loading custom verses', e);
+      }
+      return [];
+  });
+  const [customQuotes, setCustomQuotes] = useState<string[]>(() => {
+      try {
+          if (localStorage) {
+              const saved = localStorage.getItem('agendamaster_custom_quotes');
+              return saved ? JSON.parse(saved) : [];
+          }
+      } catch (e) {
+          console.error('Error loading custom quotes', e);
       }
       return [];
   });
@@ -1546,6 +1559,94 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     localStorage.setItem('agendamaster_custom_verses', JSON.stringify(lines));
     setRenderedPreviewCount(prev => prev + 1);
     alert(`${lines.length} versículo(s) salvos com sucesso!`);
+  };
+
+  const handleImportQuotesFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        let importedList: string[] = [];
+        
+        if (file.name.endsWith('.json')) {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) {
+            importedList = parsed.map(v => String(v).trim()).filter(Boolean);
+          } else {
+            throw new Error('Formato JSON inválido. Deve ser uma lista [] de textos.');
+          }
+        } else {
+          importedList = text
+            .split(/\r?\n/)
+            .map(line => {
+              let clean = line.trim();
+              if (clean.startsWith('"') && clean.endsWith('"')) {
+                clean = clean.slice(1, -1);
+              }
+              clean = clean.replace(/\t/g, ' - ');
+              return clean;
+            })
+            .filter(Boolean);
+        }
+
+        if (importedList.length === 0) {
+          alert('Nenhuma frase válida pôde ser extraída do arquivo.');
+          return;
+        }
+
+        if (confirm(`Deseja importar ${importedList.length} frase(s) nova(s)? Suas frases atuais serão substituídas.`)) {
+          setCustomQuotes(importedList);
+          localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(importedList));
+          setRenderedPreviewCount(prev => prev + 1);
+          alert(`${importedList.length} frase(s) motivacional(is) carregada(s) com sucesso!`);
+        }
+      } catch (err: any) {
+        console.error('[Import Quotes] Erro ao ler:', err);
+        alert('Erro ao importar arquivo: ' + (err.message || 'Verifique o formato.'));
+      } finally {
+        if (e.target) e.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const clearCustomQuotes = () => {
+    if (confirm('Deseja excluir todas as suas frases motivacionais personalizadas e voltar às frases padrões do sistema?')) {
+      setCustomQuotes([]);
+      localStorage.removeItem('agendamaster_custom_quotes');
+      setRenderedPreviewCount(prev => prev + 1);
+      alert('Frases motivacionais personalizadas excluídas com sucesso. O sistema voltou às frases padrões.');
+    }
+  };
+
+  const handlePasteQuotesText = (textValue: string) => {
+    if (!textValue.trim()) {
+      alert('Por favor, cole um texto com frases motivacionais.');
+      return;
+    }
+    const lines = textValue
+      .split(/\r?\n/)
+      .map(line => {
+        let clean = line.trim();
+        if (clean.startsWith('"') && clean.endsWith('"')) {
+          clean = clean.slice(1, -1);
+        }
+        return clean.replace(/\t/g, ' - ');
+      })
+      .filter(Boolean);
+      
+    if (lines.length === 0) {
+      alert('Nenhuma frase válida encontrada.');
+      return;
+    }
+
+    setCustomQuotes(lines);
+    localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(lines));
+    setRenderedPreviewCount(prev => prev + 1);
+    alert(`${lines.length} frase(s) motivacional(is) salvas com sucesso!`);
   };
 
   const triggerImageElementUpload = (elementId: string) => {
@@ -2754,14 +2855,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newElement.style.borderWidth = 0; 
         }
         if (type === 'date_placeholder') { 
-            newElement.w = 15; newElement.h = 10; 
-            newElement.style.fontSize = 32; 
-            newElement.style.fontWeight = 'bold'; 
+            const variant = (styleOverride as any)?.variant || 'day_number';
+            newElement.style.variant = variant;
             newElement.style.borderWidth = 0; 
-            newElement.style.variant = (styleOverride as any)?.variant || 'day_number';
+            newElement.style.fontWeight = 'bold'; 
+            if (variant === 'day_number') {
+                newElement.w = 18; newElement.h = 10; 
+                newElement.style.fontSize = 32; 
+            } else if (variant === 'month_name') {
+                newElement.w = 42; newElement.h = 10; 
+                newElement.style.fontSize = 24; 
+            } else if (variant === 'day_name') {
+                newElement.w = 45; newElement.h = 10; 
+                newElement.style.fontSize = 22; 
+            } else if (variant === 'year') {
+                newElement.w = 24; newElement.h = 10; 
+                newElement.style.fontSize = 24; 
+            } else if (variant === 'month_number') {
+                newElement.w = 18; newElement.h = 10; 
+                newElement.style.fontSize = 24; 
+            } else {
+                newElement.w = 25; newElement.h = 10; 
+                newElement.style.fontSize = 24; 
+            }
         }
-        if (type === 'text') { newElement.w = 30; newElement.h = 8; newElement.style.fontSize = 16; newElement.style.borderWidth = 0; }
-        if (type === 'holiday') { newElement.w = 40; newElement.h = 5; newElement.style.fontSize = 10; newElement.style.color = '#ef4444'; newElement.style.borderWidth = 0; newElement.style.fontWeight = '500'; }
+        if (type === 'day_number') { newElement.w = 18; newElement.h = 10; newElement.style.fontSize = 32; newElement.style.fontWeight = 'bold'; newElement.style.borderWidth = 0; }
+        if (type === 'day_name') { newElement.w = 45; newElement.h = 10; newElement.style.fontSize = 22; newElement.style.fontWeight = 'bold'; newElement.style.borderWidth = 0; }
+        if (type === 'month_name') { newElement.w = 42; newElement.h = 10; newElement.style.fontSize = 24; newElement.style.fontWeight = 'bold'; newElement.style.borderWidth = 0; }
+        if (type === 'month_number') { newElement.w = 18; newElement.h = 10; newElement.style.fontSize = 24; newElement.style.fontWeight = 'bold'; newElement.style.borderWidth = 0; }
+        if (type === 'year') { newElement.w = 24; newElement.h = 10; newElement.style.fontSize = 24; newElement.style.fontWeight = 'bold'; newElement.style.borderWidth = 0; }
+        if (type === 'text') { newElement.w = 40; newElement.h = 8; newElement.style.fontSize = 16; newElement.style.borderWidth = 0; }
+        if (type === 'holiday') { newElement.w = 50; newElement.h = 6; newElement.style.fontSize = 11; newElement.style.color = '#ef4444'; newElement.style.borderWidth = 0; newElement.style.fontWeight = '500'; }
         if (type === 'moon') { newElement.w = 20; newElement.h = 5; newElement.style.fontSize = 12; newElement.style.color = '#6b7280'; newElement.style.borderWidth = 0; }
         if (type === 'icon') { newElement.w = 5; newElement.h = 5 * (PAGE_WIDTH_MM / PAGE_HEIGHT_MM); newElement.style.borderWidth = 0; }
         if (type === 'verse') { 
@@ -3263,6 +3387,154 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const updateElementContent = (id: string, content: string) => {
     const activeList = getActiveElements();
     updateActiveElements(activeList.map(e => e.id === id ? { ...e, content } : e));
+  };
+
+  const autoFitElementToContent = (id?: string) => {
+    const targetId = id || selectedId;
+    if (!targetId) return;
+
+    const activeList = getActiveElements();
+    const el = activeList.find(e => e.id === targetId);
+    if (!el) return;
+
+    const domNode = document.querySelector(`[data-element-id="${targetId}"]`) as HTMLElement;
+    const pageContainer = (editorRef.current || domNode?.parentElement) as HTMLElement;
+
+    if (pageContainer) {
+        const containerW = pageContainer.clientWidth;
+        const containerH = pageContainer.clientHeight;
+
+        if (containerW > 0 && containerH > 0) {
+            const isTextual = ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'text', 'verse', 'quote', 'holiday', 'holiday_list'].includes(el.type);
+
+            if (isTextual) {
+                // Measure text using a standalone, clean SPAN without any parent width/height constraints
+                const testSpan = document.createElement('span');
+                testSpan.style.position = 'absolute';
+                testSpan.style.visibility = 'hidden';
+                testSpan.style.pointerEvents = 'none';
+                testSpan.style.left = '-99999px';
+                testSpan.style.top = '-99999px';
+                testSpan.style.whiteSpace = 'pre';
+                testSpan.style.fontSize = typeof el.style?.fontSize === 'number' ? `${el.style.fontSize}px` : (el.style?.fontSize || '16px');
+                testSpan.style.fontFamily = el.style?.fontFamily || 'Inter, sans-serif';
+                testSpan.style.fontWeight = String(el.style?.fontWeight || 'normal');
+                testSpan.style.fontStyle = el.style?.fontStyle || 'normal';
+                testSpan.style.letterSpacing = typeof el.style?.letterSpacing === 'number' ? `${el.style.letterSpacing}px` : (el.style?.letterSpacing || 'normal');
+                testSpan.style.lineHeight = String(el.style?.lineHeight || '1.2');
+
+                // Determine representative text to measure
+                let textToMeasure = '';
+                const currentYear = config?.year || new Date().getFullYear();
+                const startMonth = config?.startMonth ?? 0;
+                const startDay = 1;
+                const startDate = new Date(currentYear, startMonth, startDay);
+                const dayOfWeek = startDate.getDay();
+
+                if (el.type === 'day_number') textToMeasure = String(startDay).padStart(2, '0');
+                else if (el.type === 'month_name') textToMeasure = getMonthName(startMonth, el.style?.nameFormat);
+                else if (el.type === 'day_name') textToMeasure = getDayName(dayOfWeek, el.style?.nameFormat);
+                else if (el.type === 'month_number') textToMeasure = String(startMonth + 1).padStart(2, '0');
+                else if (el.type === 'year') textToMeasure = String(currentYear);
+                else if (el.type === 'date_placeholder') {
+                    const variant = el.style?.variant || 'day_number';
+                    if (variant === 'day_number') textToMeasure = String(startDay).padStart(2, '0');
+                    else if (variant === 'month_name') textToMeasure = getMonthName(startMonth, el.style?.nameFormat);
+                    else if (variant === 'day_name') textToMeasure = getDayName(dayOfWeek, el.style?.nameFormat);
+                    else if (variant === 'month_number') textToMeasure = String(startMonth + 1).padStart(2, '0');
+                    else if (variant === 'year') textToMeasure = String(currentYear);
+                    else textToMeasure = String(startDay).padStart(2, '0');
+                } else if (el.type === 'holiday') {
+                    textToMeasure = 'Confraternização Universal';
+                } else if (el.type === 'holiday_list') {
+                    textToMeasure = el.content || 'Feriados Nacionais (Editável)';
+                } else {
+                    textToMeasure = el.content || el.name || 'Texto';
+                }
+
+                if (el.style?.simulateMaxSpace) {
+                    if (el.type === 'day_name' || (el.type === 'date_placeholder' && el.style?.variant === 'day_name')) textToMeasure = 'Segunda-feira';
+                    if (el.type === 'month_name' || (el.type === 'date_placeholder' && el.style?.variant === 'month_name')) textToMeasure = 'Novembro';
+                    if (el.type === 'day_number' || (el.type === 'date_placeholder' && el.style?.variant === 'day_number')) textToMeasure = '30';
+                    if (el.type === 'month_number' || (el.type === 'date_placeholder' && el.style?.variant === 'month_number')) textToMeasure = '12';
+                }
+
+                const transform = el.style?.textTransform;
+                if (transform === 'uppercase') textToMeasure = textToMeasure.toUpperCase();
+                else if (transform === 'lowercase') textToMeasure = textToMeasure.toLowerCase();
+                else if (transform === 'capitalize') textToMeasure = textToMeasure.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+                else if (transform === 'sentence') textToMeasure = textToMeasure.charAt(0).toUpperCase() + textToMeasure.slice(1).toLowerCase();
+
+                testSpan.textContent = textToMeasure;
+                pageContainer.appendChild(testSpan);
+
+                const spanRect = testSpan.getBoundingClientRect();
+                const naturalWPx = Math.max(10, spanRect.width);
+                const naturalHPx = Math.max(10, spanRect.height);
+                pageContainer.removeChild(testSpan);
+
+                // Add exact fixed 4px horizontal padding and 2px vertical padding (invariant)
+                let newW = ((naturalWPx + 4) / containerW) * 100;
+                let newH = ((naturalHPx + 2) / containerH) * 100;
+
+                newW = Math.min(100, Math.max(2, Math.round(newW * 10) / 10));
+                newH = Math.min(100, Math.max(1.2, Math.round(newH * 10) / 10));
+
+                let newX = el.x;
+                if (newX + newW > 100) newX = Math.max(0, 100 - newW);
+                let newY = el.y;
+                if (newY + newH > 100) newY = Math.max(0, 100 - newH);
+
+                updateActiveElements(activeList.map(e => e.id === targetId ? { ...e, x: newX, y: newY, w: newW, h: newH } : e));
+                return;
+            }
+
+            if (domNode) {
+                // For tables and other structured elements
+                if (el.type === 'table') {
+                    const tableEl = domNode.querySelector('table');
+                    if (tableEl) {
+                        let newW = Math.min(100, Math.max(10, Math.round((tableEl.scrollWidth / containerW) * 1000) / 10));
+                        let newH = Math.min(100, Math.max(5, Math.round((tableEl.scrollHeight / containerH) * 1000) / 10));
+                        updateActiveElements(activeList.map(e => e.id === targetId ? { ...e, w: newW, h: newH } : e));
+                        return;
+                    }
+                }
+                if (el.type === 'icon') {
+                    const sz = typeof el.style?.fontSize === 'number' ? el.style.fontSize : 24;
+                    let newW = Math.round(((sz + 8) / containerW) * 1000) / 10;
+                    let newH = Math.round(((sz + 8) / containerH) * 1000) / 10;
+                    updateActiveElements(activeList.map(e => e.id === targetId ? { ...e, w: newW, h: newH } : e));
+                    return;
+                }
+            }
+        }
+    }
+
+    // Heuristic fallback
+    const fontSz = el.style.fontSize || 16;
+    let newW = 20;
+    let newH = 6;
+    if (el.type === 'month_name' || (el.type === 'date_placeholder' && el.style.variant === 'month_name')) {
+        newW = Math.min(50, Math.max(18, Math.round(fontSz * 0.95)));
+        newH = Math.min(30, Math.max(5, Math.round(fontSz * 0.35)));
+    } else if (el.type === 'day_name' || (el.type === 'date_placeholder' && el.style.variant === 'day_name')) {
+        newW = Math.min(60, Math.max(22, Math.round(fontSz * 1.2)));
+        newH = Math.min(30, Math.max(5, Math.round(fontSz * 0.35)));
+    } else if (el.type === 'day_number' || (el.type === 'date_placeholder' && el.style.variant === 'day_number')) {
+        newW = Math.min(30, Math.max(8, Math.round(fontSz * 0.45)));
+        newH = Math.min(30, Math.max(5, Math.round(fontSz * 0.35)));
+    } else if (el.type === 'month_number' || (el.type === 'date_placeholder' && el.style.variant === 'month_number')) {
+        newW = Math.min(30, Math.max(8, Math.round(fontSz * 0.45)));
+        newH = Math.min(30, Math.max(5, Math.round(fontSz * 0.35)));
+    } else if (el.type === 'year' || (el.type === 'date_placeholder' && el.style.variant === 'year')) {
+        newW = Math.min(35, Math.max(12, Math.round(fontSz * 0.65)));
+        newH = Math.min(30, Math.max(5, Math.round(fontSz * 0.35)));
+    } else if (el.type === 'text' && el.content) {
+        newW = Math.min(90, Math.max(10, Math.round(el.content.length * (fontSz * 0.08))));
+        newH = Math.min(30, Math.max(5, Math.round(fontSz * 0.35)));
+    }
+    updateActiveElements(activeList.map(e => e.id === targetId ? { ...e, w: newW, h: newH } : e));
   };
 
   const updateTableConfig = (id: string, tableUpdate: any) => {
@@ -4157,6 +4429,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     };
   }, [config.introPages, config.monthlyIntroPages, config.startOfWeekDay]);
 
+  const getProjectFirstDay = useCallback((offset: number = 0): DayData => {
+    const year = config.year || new Date().getFullYear();
+    const month = config.startMonth ?? 0;
+    const date = new Date(year, month, 1 + offset);
+    return {
+      dayOfMonth: date.getDate(),
+      month: date.getMonth(),
+      year: date.getFullYear(),
+      dayOfWeek: date.getDay(),
+      holiday: checkIsHoliday(date.getFullYear(), date.getMonth(), date.getDate(), config.municipalHolidays),
+      moonPhase: 'Lua nova',
+      date
+    };
+  }, [config.year, config.startMonth, config.municipalHolidays]);
+
   const renderTemplate = (
     elements: LayoutElement[], 
     day: DayData | null, 
@@ -4169,7 +4456,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     introPageId?: string,
     weekDays?: DayData[]
   ) => {
-    const d = day || (weekDays && weekDays[0]) || { dayOfMonth: 24, month: 10, year: config.year, dayOfWeek: 3, holiday: 'Confraternização Universal', moonPhase: 'Lua cheia', date: new Date() } as DayData;
+    const d = day || (weekDays && weekDays[0]) || getProjectFirstDay(0);
     const globalStyle = getGlobalCalendarStyle();
     
     // Obter índices calculados (auto ou explícitos)
@@ -4227,6 +4514,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     
     const dayOfYear = d.date ? getDayOfYear(new Date(d.date)) : 0;
     const currentVerse = getVerseForDay(dayOfYear);
+    const currentQuote = getQuoteForDay(dayOfYear, d.month);
 
     const handleContextMenu = (e: React.MouseEvent, elementId: string) => {
         if (!isEditor && activeTab !== 'preview') return;
@@ -4361,6 +4649,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 className={`absolute group layout-element-wrapper ${isEditor && selectedIds.includes(el.id) ? 'ring-2 ring-indigo-500 z-50' : (isEditor ? 'hover:ring-1 hover:ring-indigo-300' : '')} ${isEditor || activeTab === 'preview' ? 'cursor-pointer' : ''} ${isEditor ? 'cursor-move' : ''}`} 
                 style={wrapperStyle} 
                 onMouseDown={(e) => handleInteractionStart(e, el.id, null, templateType, introPageId)} 
+                onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    if (isEditor) autoFitElementToContent(el.id);
+                }}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => handleContextMenu(e, el.id)}
                 title={el.name}
@@ -4395,6 +4687,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 title="Copiar"
                             >
                                 <icons.Copy className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                                onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    autoFitElementToContent(el.id);
+                                }}
+                                className="p-1.5 hover:bg-indigo-50 rounded-full text-indigo-600 transition-colors"
+                                title="Ajustar Caixa ao Conteúdo (Envolver Todo o Objeto)"
+                            >
+                                <icons.Scan className="w-3.5 h-3.5" />
                             </button>
                             <button 
                                 onClick={(e) => { 
@@ -4438,7 +4740,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             element={el} 
                             dayData={d} 
                             weekDays={weekDays}
-                            quote={quotes[d.month]} 
+                            quote={currentQuote || quotes[d.month]} 
                             verse={currentVerse}
                             isEditor={isEditor} 
                             isSelected={isSelected} 
@@ -4460,7 +4762,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 element={el} 
                                 dayData={d} 
                                 weekDays={weekDays}
-                                quote={quotes[d.month]} 
+                                quote={currentQuote || quotes[d.month]} 
                                 verse={currentVerse}
                                 isEditor={isEditor} 
                                 isSelected={isSelected} 
@@ -4655,14 +4957,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (editMode === 'monthly_intro') {
-        const previewMonth = 0; // Janeiro
-        const monthDummyDay: DayData = {
-            dayOfMonth: 1,
-            month: previewMonth,
-            year: config.year,
-            dayOfWeek: new Date(config.year, previewMonth, 1).getDay(),
-            date: new Date(config.year, previewMonth, 1)
-        };
+        const monthDummyDay = getProjectFirstDay(0);
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
@@ -4675,14 +4970,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (editMode === 'divider') {
-        const previewMonth = 0; // Janeiro
-        const monthDummyDay: DayData = {
-            dayOfMonth: 1,
-            month: previewMonth,
-            year: config.year,
-            dayOfWeek: new Date(config.year, previewMonth, 1).getDay(),
-            date: new Date(config.year, previewMonth, 1)
-        };
+        const monthDummyDay = getProjectFirstDay(0);
 
         if (dividerViewMode === 'verso') {
             const versoContent = config.monthlyDividerVersoContent || 'blank';
@@ -4699,7 +4987,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 ];
             } else if (versoContent === 'quote') {
                 versoElements = [
-                    { id: 'v-quote', type: 'text', name: 'Frase', x: 15, y: 40, w: 70, h: 20, content: '"Grandes resultados requerem grandes ambições."', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', fontStyle: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                    { id: 'v-quote', type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', fontStyle: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
                 ];
             } else if (versoContent !== 'blank') {
                 const targetPage = config.monthlyIntroPages?.find(p => p.id === versoContent) || config.introPages?.find(p => p.id === versoContent);
@@ -4729,15 +5017,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const activeElements = getActiveElements();
     if (config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.layoutType === 'devotional') {
         const maxOffset = getMaxDayIndex(activeElements);
-        const mockBatch: DayData[] = Array.from({ length: maxOffset + 1 }, (_, i) => ({
-            dayOfMonth: 20 + i,
-            month: 10,
-            year: config.year,
-            dayOfWeek: (2 + i) % 7,
-            holiday: null,
-            moonPhase: 'Lua cheia',
-            date: new Date()
-        }));
+        const mockBatch: DayData[] = Array.from({ length: maxOffset + 1 }, (_, i) => getProjectFirstDay(i));
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
@@ -4750,8 +5030,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === '2_per_page') {
-        const mockDay1: DayData = { dayOfMonth: 20, month: 10, year: config.year, dayOfWeek: 2, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
-        const mockDay2: DayData = { dayOfMonth: 21, month: 10, year: config.year, dayOfWeek: 3, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
+        const mockDay1: DayData = getProjectFirstDay(0);
+        const mockDay2: DayData = getProjectFirstDay(1);
 
         if (editorViewMode === 'standard') {
             return wrapWithRuler(
@@ -4790,11 +5070,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === '1_per_page_weekend_shared') {
-        const mockSat: DayData = { dayOfMonth: 24, month: 10, year: config.year, dayOfWeek: 6, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
-        const mockSun: DayData = { dayOfMonth: 25, month: 10, year: config.year, dayOfWeek: 0, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
+        let satDate = new Date(config.year, config.startMonth ?? 0, 1);
+        while (satDate.getDay() !== 6) {
+            satDate.setDate(satDate.getDate() + 1);
+        }
+        let sunDate = new Date(satDate);
+        sunDate.setDate(satDate.getDate() + 1);
+
+        const mockSat: DayData = {
+            dayOfMonth: satDate.getDate(),
+            month: satDate.getMonth(),
+            year: satDate.getFullYear(),
+            dayOfWeek: satDate.getDay(),
+            holiday: checkIsHoliday(satDate.getFullYear(), satDate.getMonth(), satDate.getDate(), config.municipalHolidays),
+            moonPhase: 'Lua cheia',
+            date: satDate
+        };
+        const mockSun: DayData = {
+            dayOfMonth: sunDate.getDate(),
+            month: sunDate.getMonth(),
+            year: sunDate.getFullYear(),
+            dayOfWeek: sunDate.getDay(),
+            holiday: checkIsHoliday(sunDate.getFullYear(), sunDate.getMonth(), sunDate.getDate(), config.municipalHolidays),
+            moonPhase: 'Lua cheia',
+            date: sunDate
+        };
 
         if (editorViewMode === 'standard') {
-            const mockWeekday: DayData = { dayOfMonth: 20, month: 10, year: config.year, dayOfWeek: 2, holiday: null, moonPhase: 'Lua cheia', date: new Date() };
+            const mockWeekday: DayData = getProjectFirstDay(0);
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
                     {renderBackgroundsForPage('daily', editorPageNum)}
@@ -4826,36 +5129,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
-        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => ({
-            dayOfMonth: 20 + i,
-            month: 10,
-            year: config.year,
-            dayOfWeek: (i + 1) % 7, // Mon-Sun
-            holiday: null,
-            moonPhase: 'Lua cheia',
-            date: new Date()
-        }));
+        const startYear = config.year;
+        const startMonth = config.startMonth ?? 0;
+        const firstProjectDate = new Date(startYear, startMonth, 1);
+        const startOfWeek = config.startOfWeekDay ?? 1;
+        const diff = (firstProjectDate.getDay() - startOfWeek + 7) % 7;
+        const weekStartDate = new Date(firstProjectDate);
+        weekStartDate.setDate(firstProjectDate.getDate() - diff);
+
+        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(weekStartDate);
+            d.setDate(weekStartDate.getDate() + i);
+            return {
+                dayOfMonth: d.getDate(),
+                month: d.getMonth(),
+                year: d.getFullYear(),
+                dayOfWeek: d.getDay(),
+                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
+                moonPhase: 'Lua nova',
+                date: d
+            };
+        });
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
-                    {renderTemplate(activeElements, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
+                    {renderTemplate(activeElements, mockWeek[0], true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
                 </div>
             </div>
         );
     }
 
     if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
-        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => ({
-            dayOfMonth: 20 + i,
-            month: 10,
-            year: config.year,
-            dayOfWeek: (i + 1) % 7, // Mon-Sun
-            holiday: null,
-            moonPhase: 'Lua cheia',
-            date: new Date()
-        }));
+        const startYear = config.year;
+        const startMonth = config.startMonth ?? 0;
+        const firstProjectDate = new Date(startYear, startMonth, 1);
+        const startOfWeek = config.startOfWeekDay ?? 1;
+        const diff = (firstProjectDate.getDay() - startOfWeek + 7) % 7;
+        const weekStartDate = new Date(firstProjectDate);
+        weekStartDate.setDate(firstProjectDate.getDate() - diff);
+
+        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(weekStartDate);
+            d.setDate(weekStartDate.getDate() + i);
+            return {
+                dayOfMonth: d.getDate(),
+                month: d.getMonth(),
+                year: d.getFullYear(),
+                dayOfWeek: d.getDay(),
+                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
+                moonPhase: 'Lua nova',
+                date: d
+            };
+        });
 
         const elementsLeft = config.elementsWeeklyLeft ?? config.elements;
         const elementsRight = config.elementsWeeklyRight ?? config.elements;
@@ -5044,7 +5371,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             ];
         } else if (content === 'quote') {
             elements = [
-                { id: `verso-quote-${pNum}`, type: 'text', name: 'Frase', x: 15, y: 40, w: 70, h: 20, content: '"O sucesso é a soma de pequenos esforços repetidos dia após dia."', zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                { id: `verso-quote-${pNum}`, type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
             ];
         } else if (content !== 'blank') {
             const introPage = config.introPages.find(p => p.id === content);
@@ -5101,7 +5428,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             ];
         } else if (content === 'quote') {
             elements = [
-                { id: `filler-quote-${pNum}`, type: 'text', name: 'Frase', x: 15, y: 40, w: 70, h: 20, content: '"O sucesso é a soma de pequenos esforços repetidos dia após dia."', zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                { id: `filler-quote-${pNum}`, type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
             ];
         } else if (content !== 'blank') {
             const introPage = config.introPages.find(p => p.id === content);
@@ -7298,6 +7625,155 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           </div>
       )}
 
+      {quotesModalOpen && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={() => setQuotesModalOpen(false)}>
+              <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-[780px] max-w-full m-4 flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gray-50/50">
+                      <div className="flex items-center gap-2">
+                          <div className="bg-amber-500 p-1.5 rounded-lg shadow-sm"><Sparkles className="w-4 h-4 text-white"/></div>
+                          <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Personalizar Frases Motivacionais</h3>
+                      </div>
+                      <button onClick={() => setQuotesModalOpen(false)} className="text-gray-400 hover:text-red-500 transition-colors p-1 hover:bg-red-50 rounded-full"><X className="w-5 h-5"/></button>
+                  </div>
+                  
+                  <div className="p-5 overflow-y-auto max-h-[80vh] space-y-4">
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 leading-relaxed">
+                          <p className="font-bold mb-1 flex items-center gap-1.5">
+                              <Star className="w-4 h-4 text-amber-500 fill-amber-300 shrink-0" />
+                              Quer usar suas próprias Frases e Mensagens Motivacionais na sua agenda?
+                          </p>
+                          <p>
+                              Substitua as frases inspiradoras dos meses e dias por uma lista personalizada feita por você! Você pode importar facilmente do seu <strong>Excel</strong>, <strong>Google Sheets</strong> ou colar o texto abaixo.
+                          </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-left">
+                          {/* Coluna Esquerda: Instrucoes & Arquivo */}
+                          <div className="space-y-4 text-left">
+                              <div className="space-y-2">
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">Opção 1: Upload de Arquivo</h4>
+                                  <p className="text-[11px] text-gray-500 leading-normal">
+                                      Selecione um arquivo de texto (<code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold">.txt</code> ou <code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold">.csv</code>) contendo uma frase por linha, ou uma lista em <code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold">.json</code>.
+                                  </p>
+                                  
+                                  <div className="flex items-center gap-2">
+                                      <button
+                                          type="button"
+                                          onClick={() => document.getElementById('quote-file-input')?.click()}
+                                          className="flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-700 bg-white hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700 rounded text-xs font-bold transition-all cursor-pointer"
+                                      >
+                                          <Upload className="w-3.5 h-3.5" />
+                                          <span>Escolher Arquivo</span>
+                                      </button>
+                                      <input
+                                          id="quote-file-input"
+                                          type="file"
+                                          accept=".txt,.csv,.json"
+                                          onChange={handleImportQuotesFile}
+                                          className="hidden"
+                                      />
+                                  </div>
+                              </div>
+
+                              <div className="pt-2 space-y-2">
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">Opção 2: Como colar do Excel / Planilha</h4>
+                                  <ol className="list-decimal list-inside text-[11px] text-gray-600 space-y-1 leading-normal">
+                                      <li>Abra sua planilha (Excel, Sheets ou bloco de notas).</li>
+                                      <li>Selecione e <strong>Copie (Ctrl+C)</strong> a coluna de frases.</li>
+                                      <li>Insira os dados na caixa ao lado e clique em salvar.</li>
+                                  </ol>
+                              </div>
+
+                              <div className="pt-2 border-t border-gray-100 space-y-2">
+                                  <div className="flex items-center justify-between text-xs">
+                                      <span className="font-bold text-gray-600">Estado atual:</span>
+                                      {customQuotes.length > 0 ? (
+                                          <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[10px]">Ativo (Frases Próprias)</span>
+                                      ) : (
+                                          <span className="bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded text-[10px]">Ativo (Frases Padrão)</span>
+                                      )}
+                                  </div>
+                                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                                      {customQuotes.length > 0 
+                                          ? `Você tem ${customQuotes.length} frase(s) cadastrada(s). Elas serão exibidas de forma rotativa nas páginas e meses.` 
+                                          : `O sistema conta com frases motivacionais e inspiradoras cuidadosamente selecionadas.`}
+                                  </p>
+                                  {customQuotes.length > 0 && (
+                                      <button 
+                                          type="button"
+                                          onClick={clearCustomQuotes}
+                                          className="text-[10px] font-bold text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1.5 rounded transition-all flex items-center gap-1 cursor-pointer"
+                                      >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                          <span>Voltar às frases originais</span>
+                                      </button>
+                                  )}
+                              </div>
+                          </div>
+
+                          {/* Coluna Direita: Caixa de Texto */}
+                          <div className="flex flex-col gap-3 text-left">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 flex items-center justify-between">
+                                  <span>Colar diretamente</span>
+                                  {customQuotes.length > 0 && <span className="text-[10px] text-gray-400 normal-case font-medium">Dica: Cole para atualizar</span>}
+                              </h4>
+                              
+                              <textarea
+                                  id="pasted-quotes-textarea"
+                                  placeholder="Cole suas frases motivacionais aqui (uma por linha)&#13;&#10;Exemplo:&#13;&#10;A persistência é o caminho do êxito.&#13;&#10;Grandes jornadas começam com um único passo.&#13;&#10;Foque no progresso, não na perfeição."
+                                  className="w-full h-44 p-3 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none resize-none font-mono text-gray-700 bg-gray-50/50"
+                              ></textarea>
+
+                              <button
+                                  type="button"
+                                  onClick={() => {
+                                      const txt = (document.getElementById('pasted-quotes-textarea') as HTMLTextAreaElement)?.value || '';
+                                      handlePasteQuotesText(txt);
+                                      if (txt.trim()) {
+                                          (document.getElementById('pasted-quotes-textarea') as HTMLTextAreaElement).value = '';
+                                      }
+                                  }}
+                                  className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded shadow transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                  <CheckSquare className="w-4 h-4" />
+                                  <span>Salvar Texto Colado</span>
+                              </button>
+                          </div>
+                      </div>
+
+                      {/* Preview das Frases Atuais */}
+                      {customQuotes.length > 0 && (
+                          <div className="pt-3 border-t border-gray-100 text-left">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Visualização rápida (Primeiras 5 frases salvas)</h4>
+                              <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-200/50 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                                  {customQuotes.slice(0, 5).map((q, idx) => (
+                                      <div key={idx} className="text-[10px] text-gray-600 border-b border-gray-100 last:border-0 pb-1 last:pb-0 font-sans truncate" title={q}>
+                                          <span className="font-mono text-gray-400 font-bold mr-1 bg-gray-200/50 px-1 py-0.2 rounded text-[9px]">{idx + 1}</span>
+                                          {q}
+                                      </div>
+                                  ))}
+                                  {customQuotes.length > 5 && (
+                                      <div className="text-[9px] text-gray-400 italic text-center pt-1 animate-pulse">
+                                          ... e mais {customQuotes.length - 5} frases cadastradas.
+                                      </div>
+                                  )}
+                              </div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-3 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+                      <button 
+                          onClick={() => setQuotesModalOpen(false)}
+                          className="px-4 py-1.5 bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 text-xs font-bold rounded shadow-sm transition-all focus:ring-2 focus:ring-amber-500 uppercase tracking-wider"
+                      >
+                          Fechar
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {templateModal && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={() => setTemplateModal(false)}>
               <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-[700px] max-w-full m-4 flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
@@ -8108,25 +8584,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 </div>
                             )}
 
-                            <div className="pt-3 border-t border-gray-100 mt-3 text-left">
-                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5 align-middle">Versículos das Páginas</label>
-                                <div className="bg-indigo-50/50 rounded-lg p-2.5 border border-indigo-100/60 flex flex-col gap-2">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[10px] font-bold text-gray-600">Fonte ativa:</span>
-                                        {customVerses.length > 0 ? (
-                                            <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">Importados ({customVerses.length})</span>
-                                        ) : (
-                                            <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
-                                        )}
+                            <div className="pt-3 border-t border-gray-100 mt-3 text-left space-y-2.5">
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5 align-middle">Versículos das Páginas</label>
+                                    <div className="bg-indigo-50/50 rounded-lg p-2.5 border border-indigo-100/60 flex flex-col gap-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-bold text-gray-600">Fonte ativa:</span>
+                                            {customVerses.length > 0 ? (
+                                                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">Importados ({customVerses.length})</span>
+                                            ) : (
+                                                <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
+                                            )}
+                                        </div>
+                                        <button 
+                                            type="button"
+                                            onClick={() => setVersesModalOpen(true)}
+                                            className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded justify-center font-bold text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
+                                        >
+                                            <BookOpen className="w-3 h-3" />
+                                            <span>Personalizar Bíblia</span>
+                                        </button>
                                     </div>
-                                    <button 
-                                        type="button"
-                                        onClick={() => setVersesModalOpen(true)}
-                                        className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded justify-center font-bold text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
-                                    >
-                                        <BookOpen className="w-3 h-3" />
-                                        <span>Personalizar Bíblia</span>
-                                    </button>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5 align-middle">Mensagens Motivacionais</label>
+                                    <div className="bg-amber-50/50 rounded-lg p-2.5 border border-amber-100/60 flex flex-col gap-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-bold text-gray-600">Fonte ativa:</span>
+                                            {customQuotes.length > 0 ? (
+                                                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">Importadas ({customQuotes.length})</span>
+                                            ) : (
+                                                <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
+                                            )}
+                                        </div>
+                                        <button 
+                                            type="button"
+                                            onClick={() => setQuotesModalOpen(true)}
+                                            className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded justify-center font-bold text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
+                                        >
+                                            <Sparkles className="w-3 h-3" />
+                                            <span>Personalizar Frases</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -8587,8 +9087,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             <div className="grid grid-cols-4 gap-2">
                                 {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                     <>
-                                        <button onClick={() => addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Número do Dia"><span className="font-bold text-xs text-indigo-600">24</span></button>
-                                        <button onClick={() => addElement('date_placeholder', 'Dia da Semana', { variant: 'day_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Dia da Semana"><span className="text-[10px] font-bold text-indigo-600">SEG</span></button>
+                                        <button onClick={() => addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Número do Dia"><span className="font-bold text-xs text-indigo-600">01</span></button>
+                                        <button onClick={() => addElement('date_placeholder', 'Dia da Semana', { variant: 'day_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Dia da Semana"><span className="text-[10px] font-bold text-indigo-600">DIA</span></button>
                                         <button onClick={() => addElement('date_placeholder', 'Nome do Mês', { variant: 'month_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Nome do Mês"><span className="text-[10px] text-indigo-600">MÊS</span></button>
                                     </>
                                 )}
@@ -9061,6 +9561,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 </div>
                                                             </div>
                                                         </div>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => autoFitElementToContent(selectedElement.id)}
+                                                            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-xs font-semibold transition-colors mt-2"
+                                                            title="Ajustar automaticamente o quadro/caixa para envolver todo o conteúdo sem sobras ou cortes"
+                                                        >
+                                                            <icons.Scan className="w-3.5 h-3.5" />
+                                                            <span>Ajustar Quadro ao Conteúdo</span>
+                                                        </button>
                                                     </div>
                                                 );
                                             })()}
@@ -11584,7 +12094,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Informação da Data</label>
                                                             <select 
                                                                 value={selectedElement.style.variant || 'day_number'} 
-                                                                onChange={(e) => updateElementStyle(selectedElement.id, { variant: e.target.value })} 
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    updateElementStyle(selectedElement.id, { variant: val });
+                                                                    setTimeout(() => autoFitElementToContent(selectedElement.id), 25);
+                                                                }} 
                                                                 className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white shadow-sm"
                                                             >
                                                                 <option value="day_number">Número do Dia</option>
@@ -11675,8 +12189,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     {selectedElement.type === 'holiday_list' && (
                                                         <div><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Colunas ({selectedElement.style.columnCount || 1})</label><input type="range" min="1" max="4" value={selectedElement.style.columnCount || 1} onChange={(e) => updateElementStyle(selectedElement.id, { columnCount: parseInt(e.target.value) })} className="w-full" /></div>
                                                     )}
-                                                    {(selectedElement.type === 'text' || selectedElement.type === 'verse') && (
+                                                    {(selectedElement.type === 'text' || selectedElement.type === 'verse' || selectedElement.type === 'quote') && (
                                                         <button onClick={fitToText} className="w-full mb-2 py-1.5 px-3 bg-indigo-50 text-indigo-700 text-xs font-bold rounded border border-indigo-200 hover:bg-indigo-100 transition-colors flex items-center justify-center"><BoxSelect className="w-3 h-3 mr-1.5"/> Ajustar Quadro ao Texto</button>
+                                                    )}
+                                                    {selectedElement.type === 'verse' && (
+                                                        <button onClick={() => setVersesModalOpen(true)} className="w-full mb-2 py-1.5 px-3 bg-emerald-50 text-emerald-700 text-xs font-bold rounded border border-emerald-200 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5">
+                                                            <BookOpen className="w-3.5 h-3.5 text-emerald-600"/> Personalizar Versículos
+                                                        </button>
+                                                    )}
+                                                    {selectedElement.type === 'quote' && (
+                                                        <button onClick={() => setQuotesModalOpen(true)} className="w-full mb-2 py-1.5 px-3 bg-amber-50 text-amber-700 text-xs font-bold rounded border border-amber-200 hover:bg-amber-100 transition-colors flex items-center justify-center gap-1.5">
+                                                            <Sparkles className="w-3.5 h-3.5 text-amber-600"/> Personalizar Frases Motivacionais
+                                                        </button>
                                                     )}
                                                     {renderTypographyControls({
                                                         fontFamily: selectedElement.style.fontFamily || 'Inter',
@@ -12901,7 +13425,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <div>
                                     <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-2">Datas e Marcadores</span>
                                     <div className="grid grid-cols-3 gap-2">
-                                        <button onClick={() => { addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="font-bold text-base text-indigo-600">24</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Dia</span></button>
+                                        <button onClick={() => { addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="font-bold text-base text-indigo-600">01</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Dia</span></button>
                                         <button onClick={() => { addElement('date_placeholder', 'Dia da Semana', { variant: 'day_name' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="text-xs font-bold text-indigo-600 uppercase">Seg</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Semana</span></button>
                                         <button onClick={() => { addElement('date_placeholder', 'Nome do Mês', { variant: 'month_name' }); setMobileDrawer('none'); }} className="p-3 flex flex-col items-center justify-center border border-indigo-100 rounded-xl bg-indigo-50/40 gap-1 active:scale-95 transition-transform"><span className="text-xs font-bold text-indigo-600 uppercase">Mês</span><span className="text-[9px] font-bold text-indigo-400 uppercase">Mês</span></button>
                                     </div>
