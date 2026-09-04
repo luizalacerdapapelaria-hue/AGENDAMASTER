@@ -38,6 +38,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   const [orientation, setOrientation] = useState<PageOrientation>(defaultValues?.orientation || 'portrait');
   const [margins, setMargins] = useState<PageMargins>(defaultValues?.margins || { top: 15, bottom: 15, inside: 15, outside: 15 });
   const [mirrorEvenPages, setMirrorEvenPages] = useState(defaultValues?.mirrorEvenPages ?? true);
+  const [mirrorContentOnVerso, setMirrorContentOnVerso] = useState<boolean>(defaultValues?.mirrorContentOnVerso ?? false);
   const [customVerso, setCustomVerso] = useState(defaultValues?.customVerso ?? false);
   const [versoAdvancesSequence, setVersoAdvancesSequence] = useState<boolean>(defaultValues?.versoAdvancesSequence ?? true);
   const [layoutType, setLayoutType] = useState<PageLayoutType>(defaultValues?.layoutType || '1_per_page');
@@ -65,6 +66,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           if (defaultValues.orientation) setOrientation(defaultValues.orientation);
           if (defaultValues.margins) setMargins(defaultValues.margins);
           if (defaultValues.mirrorEvenPages !== undefined) setMirrorEvenPages(defaultValues.mirrorEvenPages);
+          if (defaultValues.mirrorContentOnVerso !== undefined) setMirrorContentOnVerso(defaultValues.mirrorContentOnVerso);
           if (defaultValues.customVerso !== undefined) setCustomVerso(defaultValues.customVerso);
           if (defaultValues.versoAdvancesSequence !== undefined) setVersoAdvancesSequence(defaultValues.versoAdvancesSequence);
           if (defaultValues.startMonthOnRightPage !== undefined) setStartMonthOnRightPage(defaultValues.startMonthOnRightPage);
@@ -273,6 +275,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           orientation,
           margins,
           mirrorEvenPages,
+          mirrorContentOnVerso,
           customVerso,
           versoAdvancesSequence,
           elementsVerso: customVerso
@@ -984,15 +987,51 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                             <input type="number" value={margins.outside} onChange={(e) => setMargins({...margins, outside: parseInt(e.target.value)})} className="w-full p-1.5 text-sm border border-gray-300 rounded" />
                         </div>
                     </div>
-                    <div className="mt-3 flex items-center">
-                        <input 
-                            type="checkbox" 
-                            id="mirror" 
-                            checked={mirrorEvenPages} 
-                            onChange={(e) => setMirrorEvenPages(e.target.checked)} 
-                            className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
-                        />
-                        <label htmlFor="mirror" className="ml-2 text-sm text-gray-600">Espelhar margens nas páginas pares (Frente/Verso)</label>
+                    <div className="mt-3">
+                        <div className="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                id="mirror" 
+                                checked={mirrorEvenPages} 
+                                onChange={(e) => setMirrorEvenPages(e.target.checked)} 
+                                className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
+                            />
+                            <label htmlFor="mirror" className="ml-2 text-sm text-gray-700 font-medium">Espelhar páginas pares no verso (Frente/Verso)</label>
+                        </div>
+                        {mirrorEvenPages && (
+                            <div className="ml-6 pl-3 border-l-2 border-orange-200 mt-2 space-y-1.5">
+                                <span className="block text-[10px] uppercase font-bold text-gray-500">Modo de Espelhamento no Verso</span>
+                                <div className="flex rounded-md bg-gray-100 p-0.5 border border-gray-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => setMirrorContentOnVerso(false)}
+                                        className={`flex-1 py-1 px-2 text-xs font-semibold rounded transition-all ${
+                                            !mirrorContentOnVerso 
+                                                ? 'bg-white text-orange-600 shadow-sm' 
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        Apenas Margens
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setMirrorContentOnVerso(true)}
+                                        className={`flex-1 py-1 px-2 text-xs font-semibold rounded transition-all ${
+                                            mirrorContentOnVerso 
+                                                ? 'bg-white text-orange-600 shadow-sm' 
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        Margens + Conteúdo
+                                    </button>
+                                </div>
+                                <p className="text-[11px] text-gray-500">
+                                    {!mirrorContentOnVerso
+                                        ? '✓ Apenas as margens interna/externa invertem para encadernação. O conteúdo mantém a mesma posição da frente.'
+                                        : '✓ As margens e a posição horizontal de todos os elementos são invertidas no verso.'}
+                                </p>
+                            </div>
+                        )}
                     </div>
                     <div className="mt-2 flex items-center">
                         <input 

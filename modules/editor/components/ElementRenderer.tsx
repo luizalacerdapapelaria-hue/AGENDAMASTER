@@ -102,6 +102,8 @@ const scaleStyle = (style: any, scaleFactor: number) => {
             ...style.table,
             rowHeight: typeof style.table.rowHeight === 'number' ? style.table.rowHeight * scaleFactor : style.table.rowHeight,
             borderWidth: typeof style.table.borderWidth === 'number' ? style.table.borderWidth * scaleFactor : style.table.borderWidth,
+            outerBorderWidth: typeof style.table.outerBorderWidth === 'number' ? style.table.outerBorderWidth * scaleFactor : style.table.outerBorderWidth,
+            insideBorderWidth: typeof style.table.insideBorderWidth === 'number' ? style.table.insideBorderWidth * scaleFactor : style.table.insideBorderWidth,
             borderRadius: typeof style.table.borderRadius === 'number' ? style.table.borderRadius * scaleFactor : style.table.borderRadius,
         };
         if (style.table.textStyle) {
@@ -183,6 +185,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                 ...style.fullCalendar.weekDays,
                 fontSize: typeof style.fullCalendar.weekDays.fontSize === 'number' ? Math.max(1, style.fullCalendar.weekDays.fontSize * scaleFactor) : style.fullCalendar.weekDays.fontSize,
                 letterSpacing: typeof style.fullCalendar.weekDays.letterSpacing === 'number' ? style.fullCalendar.weekDays.letterSpacing * scaleFactor : style.fullCalendar.weekDays.letterSpacing,
+                cellPadding: typeof style.fullCalendar.weekDays.cellPadding === 'number' ? style.fullCalendar.weekDays.cellPadding * scaleFactor : style.fullCalendar.weekDays.cellPadding,
             };
         }
         if (style.fullCalendar.days) {

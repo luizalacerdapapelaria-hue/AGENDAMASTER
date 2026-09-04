@@ -161,6 +161,8 @@ export interface LayoutElement {
         cols: number;
         borderColor?: string;
         borderWidth?: number;
+        outerBorderWidth?: number; // Espessura da borda externa
+        insideBorderWidth?: number; // Espessura das linhas internas
         borderStyle?: 'solid' | 'dashed' | 'dotted';
         headerRow: boolean;
         rowHeight?: number; // Altura mínima da linha em px (no editor)
@@ -337,6 +339,7 @@ export interface AgendaConfig {
   includeQuotes: boolean;
   includeVerses: boolean;
   mirrorEvenPages: boolean; // Nova flag para ativar espelhamento automático
+  mirrorContentOnVerso?: boolean; // Se false, apenas as margens são espelhadas no verso; o conteúdo mantém a mesma posição da frente
   startMonthOnRightPage?: boolean; // Forçar início do mês na página direita
   includeMonthlyDividers?: boolean; // Nova: incluir divisórias mensais
   includeMonthlyIntroPages?: boolean; // Nova: incluir páginas mensais

@@ -191,8 +191,12 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         }
 
         // Custom weekday row height and alignment
-        const isCustomWeekdayHeight = typeof effectiveStyle?.weekdayHeight === 'number' && effectiveStyle.weekdayHeight > 0;
-        const weekdayRowHeight = isCustomWeekdayHeight ? `${effectiveStyle!.weekdayHeight}px` : undefined;
+        const rawWeekdayHeight = effectiveStyle?.weekdayHeight;
+        const parsedWeekdayHeight = (rawWeekdayHeight !== undefined && rawWeekdayHeight !== null && rawWeekdayHeight !== '')
+            ? Number(rawWeekdayHeight)
+            : undefined;
+        const isCustomWeekdayHeight = typeof parsedWeekdayHeight === 'number' && !isNaN(parsedWeekdayHeight) && parsedWeekdayHeight > 0;
+        const weekdayRowHeight = isCustomWeekdayHeight ? `${parsedWeekdayHeight}px` : undefined;
 
         const weekJustify = weekStyle.verticalAlign === 'top' ? 'flex-start' : (weekStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center');
         const weekAlign = weekStyle.textAlign === 'left' ? 'flex-start' : (weekStyle.textAlign === 'right' ? 'flex-end' : (weekStyle.textAlign === 'justify' ? 'space-between' : 'center'));
@@ -201,7 +205,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
             ? `${weekStyle.cellPadding}px` 
             : (effectiveStyle?.weekdayPadding !== undefined 
                 ? `${effectiveStyle.weekdayPadding}px` 
-                : (hasWeekAlign ? '2px 4px' : '1px 2px'));
+                : (hasWeekAlign ? '2px 4px' : (isCustomWeekdayHeight ? '0px 2px' : '1px 2px')));
 
         return (
             <div key={monthIndex} className="flex flex-col w-full h-full min-h-0 overflow-hidden">
@@ -227,7 +231,8 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                         className={`grid ${gridColsClass} gap-0 w-full shrink-0`}
                         style={{ 
                             height: weekdayRowHeight,
-                            minHeight: weekdayRowHeight || (weekStyle.fontSize ? `${Math.max(18, Math.round(weekStyle.fontSize * 1.35) + 6)}px` : '18px')
+                            minHeight: weekdayRowHeight || (weekStyle.fontSize ? `${Math.max(12, Math.round(weekStyle.fontSize * (weekStyle.lineHeight || 1.25)) + 4)}px` : '14px'),
+                            maxHeight: weekdayRowHeight
                         }}
                     >
                         {activeHeaders.map((wd, colIndex) => {
@@ -244,6 +249,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                         fontFamily: weekStyle.fontFamily, 
                                         fontWeight: weekStyle.fontWeight, 
                                         fontStyle: weekStyle.fontStyle || 'normal',
+                                        lineHeight: weekStyle.lineHeight || 1.2,
                                         color: weekStyle.color, 
                                         textTransform: cssWeekTransform as any, 
                                         letterSpacing: `${weekStyle.letterSpacing}px`, 
@@ -258,8 +264,8 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                     }}
                                 >
                                     <span 
-                                        className="truncate max-w-full inline-block pb-0.5"
-                                        style={{ lineHeight: '1.25' }}
+                                        className="truncate max-w-full inline-block"
+                                        style={{ lineHeight: '1.1' }}
                                     >
                                         {transformedWd}
                                     </span>

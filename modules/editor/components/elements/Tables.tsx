@@ -191,7 +191,9 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const zebraRows = style.table?.zebraRows;
     const zebraColor = style.table?.zebraColor || '#f9fafb';
     const borderColor = style.table?.borderColor || '#e5e7eb';
-    const borderWidth = style.table?.borderWidth !== undefined ? style.table.borderWidth : 1;
+    const borderWidth = style.table?.borderWidth !== undefined ? style.table.borderWidth : (style.borderWidth !== undefined ? style.borderWidth : 1);
+    const outerBorderWidth = style.table?.outerBorderWidth !== undefined ? style.table.outerBorderWidth : borderWidth;
+    const insideBorderWidth = style.table?.insideBorderWidth !== undefined ? style.table.insideBorderWidth : borderWidth;
     const borderStyle = style.table?.borderStyle || 'solid';
     const borderRadius = style.table?.borderRadius || 0;
 
@@ -222,16 +224,26 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
         rowDividerPositions.push(accY);
     }
 
+    const borderCssTop = borders.top && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
+    const borderCssBottom = borders.bottom && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
+    const borderCssLeft = borders.left && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
+    const borderCssRight = borders.right && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
+
     return (
         <div 
             className="w-full h-full relative select-none"
             style={{
                 borderRadius: borderRadius > 0 ? `${borderRadius}px` : undefined,
+                borderTop: borderCssTop,
+                borderBottom: borderCssBottom,
+                borderLeft: borderCssLeft,
+                borderRight: borderCssRight,
+                boxSizing: 'border-box',
                 overflow: 'hidden',
             }}
         >
-            {/* SVG Grid Borders Rendering */}
-            {borderWidth > 0 && (
+            {/* SVG Grid Borders Rendering (Internal Lines) */}
+            {insideBorderWidth > 0 && (
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
                     {/* Internal Vertical Lines */}
                     {borders.insideVertical && colDividerPositions.map((posX, idx) => (
@@ -242,7 +254,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             x2={`${posX}%`}
                             y2="100%"
                             stroke={borderColor}
-                            strokeWidth={borderWidth}
+                            strokeWidth={insideBorderWidth}
                             strokeDasharray={dashArray}
                             vectorEffect="non-scaling-stroke"
                         />
@@ -260,44 +272,12 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 x2="100%"
                                 y2={`${posY}%`}
                                 stroke={borderColor}
-                                strokeWidth={borderWidth}
+                                strokeWidth={insideBorderWidth}
                                 strokeDasharray={dashArray}
                                 vectorEffect="non-scaling-stroke"
                             />
                         );
                     })}
-
-                    {/* Outer Table Borders */}
-                    {borderRadius > 0 ? (
-                        <rect 
-                            x="0" 
-                            y="0" 
-                            width="100%" 
-                            height="100%" 
-                            rx={borderRadius} 
-                            ry={borderRadius} 
-                            fill="none" 
-                            stroke={borderColor} 
-                            strokeWidth={borderWidth} 
-                            strokeDasharray={dashArray} 
-                            vectorEffect="non-scaling-stroke" 
-                        />
-                    ) : (
-                        <>
-                            {borders.top && (
-                                <line x1="0%" y1="0%" x2="100%" y2="0%" stroke={borderColor} strokeWidth={borderWidth} strokeDasharray={dashArray} vectorEffect="non-scaling-stroke" />
-                            )}
-                            {borders.bottom && (
-                                <line x1="0%" y1="100%" x2="100%" y2="100%" stroke={borderColor} strokeWidth={borderWidth} strokeDasharray={dashArray} vectorEffect="non-scaling-stroke" />
-                            )}
-                            {borders.left && (
-                                <line x1="0%" y1="0%" x2="0%" y2="100%" stroke={borderColor} strokeWidth={borderWidth} strokeDasharray={dashArray} vectorEffect="non-scaling-stroke" />
-                            )}
-                            {borders.right && (
-                                <line x1="100%" y1="0%" x2="100%" y2="100%" stroke={borderColor} strokeWidth={borderWidth} strokeDasharray={dashArray} vectorEffect="non-scaling-stroke" />
-                            )}
-                        </>
-                    )}
                 </svg>
             )}
 

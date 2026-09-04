@@ -748,6 +748,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     includeQuotes: initialConfig?.includeQuotes ?? false,
     includeVerses: initialConfig?.includeVerses ?? true,
     mirrorEvenPages: initialConfig?.mirrorEvenPages ?? true,
+    mirrorContentOnVerso: initialConfig?.mirrorContentOnVerso ?? false,
     startMonthOnRightPage: initialConfig?.startMonthOnRightPage ?? true,
     includeMonthlyDividers: initialConfig?.includeMonthlyDividers ?? true,
     includeMonthlyIntroPages: initialConfig?.includeMonthlyIntroPages ?? true,
@@ -5026,6 +5027,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const getMirroredElements = (elements: LayoutElement[]): LayoutElement[] => {
       if (!config.mirrorEvenPages) return elements;
+      // Se mirrorContentOnVerso for explicitamente false, apenas as margens da página invertem; o conteúdo mantém a mesma posição
+      if (config.mirrorContentOnVerso === false) return elements;
       return elements.map(el => {
           const newX = 100 - el.x - el.w;
           let newTextAlign = el.style.textAlign;
@@ -8485,9 +8488,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             onChange={(e) => setConfig({ ...config, mirrorEvenPages: e.target.checked })} 
                                             className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
                                         />
-                                        <span className="text-xs text-gray-700 font-medium">Espelhar margens em páginas pares</span>
+                                        <span className="text-xs text-gray-700 font-medium">Espelhar páginas pares no verso</span>
                                     </label>
                                     <p className="text-[9px] text-gray-400 mt-0.5">Inverte as margens interna/externa para encadernação.</p>
+
+                                    {config.mirrorEvenPages && (
+                                        <div className="ml-6 mt-2 p-2.5 bg-gray-50 rounded-md border border-gray-200 space-y-2">
+                                            <span className="block text-[9px] uppercase font-bold text-gray-500 tracking-wider">Modo de Espelhamento no Verso:</span>
+                                            <div className="grid grid-cols-2 gap-1 bg-white p-1 rounded border border-gray-200">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfig({ ...config, mirrorContentOnVerso: false })}
+                                                    className={`py-1 px-1.5 text-[10px] font-bold rounded transition-all text-center ${
+                                                        !config.mirrorContentOnVerso
+                                                            ? 'bg-indigo-600 text-white shadow-xs'
+                                                            : 'text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    Apenas Margens
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfig({ ...config, mirrorContentOnVerso: true })}
+                                                    className={`py-1 px-1.5 text-[10px] font-bold rounded transition-all text-center ${
+                                                        config.mirrorContentOnVerso
+                                                            ? 'bg-indigo-600 text-white shadow-xs'
+                                                            : 'text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    Margens + Conteúdo
+                                                </button>
+                                            </div>
+                                            <p className="text-[9px] text-gray-500 leading-normal">
+                                                {!config.mirrorContentOnVerso
+                                                    ? '✓ Apenas as margens interna/externa invertem. O conteúdo mantém a mesma posição da frente.'
+                                                    : '✓ As margens e a posição horizontal de todos os elementos são invertidas no verso.'}
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div>
@@ -9739,30 +9777,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     </div>
                                                                 )}
 
-                                                                <div className="space-y-1">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura da Borda</label>
-                                                                        <span className="text-[10px] font-mono text-gray-400">{(selectedElement.style.table.borderWidth || 0)}px</span>
+                                                                <div className="space-y-2">
+                                                                    <div className="space-y-1">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda Externa</label>
+                                                                            <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1 py-0.5 rounded">{(selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1)}px</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input 
+                                                                                type="range" 
+                                                                                min="0" 
+                                                                                max="20" 
+                                                                                step="0.5" 
+                                                                                value={selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
+                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { outerBorderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                                className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
+                                                                            />
+                                                                            <input 
+                                                                                type="number" 
+                                                                                min="0" 
+                                                                                max="20" 
+                                                                                step="0.5" 
+                                                                                value={selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
+                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { outerBorderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                                className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                                            />
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <input 
-                                                                            type="range" 
-                                                                            min="0" 
-                                                                            max="10" 
-                                                                            step="0.1" 
-                                                                            value={selectedElement.style.table.borderWidth || 0} 
-                                                                            onChange={(e) => updateTableConfig(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
-                                                                            className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
-                                                                        />
-                                                                        <input 
-                                                                            type="number" 
-                                                                            min="0" 
-                                                                            max="10" 
-                                                                            step="0.1" 
-                                                                            value={selectedElement.style.table.borderWidth || 0} 
-                                                                            onChange={(e) => updateTableConfig(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
-                                                                            className="w-12 text-xs p-1 border rounded text-center font-mono" 
-                                                                        />
+                                                                    <div className="space-y-1">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Linhas Internas</label>
+                                                                            <span className="text-[10px] font-mono text-gray-500">{(selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1)}px</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input 
+                                                                                type="range" 
+                                                                                min="0" 
+                                                                                max="10" 
+                                                                                step="0.5" 
+                                                                                value={selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
+                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { insideBorderWidth: parseFloat(e.target.value) || 0, borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                                className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
+                                                                            />
+                                                                            <input 
+                                                                                type="number" 
+                                                                                min="0" 
+                                                                                max="10" 
+                                                                                step="0.5" 
+                                                                                value={selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
+                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { insideBorderWidth: parseFloat(e.target.value) || 0, borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                                className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                                            />
+                                                                        </div>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center justify-between">
@@ -11296,6 +11362,62 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </div>
                                                             <p className="text-[8px] text-gray-400 mt-1">Sábado e Domingo dividem o mesmo espaço na grade.</p>
                                                         </div>
+
+                                                        <div className="pb-3 border-b border-gray-100">
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Altura da Linha dos Dias da Semana</label>
+                                                                <span className="text-[10px] font-bold text-indigo-600">
+                                                                    {(() => {
+                                                                        const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                        return currentVal !== undefined ? `${currentVal}px` : 'Auto';
+                                                                    })()}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="range" 
+                                                                    min="10" 
+                                                                    max="80" 
+                                                                    value={(() => {
+                                                                        const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                        return currentVal ?? 18;
+                                                                    })()} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseInt(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, {
+                                                                            fullCalendar: {
+                                                                                ...selectedElement.style.fullCalendar,
+                                                                                weekdayHeight: val
+                                                                            }
+                                                                        });
+                                                                    }} 
+                                                                    className="flex-1 accent-indigo-600 h-2 bg-gray-200 rounded cursor-pointer"
+                                                                />
+                                                                <div className="flex items-center gap-1 w-20">
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="8" 
+                                                                        max="120" 
+                                                                        placeholder="Auto"
+                                                                        value={(() => {
+                                                                            const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                            return currentVal !== undefined ? currentVal : '';
+                                                                        })()} 
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value === '' ? undefined : parseInt(e.target.value);
+                                                                            updateElementStyle(selectedElement.id, {
+                                                                                fullCalendar: {
+                                                                                    ...selectedElement.style.fullCalendar,
+                                                                                    weekdayHeight: val
+                                                                                }
+                                                                            });
+                                                                        }} 
+                                                                        className="w-full text-xs p-1 border border-gray-200 rounded text-center bg-white font-medium"
+                                                                    />
+                                                                    <span className="text-[10px] text-gray-500">px</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                         
                                                         {selectedElement.type === 'mini_calendar' && (
                                                             <div className="space-y-3">
@@ -11816,12 +11938,191 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                 (updates) => updateFullCalendarStyle(selectedElement.id, 'highlight', updates)
                                                                             )}
                                                                         </div>
-                                                                    ) : (
-                                                                        renderTypographyControls(
-                                                                            selectedElement.style.fullCalendar?.[fontControlTab] || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.[fontControlTab] : null) || (defaultCalendarStyle as any)[fontControlTab],
-                                                                            (updates) => updateFullCalendarStyle(selectedElement.id, fontControlTab, updates)
-                                                                        )
-                                                                    )}
+                                                                    ) : fontControlTab === 'weekDays' ? (
+                                                                        <div className="space-y-3">
+                                                                            {/* Altura da Linha dos Dias da Semana */}
+                                                                            <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-150 space-y-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <div>
+                                                                                        <label className="block text-[10px] font-bold text-indigo-950 uppercase">Altura da Linha da Semana</label>
+                                                                                        <span className="text-[9px] text-indigo-700/80">Espessura/altura do cabeçalho dos dias</span>
+                                                                                    </div>
+                                                                                    <span className="text-xs font-bold text-indigo-600 px-2 py-0.5 bg-white rounded border border-indigo-200">
+                                                                                        {(() => {
+                                                                                            const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                                            return currentVal !== undefined ? `${currentVal}px` : 'Auto';
+                                                                                        })()}
+                                                                                    </span>
+                                                                                </div>
+
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <input 
+                                                                                        type="range" 
+                                                                                        min="10" 
+                                                                                        max="80" 
+                                                                                        value={(() => {
+                                                                                            const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                                            return currentVal ?? 18;
+                                                                                        })()} 
+                                                                                        onChange={(e) => {
+                                                                                            const val = parseInt(e.target.value);
+                                                                                            updateElementStyle(selectedElement.id, {
+                                                                                                fullCalendar: {
+                                                                                                    ...selectedElement.style.fullCalendar,
+                                                                                                    weekdayHeight: val
+                                                                                                }
+                                                                                            });
+                                                                                        }} 
+                                                                                        className="flex-1 accent-indigo-600 h-2 bg-gray-200 rounded cursor-pointer"
+                                                                                    />
+                                                                                    <div className="flex items-center gap-1 w-20">
+                                                                                        <input 
+                                                                                            type="number" 
+                                                                                            min="8" 
+                                                                                            max="120" 
+                                                                                            placeholder="Auto"
+                                                                                            value={(() => {
+                                                                                                const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                                            return currentVal !== undefined ? currentVal : '';
+                                                                                        })()} 
+                                                                                        onChange={(e) => {
+                                                                                            const val = e.target.value === '' ? undefined : parseInt(e.target.value);
+                                                                                            updateElementStyle(selectedElement.id, {
+                                                                                                fullCalendar: {
+                                                                                                    ...selectedElement.style.fullCalendar,
+                                                                                                    weekdayHeight: val
+                                                                                                }
+                                                                                            });
+                                                                                        }} 
+                                                                                        className="w-full text-xs p-1 border border-indigo-200 rounded text-center bg-white font-medium"
+                                                                                    />
+                                                                                    <span className="text-[10px] text-gray-500">px</span>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* Presets rápidos */}
+                                                                            <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                                                                                <span className="text-[9px] text-gray-500 font-medium mr-1">Predefinições:</span>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => {
+                                                                                        const newFC = { ...selectedElement.style.fullCalendar };
+                                                                                        delete (newFC as any).weekdayHeight;
+                                                                                        updateElementStyle(selectedElement.id, { fullCalendar: newFC });
+                                                                                    }}
+                                                                                    className={`px-2 py-0.5 text-[9px] font-bold rounded transition-colors ${
+                                                                                        (selectedElement.style.fullCalendar?.weekdayHeight === undefined && (!selectedElement.style.useGlobalStyle || getGlobalCalendarStyle()?.weekdayHeight === undefined))
+                                                                                            ? 'bg-indigo-600 text-white' 
+                                                                                            : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+                                                                                    }`}
+                                                                                >
+                                                                                    Auto
+                                                                                </button>
+                                                                                {[14, 18, 22, 26, 30, 36].map(h => {
+                                                                                    const currentVal = selectedElement.style.fullCalendar?.weekdayHeight ?? (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayHeight : undefined);
+                                                                                    const isSelected = currentVal === h;
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={h}
+                                                                                            type="button"
+                                                                                            onClick={() => {
+                                                                                                updateElementStyle(selectedElement.id, {
+                                                                                                    fullCalendar: {
+                                                                                                        ...selectedElement.style.fullCalendar,
+                                                                                                        weekdayHeight: h
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className={`px-2 py-0.5 text-[9px] font-medium rounded transition-colors ${
+                                                                                                isSelected 
+                                                                                                    ? 'bg-indigo-600 text-white font-bold' 
+                                                                                                    : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+                                                                                            }`}
+                                                                                        >
+                                                                                            {h}px
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Alinhamento dos Nomes dos Dias */}
+                                                                        <div className="space-y-1.5 pb-2 border-b border-gray-100">
+                                                                            <div className="flex justify-between items-center">
+                                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase">Posição dos Nomes (Dentro da Linha)</label>
+                                                                            </div>
+                                                                            <div className="grid grid-cols-3 gap-1 w-full max-w-[140px] p-1 bg-gray-50 rounded border border-gray-200">
+                                                                                {[
+                                                                                    { v: 'top', h: 'left', label: '↖', title: 'Superior Esquerdo' },
+                                                                                    { v: 'top', h: 'center', label: '↑', title: 'Superior Centro' },
+                                                                                    { v: 'top', h: 'right', label: '↗', title: 'Superior Direito' },
+                                                                                    { v: 'middle', h: 'left', label: '←', title: 'Centro Esquerdo' },
+                                                                                    { v: 'middle', h: 'center', label: '•', title: 'Centralizado' },
+                                                                                    { v: 'middle', h: 'right', label: '→', title: 'Centro Direito' },
+                                                                                    { v: 'bottom', h: 'left', label: '↙', title: 'Inferior Esquerdo' },
+                                                                                    { v: 'bottom', h: 'center', label: '↓', title: 'Inferior Centro' },
+                                                                                    { v: 'bottom', h: 'right', label: '↘', title: 'Inferior Direito' }
+                                                                                ].map((pos) => {
+                                                                                    const weekDaysStyle = selectedElement.style.fullCalendar?.weekDays || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekDays : null) || {};
+                                                                                    const isSelected = (weekDaysStyle.verticalAlign || 'middle') === pos.v && (weekDaysStyle.textAlign || 'center') === pos.h;
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={`wd-${pos.v}-${pos.h}`}
+                                                                                            type="button"
+                                                                                            onClick={() => updateFullCalendarStyle(selectedElement.id, 'weekDays', { verticalAlign: pos.v as any, textAlign: pos.h as any })}
+                                                                                            className={`flex items-center justify-center h-7 text-xs font-bold rounded transition-all ${isSelected ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white hover:bg-gray-100 border border-gray-200 text-gray-650'}`}
+                                                                                            title={pos.title}
+                                                                                        >
+                                                                                            {pos.label}
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Formato dos Dias da Semana */}
+                                                                        <div className="space-y-1.5 pb-2 border-b border-gray-100">
+                                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Formato dos Nomes</label>
+                                                                            <div className="grid grid-cols-4 gap-1">
+                                                                                {[
+                                                                                    { id: 'initial', label: '1 Letra', sub: 'D' },
+                                                                                    { id: 'two_letters', label: '2 Letras', sub: 'Do' },
+                                                                                    { id: 'short', label: '3 Letras', sub: 'Dom' },
+                                                                                    { id: 'full', label: 'Completo', sub: 'Domingo' }
+                                                                                ].map((fmt) => {
+                                                                                    const currentFmt = selectedElement.style.fullCalendar?.weekdayFormat || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekdayFormat : null) || 'initial';
+                                                                                    const isSelected = currentFmt === fmt.id;
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={fmt.id}
+                                                                                            type="button"
+                                                                                            onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                                fullCalendar: {
+                                                                                                    ...selectedElement.style.fullCalendar,
+                                                                                                    weekdayFormat: fmt.id
+                                                                                                }
+                                                                                            })}
+                                                                                            className={`p-1 text-center rounded border transition-all ${isSelected ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 text-[10px]'}`}
+                                                                                        >
+                                                                                            <div className="text-[10px] leading-tight">{fmt.label}</div>
+                                                                                            <div className={`text-[8px] opacity-75 ${isSelected ? 'text-indigo-100' : 'text-gray-400'}`}>({fmt.sub})</div>
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {renderTypographyControls(
+                                                                            selectedElement.style.fullCalendar?.weekDays || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekDays : null) || (defaultCalendarStyle as any).weekDays,
+                                                                            (updates) => updateFullCalendarStyle(selectedElement.id, 'weekDays', updates)
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    renderTypographyControls(
+                                                                        selectedElement.style.fullCalendar?.[fontControlTab] || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.[fontControlTab] : null) || (defaultCalendarStyle as any)[fontControlTab],
+                                                                        (updates) => updateFullCalendarStyle(selectedElement.id, fontControlTab, updates)
+                                                                    )
+                                                                )}
                                                                 </div>
 
                                                     <div className="mt-4 space-y-3 pt-3 border-t border-gray-100">
