@@ -85,22 +85,27 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
             }
         }
 
+        const isMini = element.type === 'mini_calendar';
+        const defaultTitleFontSize = isMini ? 9 : 12;
+        const defaultWeekFontSize = isMini ? 6.5 : 8;
+        const defaultDayFontSize = isMini ? 7.5 : 10;
+
         const titleStyle = { 
-            fontSize: 12, fontFamily: 'Inter', fontWeight: 'bold', color: '#000', 
+            fontSize: defaultTitleFontSize, fontFamily: 'Inter', fontWeight: 'bold', color: '#000', 
             textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0, 
             backgroundColor: 'transparent',
             ...effectiveStyle?.title 
         } as TextStyleConfig;
 
         const weekStyle = { 
-            fontSize: 8, fontFamily: 'Inter', fontWeight: 'bold', color: '#666', 
+            fontSize: defaultWeekFontSize, fontFamily: 'Inter', fontWeight: 'bold', color: '#666', 
             textAlign: 'center', verticalAlign: 'middle', textTransform: 'none', letterSpacing: 0, 
             backgroundColor: 'transparent',
             ...effectiveStyle?.weekDays 
         } as TextStyleConfig;
 
         const dayStyle = { 
-            fontSize: 10, fontFamily: 'Inter', fontWeight: 'normal', color: '#333', 
+            fontSize: defaultDayFontSize, fontFamily: 'Inter', fontWeight: 'normal', color: '#333', 
             textAlign: 'center', verticalAlign: 'middle', textTransform: 'none', letterSpacing: 0, 
             backgroundColor: 'transparent',
             ...effectiveStyle?.days 
@@ -123,6 +128,14 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                 ...effectiveStyle?.specialDays?.style
             }
         };
+
+        const specialDaysFontSize = (element.type === 'full_calendar')
+            ? (specialDaysConfig.style?.fontSize && specialDaysConfig.style.fontSize <= dayStyle.fontSize
+                ? specialDaysConfig.style.fontSize
+                : dayStyle.fontSize)
+            : (specialDaysConfig.style?.fontSize && specialDaysConfig.style.fontSize <= dayStyle.fontSize * 1.05
+                ? specialDaysConfig.style.fontSize
+                : dayStyle.fontSize);
         
         const baseBorderStyle = `${gridConfig.borderWidth}px ${gridConfig.borderStyle || 'solid'} ${gridConfig.borderColor}`;
         const dividerThickness = gridConfig.dividerWidth !== undefined ? gridConfig.dividerWidth : gridConfig.borderWidth;
@@ -142,7 +155,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         const totalRows = filteredWeeks.length + 1; 
         
         const showYear = effectiveStyle?.showYearInTitle ?? (element.type === 'full_calendar'); 
-        const monthFormat = element.style.nameFormat || (effectiveStyle as any)?.monthFormat;
+        const monthFormat = (effectiveStyle as any)?.monthFormat || element.style.nameFormat || 'full';
         const monthName = getMonthName(monthIndex, monthFormat);
         const titleText = showYear ? `${monthName} ${year}` : monthName;
   
@@ -192,11 +205,18 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
 
         // Custom weekday row height and alignment
         const rawWeekdayHeight = effectiveStyle?.weekdayHeight;
-        const parsedWeekdayHeight = (rawWeekdayHeight !== undefined && rawWeekdayHeight !== null && rawWeekdayHeight !== '')
+        const parsedWeekdayHeight = (rawWeekdayHeight !== undefined && rawWeekdayHeight !== null && (rawWeekdayHeight as any) !== '')
             ? Number(rawWeekdayHeight)
             : undefined;
         const isCustomWeekdayHeight = typeof parsedWeekdayHeight === 'number' && !isNaN(parsedWeekdayHeight) && parsedWeekdayHeight > 0;
         const weekdayRowHeight = isCustomWeekdayHeight ? `${parsedWeekdayHeight}px` : undefined;
+
+        // Custom day row height (line spacing between day numbers)
+        const rawDayRowHeight = effectiveStyle?.dayRowHeight;
+        const parsedDayRowHeight = (rawDayRowHeight !== undefined && rawDayRowHeight !== null && (rawDayRowHeight as any) !== '')
+            ? Number(rawDayRowHeight)
+            : undefined;
+        const isCustomDayRowHeight = typeof parsedDayRowHeight === 'number' && !isNaN(parsedDayRowHeight) && parsedDayRowHeight > 0;
 
         const weekJustify = weekStyle.verticalAlign === 'top' ? 'flex-start' : (weekStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center');
         const weekAlign = weekStyle.textAlign === 'left' ? 'flex-start' : (weekStyle.textAlign === 'right' ? 'flex-end' : (weekStyle.textAlign === 'justify' ? 'space-between' : 'center'));
@@ -210,7 +230,8 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         return (
             <div key={monthIndex} className="flex flex-col w-full h-full min-h-0 overflow-hidden">
                 <div 
-                    className="mb-1 pb-0.5 shrink-0" 
+                    data-cal-part="title"
+                    className="mb-1 pb-0.5 shrink-0 truncate" 
                     style={{ 
                         fontSize: titleStyle.fontSize, 
                         fontFamily: titleStyle.fontFamily, 
@@ -219,6 +240,10 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                         textAlign: titleStyle.textAlign, 
                         textTransform: cssTitleTransform as any, 
                         letterSpacing: `${titleStyle.letterSpacing}px`, 
+                        lineHeight: titleStyle.lineHeight || 1.2,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
                         backgroundColor: titleStyle.backgroundColor 
                     }}
                 >
@@ -240,6 +265,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                             return (
                                 <div 
                                     key={`h-${colIndex}`} 
+                                    data-cal-part="week"
                                     style={{ 
                                         display: 'flex',
                                         alignItems: weekJustify,
@@ -276,9 +302,11 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
 
                     {/* Day Rows Grid */}
                     <div 
-                        className={`grid ${gridColsClass} gap-0 flex-1 w-full min-h-0`}
+                        className={`grid ${gridColsClass} gap-0 w-full min-h-0 ${isCustomDayRowHeight ? '' : 'flex-1'}`}
                         style={{
-                            gridTemplateRows: `repeat(${filteredWeeks.length}, minmax(0, 1fr))`
+                            gridTemplateRows: isCustomDayRowHeight 
+                                ? `repeat(${filteredWeeks.length}, ${parsedDayRowHeight}px)` 
+                                : `repeat(${filteredWeeks.length}, minmax(0, 1fr))`
                         }}
                     >
                         {flatGridFiltered.map((dayNumOrObj, i) => {
@@ -303,6 +331,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                     ? { 
                                         ...dayStyle, 
                                         ...specialDaysConfig.style,
+                                        fontSize: specialDaysFontSize,
                                         textAlign: dayStyle.textAlign || 'center',
                                         verticalAlign: dayStyle.verticalAlign || 'middle'
                                       } 
@@ -319,6 +348,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                     ? { 
                                         ...dayStyle, 
                                         ...specialDaysConfig.style,
+                                        fontSize: specialDaysFontSize,
                                         textAlign: dayStyle.textAlign || 'center',
                                         verticalAlign: dayStyle.verticalAlign || 'middle'
                                       } 
@@ -340,22 +370,40 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                         className="w-full h-full overflow-hidden"
                                     >
                                         {/* Saturday Half */}
-                                        <div 
-                                            className={`flex-1 flex overflow-hidden ${isCurrentSat ? 'font-bold' : ''}`}
-                                            style={{
-                                                justifyContent: satActiveStyle.textAlign === 'left' ? 'flex-start' : (satActiveStyle.textAlign === 'right' ? 'flex-end' : 'center'),
-                                                alignItems: satActiveStyle.verticalAlign === 'top' ? 'flex-start' : (satActiveStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center'),
-                                                padding: (satActiveStyle.verticalAlign && satActiveStyle.verticalAlign !== 'middle') || (satActiveStyle.textAlign && satActiveStyle.textAlign !== 'center') ? '2px 4px' : '0px',
-                                                fontSize: satActiveStyle.fontSize,
-                                                fontFamily: satActiveStyle.fontFamily,
-                                                fontWeight: isCurrentSat ? 'bold' : satActiveStyle.fontWeight,
-                                                color: isCurrentSat ? currentDayHighlightTextColor : satActiveStyle.color,
-                                                letterSpacing: `${satActiveStyle.letterSpacing}px`,
-                                                backgroundColor: isCurrentSat ? currentDayHighlightColor : (satActiveStyle.backgroundColor && satActiveStyle.backgroundColor !== 'transparent' ? satActiveStyle.backgroundColor : 'transparent')
-                                            }}
-                                        >
-                                            {satNum ? String(satNum).padStart(2, '0') : ''}
-                                        </div>
+                                        {(() => {
+                                            const satPadTop = satActiveStyle.verticalAlign === 'top' ? '1.5px' : '0px';
+                                            const satPadBottom = satActiveStyle.verticalAlign === 'bottom' ? '1.5px' : '0px';
+                                            const satPadLeft = satActiveStyle.textAlign === 'left' ? '2px' : '0px';
+                                            const satPadRight = satActiveStyle.textAlign === 'right' ? '2px' : '0px';
+
+                                            return (
+                                                <div 
+                                                    data-cal-part="day"
+                                                    className={`flex-1 flex overflow-hidden ${isCurrentSat ? 'font-bold' : ''}`}
+                                                    style={{
+                                                        justifyContent: satActiveStyle.textAlign === 'left' ? 'flex-start' : (satActiveStyle.textAlign === 'right' ? 'flex-end' : 'center'),
+                                                        alignItems: satActiveStyle.verticalAlign === 'top' ? 'flex-start' : (satActiveStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center'),
+                                                        paddingTop: satPadTop,
+                                                        paddingBottom: satPadBottom,
+                                                        paddingLeft: satPadLeft,
+                                                        paddingRight: satPadRight,
+                                                        boxSizing: 'border-box',
+                                                        fontSize: satActiveStyle.fontSize,
+                                                        fontFamily: satActiveStyle.fontFamily,
+                                                        fontWeight: isCurrentSat ? 'bold' : satActiveStyle.fontWeight,
+                                                        color: isCurrentSat ? currentDayHighlightTextColor : satActiveStyle.color,
+                                                        letterSpacing: `${satActiveStyle.letterSpacing}px`,
+                                                        backgroundColor: isCurrentSat ? currentDayHighlightColor : (satActiveStyle.backgroundColor && satActiveStyle.backgroundColor !== 'transparent' ? satActiveStyle.backgroundColor : 'transparent')
+                                                    }}
+                                                >
+                                                    {satNum ? (
+                                                        <span className="inline-block leading-none select-none max-w-full text-center" style={{ lineHeight: 1, fontSize: 'inherit' }}>
+                                                            {String(satNum).padStart(2, '0')}
+                                                        </span>
+                                                    ) : ''}
+                                                </div>
+                                            );
+                                        })()}
 
                                         {/* Divider Line */}
                                         {(satNum || sunNum) && (
@@ -368,22 +416,40 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                         )}
 
                                         {/* Sunday Half */}
-                                        <div 
-                                            className={`flex-1 flex overflow-hidden ${isCurrentSun ? 'font-bold' : ''}`}
-                                            style={{
-                                                justifyContent: sunActiveStyle.textAlign === 'left' ? 'flex-start' : (sunActiveStyle.textAlign === 'right' ? 'flex-end' : 'center'),
-                                                alignItems: sunActiveStyle.verticalAlign === 'top' ? 'flex-start' : (sunActiveStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center'),
-                                                padding: (sunActiveStyle.verticalAlign && sunActiveStyle.verticalAlign !== 'middle') || (sunActiveStyle.textAlign && sunActiveStyle.textAlign !== 'center') ? '2px 4px' : '0px',
-                                                fontSize: sunActiveStyle.fontSize,
-                                                fontFamily: sunActiveStyle.fontFamily,
-                                                fontWeight: isCurrentSun ? 'bold' : sunActiveStyle.fontWeight,
-                                                color: isCurrentSun ? currentDayHighlightTextColor : sunActiveStyle.color,
-                                                letterSpacing: `${sunActiveStyle.letterSpacing}px`,
-                                                backgroundColor: isCurrentSun ? currentDayHighlightColor : (sunActiveStyle.backgroundColor && sunActiveStyle.backgroundColor !== 'transparent' ? sunActiveStyle.backgroundColor : 'transparent')
-                                            }}
-                                        >
-                                            {sunNum ? String(sunNum).padStart(2, '0') : ''}
-                                        </div>
+                                        {(() => {
+                                            const sunPadTop = sunActiveStyle.verticalAlign === 'top' ? '1.5px' : '0px';
+                                            const sunPadBottom = sunActiveStyle.verticalAlign === 'bottom' ? '1.5px' : '0px';
+                                            const sunPadLeft = sunActiveStyle.textAlign === 'left' ? '2px' : '0px';
+                                            const sunPadRight = sunActiveStyle.textAlign === 'right' ? '2px' : '0px';
+
+                                            return (
+                                                <div 
+                                                    data-cal-part="day"
+                                                    className={`flex-1 flex overflow-hidden ${isCurrentSun ? 'font-bold' : ''}`}
+                                                    style={{
+                                                        justifyContent: sunActiveStyle.textAlign === 'left' ? 'flex-start' : (sunActiveStyle.textAlign === 'right' ? 'flex-end' : 'center'),
+                                                        alignItems: sunActiveStyle.verticalAlign === 'top' ? 'flex-start' : (sunActiveStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center'),
+                                                        paddingTop: sunPadTop,
+                                                        paddingBottom: sunPadBottom,
+                                                        paddingLeft: sunPadLeft,
+                                                        paddingRight: sunPadRight,
+                                                        boxSizing: 'border-box',
+                                                        fontSize: sunActiveStyle.fontSize,
+                                                        fontFamily: sunActiveStyle.fontFamily,
+                                                        fontWeight: isCurrentSun ? 'bold' : sunActiveStyle.fontWeight,
+                                                        color: isCurrentSun ? currentDayHighlightTextColor : sunActiveStyle.color,
+                                                        letterSpacing: `${sunActiveStyle.letterSpacing}px`,
+                                                        backgroundColor: isCurrentSun ? currentDayHighlightColor : (sunActiveStyle.backgroundColor && sunActiveStyle.backgroundColor !== 'transparent' ? sunActiveStyle.backgroundColor : 'transparent')
+                                                    }}
+                                                >
+                                                    {sunNum ? (
+                                                        <span className="inline-block leading-none select-none max-w-full text-center" style={{ lineHeight: 1, fontSize: 'inherit' }}>
+                                                            {String(sunNum).padStart(2, '0')}
+                                                        </span>
+                                                    ) : ''}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 );
                             }
@@ -400,27 +466,38 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                 ? { 
                                     ...dayStyle, 
                                     ...specialDaysConfig.style,
+                                    fontSize: specialDaysFontSize,
                                     textAlign: dayStyle.textAlign || 'center',
                                     verticalAlign: dayStyle.verticalAlign || 'middle'
                                   } 
                                 : dayStyle;
 
+                            // Compact directional padding so dates align cleanly to edges without overflowing or inverting
+                            const padTop = activeStyle.verticalAlign === 'top' ? '2px' : '0px';
+                            const padBottom = activeStyle.verticalAlign === 'bottom' ? '2px' : '0px';
+                            const padLeft = activeStyle.textAlign === 'left' ? '3px' : '0px';
+                            const padRight = activeStyle.textAlign === 'right' ? '3px' : '0px';
+
                             // Parse alignment values mapping TextStyleConfig to css flex
                             const justifyValue = activeStyle.verticalAlign === 'top' ? 'flex-start' : (activeStyle.verticalAlign === 'bottom' ? 'flex-end' : 'center');
                             const alignValue = activeStyle.textAlign === 'left' ? 'flex-start' : (activeStyle.textAlign === 'right' ? 'flex-end' : 'center');
-                            const hasAlign = (activeStyle.verticalAlign && activeStyle.verticalAlign !== 'middle') || (activeStyle.textAlign && activeStyle.textAlign !== 'center');
-                            const cellPadding = hasAlign ? '4px 6px' : '0px';
 
                             return (
                                 <div 
                                     key={`d-${i}`} 
+                                    data-cal-part="day"
                                     className={`${isCurrentDayPage ? 'rounded-sm font-bold' : ''}`} 
                                     style={{ 
                                         display: 'flex',
                                         flexDirection: 'column',
                                         justifyContent: justifyValue,
                                         alignItems: alignValue,
-                                        padding: cellPadding,
+                                        paddingTop: padTop,
+                                        paddingBottom: padBottom,
+                                        paddingLeft: padLeft,
+                                        paddingRight: padRight,
+                                        boxSizing: 'border-box',
+                                        overflow: 'hidden',
                                         fontSize: activeStyle.fontSize, 
                                         fontFamily: activeStyle.fontFamily, 
                                         fontWeight: isCurrentDayPage ? 'bold' : activeStyle.fontWeight, 
@@ -432,7 +509,11 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                         borderRight: (colIndex === colsToShow.length - 1 && gridConfig.borders?.right) ? baseBorderStyle : noBorder 
                                     }}
                                 >
-                                    {dayNum ? String(dayNum).padStart(2, '0') : ''}
+                                    {dayNum ? (
+                                        <span className="inline-block leading-none select-none max-w-full text-center" style={{ lineHeight: 1, fontSize: 'inherit' }}>
+                                            {String(dayNum).padStart(2, '0')}
+                                        </span>
+                                    ) : ''}
                                 </div>
                             );
                         })}
@@ -484,12 +565,14 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
     if (element.type === 'full_calendar') {
         const months = Array.from({ length: 12 }, (_, i) => i);
         const cols = style.monthsPerRow || 3;
+        const rows = Math.ceil(12 / cols);
         const gap = style.gap !== undefined ? style.gap : 10;
         const targetYear = d.year + (style.yearOffset || 0);
         
         const containerStyle: React.CSSProperties = {
             display: 'grid', 
-            gridTemplateColumns: `repeat(${cols}, 1fr)`, 
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, 
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
             gap: `${gap}px`, 
             backgroundColor: style.backgroundColor || 'transparent', 
             padding: style.padding ? `${style.padding}px` : '4px',
@@ -499,7 +582,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
             opacity: style.opacity !== undefined ? style.opacity : 1,
         };
 
-        return <div className="w-full h-full" style={containerStyle}>{months.map(m => (<div key={m} className="overflow-hidden">{renderSingleMonth(m, targetYear)}</div>))}</div>;
+        return <div className="w-full h-full" style={containerStyle}>{months.map(m => (<div key={m} className="overflow-hidden min-h-0">{renderSingleMonth(m, targetYear)}</div>))}</div>;
     }
 
     return null;

@@ -53,11 +53,30 @@ const getSmartSnap = (
         }
     });
 
-    otherElements.forEach(el => {
+    // Se houver muitos elementos (ex: PDF com centenas de objetos), poda espacial rápida por proximidade
+    const candidateElements = otherElements.length > 30 
+        ? otherElements.filter(el => {
+            const pos = axis === 'x' ? el.x : el.y;
+            return Math.abs(pos - currentVal) < 15;
+        }).slice(0, 30)
+        : otherElements;
+
+    candidateElements.forEach(el => {
         const otherStart = axis === 'x' ? el.x : el.y;
         const otherSize = axis === 'x' ? el.w : el.h;
         const otherEnd = otherStart + otherSize;
         const otherCenter = otherStart + (otherSize / 2);
+
+        // Poda espacial ultrarrápida: se o elemento estiver longe, ignora imediatamente
+        if (
+            Math.abs(otherStart - currentVal) > 3 &&
+            Math.abs(otherEnd - currentEnd) > 3 &&
+            Math.abs(otherCenter - currentCenter) > 3 &&
+            Math.abs(otherEnd - currentVal) > 3 &&
+            Math.abs(otherStart - currentEnd) > 3
+        ) {
+            return;
+        }
 
         // Pontos de interesse para alinhar (Início, Meio, Fim)
         const targets = [otherStart, otherCenter, otherEnd];

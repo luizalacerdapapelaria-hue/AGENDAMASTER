@@ -12,6 +12,7 @@ import { ImageElement } from './elements/Images';
 import { IconElement } from './elements/Icons';
 import { PermanentDayHeader } from './elements/PermanentDayHeader';
 import { PlannerDayBox } from './elements/PlannerDayBox';
+import { FooterTrackerElement } from './elements/FooterTrackers';
 
 interface ElementRendererProps {
   element: LayoutElement;
@@ -77,6 +78,9 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     if (typeof style.lineSpacing === 'number') {
         scaled.lineSpacing = style.lineSpacing * scaleFactor;
     }
+    if (typeof style.columnGap === 'number') {
+        scaled.columnGap = style.columnGap * scaleFactor;
+    }
     if (typeof style.habitMarkerSize === 'number') {
         scaled.habitMarkerSize = style.habitMarkerSize * scaleFactor;
     }
@@ -93,6 +97,19 @@ const scaleStyle = (style: any, scaleFactor: number) => {
             ...style.plannerDayBox,
             headerBorderWidth: typeof style.plannerDayBox.headerBorderWidth === 'number' ? style.plannerDayBox.headerBorderWidth * scaleFactor : style.plannerDayBox.headerBorderWidth,
             strokeWidth: typeof style.plannerDayBox.strokeWidth === 'number' ? style.plannerDayBox.strokeWidth * scaleFactor : style.plannerDayBox.strokeWidth,
+        };
+    }
+
+    // Scale footerTracker configurations
+    if (style.footerTracker) {
+        scaled.footerTracker = {
+            ...style.footerTracker,
+            itemSize: typeof style.footerTracker.itemSize === 'number' ? style.footerTracker.itemSize * scaleFactor : style.footerTracker.itemSize,
+            spacing: typeof style.footerTracker.spacing === 'number' ? style.footerTracker.spacing * scaleFactor : style.footerTracker.spacing,
+            strokeWidth: typeof style.footerTracker.strokeWidth === 'number' ? style.footerTracker.strokeWidth * scaleFactor : style.footerTracker.strokeWidth,
+            boxPadding: typeof style.footerTracker.boxPadding === 'number' ? style.footerTracker.boxPadding * scaleFactor : style.footerTracker.boxPadding,
+            boxBorderWidth: typeof style.footerTracker.boxBorderWidth === 'number' ? style.footerTracker.boxBorderWidth * scaleFactor : style.footerTracker.boxBorderWidth,
+            boxBorderRadius: typeof style.footerTracker.boxBorderRadius === 'number' ? style.footerTracker.boxBorderRadius * scaleFactor : style.footerTracker.boxBorderRadius,
         };
     }
     
@@ -362,6 +379,10 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
           targetDay = props.dayData;
       }
       return <PlannerDayBox element={scaledElement} dayData={targetDay || props.dayData} isEditor={props.isEditor} pageHeight={pageHeight} pageWidth={pageWidth} />;
+  }
+
+  if (element.type === 'footer_tracker') {
+      return <FooterTrackerElement {...scaledProps} style={scaledElement.style} pageHeight={pageHeight} pageWidth={pageWidth} />;
   }
 
   return null;

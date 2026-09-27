@@ -96,6 +96,110 @@ ipcMain.handle('save-pdf-base64', async (event, { base64String, defaultName }) =
   }
 });
 
+// IPC para buscar lista de fontes instaladas no sistema operacional (Windows, macOS, Linux)
+ipcMain.handle('get-system-fonts', async () => {
+  const fontDirs = [];
+  if (process.platform === 'win32') {
+    const winDir = process.env.WINDIR || 'C:\\Windows';
+    fontDirs.push(path.join(winDir, 'Fonts'));
+    if (process.env.LOCALAPPDATA) {
+      fontDirs.push(path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Windows', 'Fonts'));
+    }
+  } else if (process.platform === 'darwin') {
+    fontDirs.push('/Library/Fonts', '/System/Library/Fonts');
+    if (process.env.HOME) {
+      fontDirs.push(path.join(process.env.HOME, 'Library', 'Fonts'));
+    }
+  } else {
+    fontDirs.push('/usr/share/fonts', '/usr/local/share/fonts');
+    if (process.env.HOME) {
+      fontDirs.push(path.join(process.env.HOME, '.fonts'));
+    }
+  }
+
+  const results = [];
+  for (const dir of fontDirs) {
+    try {
+      if (fs.existsSync(dir)) {
+        const files = await fs.promises.readdir(dir);
+        for (const file of files) {
+          const ext = path.extname(file).toLowerCase();
+          if (['.ttf', '.otf', '.woff', '.woff2'].includes(ext)) {
+            const cleanName = path.basename(file, ext)
+              .replace(/[-_]/g, ' ')
+              .replace(/\b\w/g, c => c.toUpperCase());
+            results.push({
+              name: cleanName,
+              fileName: file,
+              path: path.join(dir, file),
+              ext
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao ler diretório de fontes:', dir, e);
+    }
+  }
+
+  const seen = new Set();
+  return results.filter(f => {
+    if (seen.has(f.fileName.toLowerCase())) return false;
+    seen.add(f.fileName.toLowerCase());
+    return true;
+  }).sort((a, b) => a.name.localeCompare(b.name));
+});
+
+// IPC para ler arquivo de fonte em Base64
+ipcMain.handle('read-font-file', async (event, filePath) => {
+  try {
+    const buffer = await fs.promises.readFile(filePath);
+    return { success: true, data: buffer.toString('base64'), name: path.basename(filePath) };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// IPC para abrir seletor nativo de arquivos de fonte no PC
+ipcMain.handle('pick-system-font-file', async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow();
+    const defaultDir = process.platform === 'win32'
+      ? path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts')
+      : undefined;
+
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Selecionar Fontes do Computador',
+      defaultPath: defaultDir,
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Fontes TrueType / OpenType', extensions: ['ttf', 'otf', 'woff', 'woff2', 'ttc'] }
+      ]
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { canceled: true, files: [] };
+    }
+
+    const loadedFiles = [];
+    for (const fp of result.filePaths) {
+      try {
+        const buffer = await fs.promises.readFile(fp);
+        loadedFiles.push({
+          path: fp,
+          name: path.basename(fp),
+          data: buffer.toString('base64')
+        });
+      } catch (e) {
+        console.error('Erro ao ler fonte:', fp, e);
+      }
+    }
+    return { canceled: false, files: loadedFiles };
+  } catch (err) {
+    return { canceled: true, error: err.message || String(err), files: [] };
+  }
+});
+
 // Configuração do Auto-Updater para atualizações binárias (.exe)
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;

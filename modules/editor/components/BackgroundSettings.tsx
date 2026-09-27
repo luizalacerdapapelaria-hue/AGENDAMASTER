@@ -15,40 +15,13 @@ import {
     migrateLegacyBackgroundsToRules,
     BackgroundCategoryType
 } from '../../../core/logic/backgroundRules';
+import { PdfImportDestination } from './PdfImportModal';
+import * as pdfjsLib from 'pdfjs-dist';
+import { setupPdfWorker } from '../../../core/logic/pdfExtractor';
 
-const loadPdfJs = (): Promise<any> => {
-    return new Promise((resolve, reject) => {
-        if ((window as any).pdfjsLib) {
-            resolve((window as any).pdfjsLib);
-            return;
-        }
-
-        const existingScript = document.getElementById('pdfjs-script');
-        if (existingScript) {
-            const checkInterval = setInterval(() => {
-                if ((window as any).pdfjsLib) {
-                    clearInterval(checkInterval);
-                    resolve((window as any).pdfjsLib);
-                }
-            }, 100);
-            return;
-        }
-
-        const script = document.createElement('script');
-        script.id = 'pdfjs-script';
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
-        script.onload = () => {
-            const pdfjs = (window as any).pdfjsLib;
-            if (pdfjs) {
-                pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-                resolve(pdfjs);
-            } else {
-                reject(new Error('PDF.js falhou ao inicializar'));
-            }
-        };
-        script.onerror = () => reject(new Error('Falha ao carregar PDF.js do CDN'));
-        document.head.appendChild(script);
-    });
+const loadPdfJs = async (): Promise<any> => {
+    setupPdfWorker();
+    return pdfjsLib;
 };
 
 const COLOR_SWATCHES = [
@@ -68,13 +41,15 @@ interface BackgroundSettingsProps {
     onAgendaConfigChange: (updatedConfig: AgendaConfig) => void;
     currentEditorPageNum?: number;
     pushHistory?: () => void;
+    onOpenPdfLayoutImport?: (file?: File | null, destination?: PdfImportDestination) => void;
 }
 
 export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
     agendaConfig,
     onAgendaConfigChange,
     currentEditorPageNum = 1,
-    pushHistory
+    pushHistory,
+    onOpenPdfLayoutImport
 }) => {
     // Garantir que temos a estrutura de regras sincronizada
     const rules: BackgroundRulesConfig = migrateLegacyBackgroundsToRules(agendaConfig);
@@ -84,6 +59,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
     const [selectedScope, setSelectedScope] = useState<'default' | 'even' | 'odd'>('default');
     const [selectedSpecificPage, setSelectedSpecificPage] = useState<number>(currentEditorPageNum || 37);
     const [specificPageInputText, setSpecificPageInputText] = useState<string>(String(currentEditorPageNum || 37));
+    const [uploadedPdfFile, setUploadedPdfFile] = useState<File | null>(null);
 
     useEffect(() => {
         setSpecificPageInputText(String(selectedSpecificPage));
@@ -191,6 +167,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
     }, [pdfDoc, pdfCurrentPage, showPdfModal]);
 
     const handlePdfUpload = (file: File) => {
+        setUploadedPdfFile(file);
         setPdfLoading(true);
         setShowPdfModal(true);
 
@@ -1297,23 +1274,47 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
                             </div>
                         </div>
 
-                        <div className="flex justify-end gap-2 pt-2 border-t">
-                            <button
-                                type="button"
-                                onClick={() => setShowPdfModal(false)}
-                                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleConfirmPdfPage}
-                                disabled={pdfLoading}
-                                className="px-5 py-2 text-xs font-bold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 flex items-center gap-2"
-                            >
-                                {pdfLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                <span>Usar esta Página</span>
-                            </button>
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t">
+                            <div>
+                                {onOpenPdfLayoutImport && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const fileToUse = uploadedPdfFile;
+                                            setShowPdfModal(false);
+                                            const targetDest: PdfImportDestination = 
+                                                selectedCategory === 'iniciais' ? 'new_intro' :
+                                                selectedCategory === 'divisorias' ? 'divider' :
+                                                (selectedScope === 'even' ? 'miolo_left' : selectedScope === 'odd' ? 'miolo_right' : 'miolo_default');
+                                            onOpenPdfLayoutImport(fileToUse, targetDest);
+                                        }}
+                                        className="px-3.5 py-2 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl hover:bg-indigo-100 flex items-center gap-1.5 cursor-pointer shadow-2xs transition-all"
+                                        title="Extrai objetos, molduras, linhas e textos vetoriais editáveis do PDF para usar como layout nativo do Agenda Master"
+                                    >
+                                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>Usar como Layout Editável</span>
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPdfModal(false)}
+                                    className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleConfirmPdfPage}
+                                    disabled={pdfLoading}
+                                    className="px-4 py-2 text-xs font-bold bg-gray-700 text-white rounded-xl hover:bg-gray-800 flex items-center gap-2"
+                                    title="Usa apenas a imagem estática de fundo"
+                                >
+                                    {pdfLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                    <span>Fundo Estático</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

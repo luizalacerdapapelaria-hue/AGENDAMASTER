@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
-import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, IntroPage, BackgroundConfig } from '../../types';
-import { generateCalendarYear, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday } from '../../core/backend/calendar';
+import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem } from '../../types';
+import { generateCalendarYear, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday, getYearHolidays, formatHolidayItemText, generateHolidayListFullText, HolidayDateFormat, FormattedHolidayItem } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
 import { MOTIVATIONAL_QUOTES, getQuoteForDay } from '../../core/constants/quotes';
@@ -12,10 +12,17 @@ import { ELEMENT_VARIANTS, AVAILABLE_FONTS, SYSTEM_FONTS } from '../../core/cons
 import { ElementRenderer } from './components/ElementRenderer';
 import { BackgroundSettings } from './components/BackgroundSettings';
 import { OpenTypeEditor } from './components/OpenTypeEditor';
+import { MockupStudio } from './components/MockupStudio';
 import { compressImage } from './utils/imageCompressor';
 import { ImageManager, useImageSrc } from './utils/imageManager';
 import { getEffectiveBackgroundForPage, BackgroundCategoryType } from '../../core/logic/backgroundRules';
 import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
+import { detectInstalledFonts, getCachedInstalledFonts } from '../../core/logic/fontDetector';
+import { PdfImportModal } from './components/PdfImportModal';
+import { VectorShapeGalleryModal } from './components/VectorShapeGalleryModal';
+import { FooterTrackerGalleryModal, FOOTER_TRACKER_PRESETS, FooterTrackerPreset } from './components/FooterTrackerGalleryModal';
+import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition } from './components/elements/vectorShapesData';
+import { FooterTrackerConfig, FooterTrackerType, FooterTrackerSection } from '../../types';
 import * as icons from 'lucide-react';
 
 import { exportProject, importProject } from '../../core/logic/fileSystem';
@@ -35,14 +42,15 @@ import {
   Table as TableIcon,
   ArrowUpToLine, ArrowDownToLine, AlignCenterVertical, 
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
-  AlignStartVertical, AlignEndVertical, BoxSelect,
-  Minimize2, Loader2, Settings, Search,
-  FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, FileImage, Printer, Lock, Ruler, WrapText, Scissors, MoreHorizontal
+  AlignStartVertical, AlignEndVertical, BoxSelect, Box,
+  Minimize2, Maximize2, Loader2, Settings, Search,
+  FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, FileImage, Printer, Lock, Ruler, WrapText, Scissors, MoreHorizontal, Italic, RotateCcw,
+  RefreshCw, ArrowLeftRight, Droplets, PenTool
 } from 'lucide-react';
 
-const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: number; heightMm: number; zoom?: number }> = ({ children, widthMm, heightMm, zoom = 1 }) => {
+const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: number; heightMm: number; zoom?: number; scale?: number }> = ({ children, widthMm, heightMm, zoom = 1, scale: propScale }) => {
     const wrapperRef = useRef<HTMLDivElement>(null);
-    const [scale, setScale] = useState(1);
+    const [internalScale, setInternalScale] = useState(1);
 
     const safeW = Math.max(20, Number(widthMm) || 148);
     const safeH = Math.max(20, Number(heightMm) || 210);
@@ -51,6 +59,7 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
     const nativeHeight = safeH * 3.77952;
 
     useEffect(() => {
+        if (propScale !== undefined) return;
         const wrapper = wrapperRef.current;
         if (!wrapper) return;
 
@@ -58,7 +67,7 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
             const currentWidth = wrapper.clientWidth;
             if (currentWidth > 0 && nativeWidth > 0) {
                 const targetScale = currentWidth / nativeWidth;
-                setScale(Math.min(1.0, Math.max(0.1, targetScale)));
+                setInternalScale(Math.min(1.0, Math.max(0.1, targetScale)));
             }
         };
 
@@ -66,14 +75,13 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
         const observer = new ResizeObserver(handleResize);
         observer.observe(wrapper);
 
-        window.addEventListener('resize', handleResize);
         return () => {
             observer.disconnect();
-            window.removeEventListener('resize', handleResize);
         };
-    }, [nativeWidth]);
+    }, [nativeWidth, propScale]);
 
-    const effectiveScale = scale * zoom;
+    const activeScale = propScale !== undefined ? propScale : internalScale;
+    const effectiveScale = activeScale * zoom;
 
     return (
         <div ref={wrapperRef} className="w-full flex justify-center items-start overflow-visible">
@@ -92,6 +100,165 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
         </div>
     );
 };
+
+const VirtualPreviewSpread: React.FC<{
+    spreadKey: string;
+    isLandscape?: boolean;
+    isInitial?: boolean;
+    pageLeft?: React.ReactNode;
+    pageRight?: React.ReactNode;
+    pageLeftNum: number;
+    pageRightNum?: number;
+    widthMm: number;
+    heightMm: number;
+    zoom: number;
+    scale?: number;
+}> = React.memo(({
+    spreadKey,
+    isLandscape,
+    isInitial,
+    pageLeft,
+    pageRight,
+    pageLeftNum,
+    pageRightNum,
+    widthMm,
+    heightMm,
+    zoom,
+    scale
+}) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        if (typeof IntersectionObserver === 'undefined') {
+            setIsVisible(true);
+            return;
+        }
+
+        const observer = new IntersectionObserver((entries) => {
+            const entry = entries[0];
+            if (entry) {
+                setIsVisible(entry.isIntersecting);
+            }
+        }, {
+            rootMargin: '1000px 0px',
+            threshold: 0
+        });
+
+        observer.observe(el);
+        return () => {
+            observer.disconnect();
+        };
+    }, []);
+
+    const safeW = Math.max(20, Number(widthMm) || 148);
+    const safeH = Math.max(20, Number(heightMm) || 210);
+    const activeScale = scale !== undefined ? scale : 1;
+    const effectiveScale = activeScale * zoom;
+    const nativeHeight = safeH * 3.77952;
+    const nativeWidth = safeW * 3.77952;
+    const estimatedHeight = Math.max(160, nativeHeight * effectiveScale);
+
+    if (isLandscape) {
+        return (
+            <div 
+                ref={containerRef}
+                id={`preview-spread-${pageLeftNum}`}
+                className="w-full max-w-4xl flex justify-center print:contents"
+                style={{ minHeight: isVisible ? undefined : `${estimatedHeight + 20}px` }}
+            >
+                {isVisible ? (
+                    <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
+                        {pageLeft}
+                    </PreviewPageScaleWrapper>
+                ) : (
+                    <div 
+                        id={`preview-page-${pageLeftNum}`}
+                        className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
+                        style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                    >
+                        <span className="text-xs font-mono font-medium">Página {pageLeftNum}</span>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    if (isInitial) {
+        return (
+            <div 
+                ref={containerRef}
+                id={`preview-spread-${pageLeftNum}`}
+                className="flex items-start justify-center w-full print:contents"
+                style={{ minHeight: isVisible ? undefined : `${estimatedHeight + 20}px` }}
+            >
+                <div className="hidden lg:block w-[45%] opacity-0 pointer-events-none" />
+                <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
+                    {isVisible ? (
+                        <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
+                            {pageLeft}
+                        </PreviewPageScaleWrapper>
+                    ) : (
+                        <div 
+                            id={`preview-page-${pageLeftNum}`}
+                            className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
+                            style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                        >
+                            <span className="text-xs font-mono font-medium">Página 1</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div 
+            ref={containerRef}
+            id={`preview-spread-${pageLeftNum}`}
+            className="flex flex-col lg:flex-row items-center lg:items-start justify-center w-full gap-8 lg:gap-0 print:contents"
+            style={{ minHeight: isVisible ? undefined : `${estimatedHeight + 20}px` }}
+        >
+            <div className="w-full lg:w-[45%] flex justify-center lg:justify-end pr-0 lg:pr-[2mm]">
+                {isVisible ? (
+                    <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
+                        {pageLeft}
+                    </PreviewPageScaleWrapper>
+                ) : (
+                    <div 
+                        id={`preview-page-${pageLeftNum}`}
+                        className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
+                        style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                    >
+                        <span className="text-xs font-mono font-medium">Página {pageLeftNum}</span>
+                    </div>
+                )}
+            </div>
+            <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
+                {pageRight ? (
+                    isVisible ? (
+                        <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
+                            {pageRight}
+                        </PreviewPageScaleWrapper>
+                    ) : (
+                        <div 
+                            id={`preview-page-${pageRightNum}`}
+                            className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
+                            style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                        >
+                            <span className="text-xs font-mono font-medium">Página {pageRightNum}</span>
+                        </div>
+                    )
+                ) : (
+                    <div className="hidden lg:block w-full opacity-0 pointer-events-none" />
+                )}
+            </div>
+        </div>
+    );
+});
 
 interface DashboardProps {
   user: User;
@@ -672,15 +839,25 @@ interface PageBackgroundProps {
 }
 
 const PageBackground: React.FC<PageBackgroundProps> = ({ bg, style, pageNumber }) => {
-  const imageUrl = useImageSrc(bg.image?.url);
+  const bgImg = bg.image || (bg as any).imageUrl ? {
+    url: bg.image?.url || (bg as any).imageUrl,
+    fit: bg.image?.fit || (bg as any).fit || 'fill',
+    opacity: bg.image?.opacity ?? (bg as any).opacity ?? 1,
+    flipHorizontal: bg.image?.flipHorizontal || (bg as any).flipHorizontal,
+    flipVertical: bg.image?.flipVertical || (bg as any).flipVertical,
+    flipOnEvenPages: bg.image?.flipOnEvenPages || (bg as any).flipOnEvenPages,
+    rotation: bg.image?.rotation || (bg as any).rotation || 0,
+  } : undefined;
 
-  if (bg.type === 'image' && bg.image) {
+  const imageUrl = useImageSrc(bgImg?.url);
+
+  if (bg.type === 'image' && bgImg && bgImg.url) {
     const isEvenPage = pageNumber !== undefined ? pageNumber % 2 === 0 : false;
-    const baseFlipX = !!bg.image.flipHorizontal;
-    const flipOnEven = !!bg.image.flipOnEvenPages && isEvenPage;
+    const baseFlipX = !!bgImg.flipHorizontal;
+    const flipOnEven = !!bgImg.flipOnEvenPages && isEvenPage;
     const shouldFlipX = baseFlipX !== flipOnEven;
-    const shouldFlipY = !!bg.image.flipVertical;
-    const rotation = bg.image.rotation || 0;
+    const shouldFlipY = !!bgImg.flipVertical;
+    const rotation = bgImg.rotation || 0;
 
     const transformParts: string[] = [];
     if (shouldFlipX) transformParts.push('scaleX(-1)');
@@ -695,8 +872,8 @@ const PageBackground: React.FC<PageBackgroundProps> = ({ bg, style, pageNumber }
           style={{ 
               width: '100%', 
               height: '100%', 
-              objectFit: bg.image.fit || 'cover',
-              opacity: bg.image.opacity ?? 1,
+              objectFit: bgImg.fit || 'fill',
+              opacity: bgImg.opacity ?? 1,
               transform: transformParts.length > 0 ? transformParts.join(' ') : undefined,
           }} 
         />
@@ -757,6 +934,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     monthlyDividerStyle: initialConfig?.monthlyDividerStyle,
     disableSequenceSkip: initialConfig?.disableSequenceSkip || false,
     margins: initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+    initialMargins: initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+    bindingMargins: initialConfig?.bindingMargins || initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
     municipalHolidays: initialConfig?.municipalHolidays || [],
     elements: initialConfig?.elements && initialConfig.elements.length > 0 ? initialConfig.elements : getDefaultElements(),
     elementsSaturday: initialConfig?.elementsSaturday,
@@ -787,6 +966,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return {
           ...prev,
           ...initialConfig,
+          initialMargins: initialConfig.initialMargins || initialConfig.margins || prev.initialMargins,
+          bindingMargins: initialConfig.bindingMargins || initialConfig.initialMargins || initialConfig.margins || prev.bindingMargins,
           projectType: nextProjectType,
           layoutType: nextLayoutType,
           elements: nextElements,
@@ -807,13 +988,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [history, setHistory] = useState<AgendaConfig[]>([]);
 
   const pushHistory = useCallback(() => {
-    setHistory(h => [...h, config].slice(-50));
+    setHistory(h => [...h, config].slice(-25));
   }, [config]);
 
   const setConfig = useCallback((newConfig: AgendaConfig | ((prev: AgendaConfig) => AgendaConfig)) => {
     _setConfig(prev => {
       const resolved = typeof newConfig === 'function' ? newConfig(prev) : newConfig;
-      setHistory(h => [...h, prev].slice(-50));
+      setHistory(h => [...h, prev].slice(-25));
       return resolved;
     });
   }, []);
@@ -833,14 +1014,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [quotes, setQuotes] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
-  const [marquee, setMarquee] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
-  const marqueeRef = useRef<{ x1: number, y1: number } | null>(null);
-  const [activeTab, setActiveTab] = useState<'editor' | 'preview' | 'opentype'>('editor');
+  const [marqueeBox, setMarqueeBox] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const marqueeDragRef = useRef<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    isShift: boolean;
+    initialSelectedIds: string[];
+    hasDragged: boolean;
+  } | null>(null);
+  const startMarqueeSelectionRef = useRef<((e: React.MouseEvent | MouseEvent) => void) | null>(null);
+  const [activeTab, setActiveTab] = useState<'editor' | 'preview' | 'opentype' | 'mockup'>('editor');
   const [showMargins, setShowMargins] = useState(true);
   const [showRulers, setShowRulers] = useState(true);
   const [guides, setGuides] = useState<{ id: string; type: 'h' | 'v'; posMm: number }[]>([]);
   const [customFonts, setCustomFonts] = useState<string[]>([]);
-  const [localFonts, setLocalFonts] = useState<string[]>([]);
+  const [localFonts, setLocalFonts] = useState<string[]>(() => getCachedInstalledFonts());
   const [localFontsLoading, setLocalFontsLoading] = useState(false);
   const [manualFonts, setManualFonts] = useState<string[]>(() => {
     try {
@@ -850,9 +1045,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       return [];
     }
   });
+
+  const allSystemFonts = useMemo(() => {
+    return Array.from(new Set([...SYSTEM_FONTS, ...localFonts, ...manualFonts])).sort();
+  }, [localFonts, manualFonts]);
   const [tableScheduleStart, setTableScheduleStart] = useState<number>(7);
   const [tableScheduleEnd, setTableScheduleEnd] = useState<number>(18);
   const [tableScheduleInterval, setTableScheduleInterval] = useState<number>(60);
+  const [tableScheduleSkipLine, setTableScheduleSkipLine] = useState<boolean>(false);
+  const [scheduleAppliedFeedback, setScheduleAppliedFeedback] = useState<boolean>(false);
   const [tableTargetRow, setTableTargetRow] = useState<number>(0);
   const [tableTargetCol, setTableTargetCol] = useState<number>(0);
   const [variantModal, setVariantModal] = useState<{type: ElementType, label: string} | null>(null);
@@ -869,6 +1070,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [versesModalOpen, setVersesModalOpen] = useState(false);
   const [quotesModalOpen, setQuotesModalOpen] = useState(false);
   const [reqModalOpen, setReqModalOpen] = useState(false);
+  const [pdfImportModalOpen, setPdfImportModalOpen] = useState(false);
+  const [shapeGalleryOpen, setShapeGalleryOpen] = useState(false);
+  const [shapeGalleryTargetId, setShapeGalleryTargetId] = useState<string | null>(null);
+  const [footerGalleryOpen, setFooterGalleryOpen] = useState(false);
+  const [pdfImportInitialFile, setPdfImportInitialFile] = useState<File | null>(null);
+  const [pdfImportInitialDestination, setPdfImportInitialDestination] = useState<PdfImportDestination>('miolo_default');
   const [customVerses, setCustomVerses] = useState<string[]>(() => {
       try {
           if (localStorage) {
@@ -891,6 +1098,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
       return [];
   });
+
+  // Checagem se elementos de Versículos ou Frases Motivacionais estão em uso na agenda
+  const hasVerseElement = useMemo(() => {
+    const checkElements = (elements?: LayoutElement[]) => elements?.some(el => el.type === 'verse');
+    
+    if (checkElements(config.elements)) return true;
+    if (checkElements(config.elementsVerso)) return true;
+    if (checkElements(config.elementsTop)) return true;
+    if (checkElements(config.elementsBottom)) return true;
+    if (checkElements(config.elementsSaturday)) return true;
+    if (checkElements(config.elementsSunday)) return true;
+    if (checkElements(config.elementsWeeklyLeft)) return true;
+    if (checkElements(config.elementsWeeklyRight)) return true;
+
+    if (config.introPages?.some(p => checkElements(p.elements))) return true;
+    if (config.monthlyIntroPages?.some(p => checkElements(p.elements))) return true;
+    if (checkElements(config.monthlyDividerStyle?.elements)) return true;
+    if (checkElements(config.monthlyDividerStyle?.versoElements)) return true;
+
+    return false;
+  }, [config]);
+
+  const hasQuoteElement = useMemo(() => {
+    const checkElements = (elements?: LayoutElement[]) => elements?.some(el => el.type === 'quote');
+
+    if (checkElements(config.elements)) return true;
+    if (checkElements(config.elementsVerso)) return true;
+    if (checkElements(config.elementsTop)) return true;
+    if (checkElements(config.elementsBottom)) return true;
+    if (checkElements(config.elementsSaturday)) return true;
+    if (checkElements(config.elementsSunday)) return true;
+    if (checkElements(config.elementsWeeklyLeft)) return true;
+    if (checkElements(config.elementsWeeklyRight)) return true;
+
+    if (config.introPages?.some(p => checkElements(p.elements))) return true;
+    if (config.monthlyIntroPages?.some(p => checkElements(p.elements))) return true;
+    if (checkElements(config.monthlyDividerStyle?.elements)) return true;
+    if (checkElements(config.monthlyDividerStyle?.versoElements)) return true;
+
+    if (config.fillerPageContent === 'quote') return true;
+    if (config.monthlyDividerVersoContent === 'quote') return true;
+
+    return false;
+  }, [config]);
+
+  const [isProjectConfigOpen, setIsProjectConfigOpen] = useState<boolean>(false);
+
+  const getLayoutTypeShortLabel = (type?: string) => {
+    switch (type) {
+      case '1_per_page': return '1 Dia/Pág';
+      case '1_per_page_weekend_shared': return 'Fim de Sem. Junto';
+      case '2_per_page': return '2 Dias/Pág';
+      case 'weekly_vertical': return 'Semanal Vert.';
+      case 'weekly_horizontal': return 'Semanal Horiz.';
+      case 'weekly_one_page_vertical': return 'Semanal 1 Pág';
+      case 'weekly_one_page_horizontal': return 'Semanal 1 Pág';
+      case 'notebook': return 'Caderno';
+      case 'devotional': return 'Devocional';
+      default: return 'Miolo';
+    }
+  };
+
   const [editorViewMode, setEditorViewMode] = useState<'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right'>(
     initialConfig?.layoutType === 'weekly_vertical' || initialConfig?.layoutType === 'weekly_horizontal' 
     ? 'weekly_left' 
@@ -953,12 +1222,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [pendingImageElementId, setPendingImageElementId] = useState<string | null>(null);
   const [showAlignment, setShowAlignment] = useState(false);
   const [alignmentReference, setAlignmentReference] = useState<'selection' | 'margins' | 'page'>('margins');
-  const [showDividerCustomizer, setShowDividerCustomizer] = useState(false);
 
   // Interaction States
   const [isDragging, setIsDragging] = useState(false);
   const [resizeDir, setResizeDir] = useState<string | null>(null);
-  const [activeGuides, setActiveGuides] = useState<SnapGuide[]>([]);
+  const guidesOverlayRef = useRef<HTMLDivElement>(null);
   
   // Table Specific Interactions
   const [resizingTableCol, setResizingTableCol] = useState<{ elementId: string, colIndex: number } | null>(null);
@@ -1140,6 +1408,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('textarea') || target.closest('label')) return true;
     if (target.closest('aside') || target.closest('header') || target.closest('nav') || target.closest('[role="dialog"]')) return true;
     if (target.closest('#context-menu') || target.closest('.no-print-interactive')) return true;
+    if (target.closest('.ruler-bar') || target.closest('[data-ruler]') || target.closest('.ruler-guide')) return true;
     return false;
   };
 
@@ -1167,10 +1436,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (e.button === 0) {
       const targetEl = e.target as HTMLElement;
       if (!isClickTargetInteractiveOrElement(targetEl)) {
-        if (!e.shiftKey && selectedIds.length > 0) {
-          setSelectedIds([]);
+        if (startMarqueeSelectionRef.current) {
+          startMarqueeSelectionRef.current(e);
+        } else {
+          if (!e.shiftKey && selectedIds.length > 0) {
+            setSelectedIds([]);
+          }
+          if (contextMenu) setContextMenu(null);
         }
-        if (contextMenu) setContextMenu(null);
       }
     }
   };
@@ -1223,10 +1496,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     };
   }, []);
 
-  const defaultCalendarStyle = {
+  const defaultCalendarStyle: NonNullable<LayoutElement['style']['fullCalendar']> = {
       title: { fontSize: 10, fontFamily: 'Inter', fontWeight: 'bold', color: '#000', textAlign: 'center' as const, textTransform: 'uppercase' as const, letterSpacing: 1, backgroundColor: 'transparent' },
       weekDays: { fontSize: 7, fontFamily: 'Inter', fontWeight: 'bold', color: '#666', textAlign: 'center' as const, textTransform: 'uppercase' as const, letterSpacing: 0, backgroundColor: 'transparent' },
       days: { fontSize: 8, fontFamily: 'Inter', fontWeight: 'normal', color: '#333', textAlign: 'center' as const, textTransform: 'none' as const, letterSpacing: 0, backgroundColor: 'transparent' },
+      monthFormat: 'full',
       grid: { 
           borderColor: '#dddddd', borderWidth: 0.5, cellBackgroundColor: 'transparent', headerBackgroundColor: 'transparent',
           borders: { top: false, bottom: false, left: false, right: false, insideHorizontal: false, insideVertical: false, headerSeparator: true }
@@ -1353,7 +1627,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('agendamaster_current_project', JSON.stringify(config));
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('agendamaster_current_project', JSON.stringify(config));
+      } catch (err) {
+        console.warn('Falha ao salvar projeto no localStorage:', err);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
   }, [config]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -1736,43 +2017,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const handleLoadLocalFonts = async () => {
-    if (!('queryLocalFonts' in window)) {
-      alert(
-        "⚠️ Recurso não suportado neste navegador!\n\n" +
-        "O acesso automático às fontes locais requer navegadores modernos como Google Chrome, Microsoft Edge ou Opera.\n\n" +
-        "Se estiver usando outro navegador ou se a leitura falhar, você pode usar o botão 'Digitar Nome' para digitar o nome da fonte instalada no seu PC (ex: 'Century Gothic') e ela funcionará imediatamente!"
-      );
-      return;
-    }
-    
     setLocalFontsLoading(true);
     try {
-      const fonts = await (window as any).queryLocalFonts();
-      const families = Array.from(new Set<string>(fonts.map((f: any) => f.family))).sort();
-      setLocalFonts(families);
-      localStorage.setItem('agendamaster_local_fonts_allowed', 'true');
-    } catch (error: any) {
-      console.error('Erro ao acessar fontes locais:', error);
-      if (error.name === 'SecurityError' || error.message?.includes('frame') || error.message?.includes('iframe')) {
-        alert(
-          "⚠️ Bloqueio de Segurança do Navegador (Iframe)!\n\n" +
-          "O navegador bloqueia a busca automática de fontes do computador quando o aplicativo roda dentro do painel do AI Studio (iframe) por motivos de privacidade.\n\n" +
-          "Para usar suas fontes do computador agora mesmo, escolha uma das duas soluções:\n" +
-          "1. Clique no botão 'Digitar Nome' e digite o nome exato da fonte (ex: Century Gothic, Calibri). Ela funcionará na hora!\n" +
-          "2. Ou abra o aplicativo em uma nova aba fora do painel usando o link de visualização e clique em 'Puxar do PC' novamente."
-        );
-      } else if (error.name === 'NotAllowedError') {
-        alert(
-          "⚠️ Permissão negada!\n\n" +
-          "Você recusou a permissão de acesso às fontes locais. Se quiser usar a busca automática, altere as permissões do site nas configurações do navegador.\n\n" +
-          "Alternativa: Use o botão 'Digitar Nome' para usar qualquer fonte do computador sem precisar de permissões!"
-        );
-      } else {
-        alert(
-          "⚠️ Erro ao carregar fontes automaticamente: " + error.message + "\n\n" +
-          "Alternativa: Use o botão 'Digitar Nome' para digitar o nome da fonte instalada no seu PC (ex: 'Century Gothic') e ela funcionará na hora!"
-        );
+      const detected = await detectInstalledFonts();
+      if (detected && detected.length > 0) {
+        setLocalFonts(detected);
       }
+    } catch (e) {
+      console.warn('Detecção de fontes do computador:', e);
     } finally {
       setLocalFontsLoading(false);
     }
@@ -1780,7 +2032,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const handleAddManualFont = () => {
     const fontName = prompt(
-      "Digite o nome exato da fonte instalada no seu computador (ex: Century Gothic, Calibri, Cooper Black, Arial, Comic Sans MS, Garamond, Helvetica):\n\nEla ficará disponível imediatamente na lista de fontes do editor."
+      "Digite o nome da fonte instalada no seu computador (ex: Century Gothic, Calibri, Garamond):\n\nEla ficará disponível imediatamente na lista de fontes do editor."
     );
     if (fontName && fontName.trim()) {
       const trimmed = fontName.trim();
@@ -1790,33 +2042,88 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
   };
 
-  // Carregar fontes do computador automaticamente se já permitido anteriormente
+  // Identificar automaticamente as fontes instaladas no computador ao inicializar
   useEffect(() => {
-    if (localStorage.getItem('agendamaster_local_fonts_allowed') === 'true' && 'queryLocalFonts' in window) {
-      (window as any).queryLocalFonts().then((fonts: any) => {
-        const families = Array.from(new Set<string>(fonts.map((f: any) => f.family))).sort();
-        setLocalFonts(families);
-      }).catch((err: any) => {
-        console.error('Erro ao carregar fontes locais automaticamente:', err);
-      });
-    }
+    detectInstalledFonts().then((detected) => {
+      if (detected && detected.length > 0) {
+        setLocalFonts(detected);
+      }
+    }).catch((err: any) => {
+      console.warn('Detecção automática de fontes locais:', err);
+    });
   }, []);
 
-  // -- BATCH RENDERER LOGIC --
+  // Desativa automaticamente modo de simulação de preenchimento máximo (simulateMaxSpace) de todos os elementos
+  const clearSimulationMode = useCallback(() => {
+    const clearList = (list?: LayoutElement[]) => {
+      if (!list) return list;
+      let changed = false;
+      const updated = list.map(el => {
+        if (el.style?.simulateMaxSpace) {
+          changed = true;
+          return {
+            ...el,
+            style: {
+              ...el.style,
+              simulateMaxSpace: false
+            }
+          };
+        }
+        return el;
+      });
+      return changed ? updated : list;
+    };
+
+    const hasSim = (list?: LayoutElement[]) => list?.some(el => el.style?.simulateMaxSpace);
+    const anySim =
+      hasSim(config.elements) ||
+      hasSim(config.elementsVerso) ||
+      hasSim(config.elementsWeeklyLeft) ||
+      hasSim(config.elementsWeeklyRight) ||
+      hasSim(config.elementsSaturday) ||
+      hasSim(config.elementsSunday) ||
+      hasSim(config.elementsTop) ||
+      hasSim(config.elementsBottom) ||
+      config.introPages?.some(p => hasSim(p.elements)) ||
+      config.monthlyIntroPages?.some(p => hasSim(p.elements));
+
+    if (!anySim) return;
+
+    setConfigSilent(prev => ({
+      ...prev,
+      elements: clearList(prev.elements) || [],
+      elementsVerso: clearList(prev.elementsVerso),
+      elementsWeeklyLeft: clearList(prev.elementsWeeklyLeft),
+      elementsWeeklyRight: clearList(prev.elementsWeeklyRight),
+      elementsSaturday: clearList(prev.elementsSaturday),
+      elementsSunday: clearList(prev.elementsSunday),
+      elementsTop: clearList(prev.elementsTop),
+      elementsBottom: clearList(prev.elementsBottom),
+      introPages: prev.introPages?.map(p => ({
+        ...p,
+        elements: clearList(p.elements) || []
+      })),
+      monthlyIntroPages: prev.monthlyIntroPages?.map(p => ({
+        ...p,
+        elements: clearList(p.elements) || []
+      }))
+    }));
+  }, [config, setConfigSilent]);
+
+  // -- PREVIEW INITIALIZATION --
   useEffect(() => {
       if (activeTab === 'preview') {
-          if (renderedPreviewCount < generatedData.length) {
-              const timer = setTimeout(() => {
-                  setRenderedPreviewCount(prev => Math.min(prev + 20, generatedData.length));
-              }, 10);
-              return () => clearTimeout(timer);
+          clearSimulationMode();
+          if (renderedPreviewCount !== generatedData.length) {
+              setRenderedPreviewCount(generatedData.length);
           }
       } else {
           if (renderedPreviewCount > 0) setRenderedPreviewCount(0);
       }
-  }, [activeTab, renderedPreviewCount, generatedData.length]);
+  }, [activeTab, renderedPreviewCount, generatedData.length, clearSimulationMode]);
 
   const handlePrintRequest = () => {
+      clearSimulationMode();
       const isYearRestricted = isProjectYearRestricted(
           config.projectType,
           config.year,
@@ -2201,11 +2508,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           base = PAGE_SIZES_MM[config.pageSize] || { width: 148, height: 210 };
       }
 
-      const w = Math.max(20, Number(base.width) || 148);
-      const h = Math.max(20, Number(base.height) || 210);
+      const dimA = Math.max(20, Number(base.width) || 148);
+      const dimB = Math.max(20, Number(base.height) || 210);
+      const minDim = Math.min(dimA, dimB);
+      const maxDim = Math.max(dimA, dimB);
 
-      if (config.orientation === 'portrait') return { width: w, height: h };
-      return { width: h, height: w };
+      if (config.orientation === 'portrait') return { width: minDim, height: maxDim };
+      return { width: maxDim, height: minDim };
   };
 
   const { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM } = getPageDimensions();
@@ -2263,10 +2572,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (selectedId !== activeTableCell?.elementId) {
         setActiveTableCell(null);
     }
-    if (selectedId) setShowProperties(true);
+    if (selectedId) {
+        setShowProperties(true);
+        const activeList = getActiveElements();
+        const el = activeList.find(e => e.id === selectedId);
+        if (el?.type === 'table' && el.style?.table?.scheduleConfig) {
+            const sc = el.style.table.scheduleConfig;
+            if (sc.startHour !== undefined) setTableScheduleStart(sc.startHour);
+            if (sc.endHour !== undefined) setTableScheduleEnd(sc.endHour);
+            if (sc.intervalMinutes !== undefined) setTableScheduleInterval(sc.intervalMinutes);
+            if (sc.skipLine !== undefined) setTableScheduleSkipLine(sc.skipLine);
+        }
+    }
   }, [selectedId]);
 
-  const getActiveElements = () => {
+  const getActiveElements = (): LayoutElement[] => {
       if (editMode === 'daily') {
           if (editorViewMode === 'verso') {
               return config.elementsVerso || config.elements;
@@ -2295,6 +2615,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           return config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId)?.elements || [];
       }
       if (editMode === 'divider') {
+          if (dividerViewMode === 'verso') {
+              if (config.monthlyDividerStyle?.versoElements !== undefined) {
+                  return config.monthlyDividerStyle.versoElements;
+              }
+              const versoContent = config.monthlyDividerVersoContent || 'blank';
+              if (versoContent === 'notes') {
+                  return [
+                      { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Anotações do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                      { id: 'v-lines', type: 'lines', name: 'Pauta', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { lineSpacing: 25, color: '#d1d5db' } }
+                  ];
+              } else if (versoContent === 'habit_tracker') {
+                  return [
+                      { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Controle de Hábitos', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                      { id: 'v-ht', type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { habitLabel: 'Hábitos do Mês' } }
+                  ];
+              } else if (versoContent === 'quote') {
+                  const quoteStyle: LayoutElement['style'] = {
+                      fontSize: 20,
+                      fontWeight: 'bold',
+                      fontStyle: 'italic',
+                      textAlign: 'center',
+                      verticalAlign: 'middle',
+                      color: '#1f2937',
+                      fontFamily: 'Inter',
+                      lineHeight: 1.5,
+                      letterSpacing: 0,
+                      textTransform: 'none',
+                      backgroundColor: 'transparent',
+                      ...(config.monthlyDividerStyle?.versoQuoteStyle || {})
+                  };
+                  const pos = config.monthlyDividerStyle?.versoQuotePosition || { x: 10, y: 30, w: 80, h: 40 };
+                  return [
+                      { id: 'v-quote', type: 'quote', name: 'Frase Motivacional', x: pos.x, y: pos.y, w: pos.w, h: pos.h, zIndex: 1, style: quoteStyle }
+                  ];
+              } else if (versoContent !== 'blank') {
+                  const targetPage = config.monthlyIntroPages?.find(p => p.id === versoContent) || config.introPages?.find(p => p.id === versoContent);
+                  if (targetPage) return targetPage.elements;
+              }
+              return [];
+          }
           return config.monthlyDividerStyle?.elements || [];
       }
       return [];
@@ -2387,11 +2747,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               return;
           }
           setter(prev => ({ ...prev, elements: getNew(prev.elements) }));
-      } else if (editMode === 'intro' && currentIntroPageId) {
-          setter(prev => ({
-              ...prev,
-              introPages: prev.introPages.map(p => p.id === currentIntroPageId ? { ...p, elements: getNew(p.elements) } : p)
-          }));
+      } else if (editMode === 'intro') {
+          if (currentIntroPageId && config.introPages.some(p => p.id === currentIntroPageId)) {
+              setter(prev => ({
+                  ...prev,
+                  introPages: prev.introPages.map(p => p.id === currentIntroPageId ? { ...p, elements: getNew(p.elements) } : p)
+              }));
+          } else if (config.introPages.length > 0) {
+              const targetId = config.introPages[0].id;
+              setCurrentIntroPageId(targetId);
+              setter(prev => ({
+                  ...prev,
+                  introPages: prev.introPages.map(p => p.id === targetId ? { ...p, elements: getNew(p.elements) } : p)
+              }));
+          } else {
+              const newPageId = Math.random().toString(36).substr(2, 9);
+              setCurrentIntroPageId(newPageId);
+              setter(prev => ({
+                  ...prev,
+                  introPages: [{ id: newPageId, name: 'Calendário Anual', elements: getNew([]) }]
+              }));
+          }
       } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
           setter(prev => {
               const pages = prev.monthlyIntroPages || [];
@@ -2451,6 +2827,74 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               };
           });
       } else if (editMode === 'divider') {
+          if (dividerViewMode === 'verso') {
+              setter(prev => {
+                  const getBaseVersoElements = (p: AgendaConfig): LayoutElement[] => {
+                      if (p.monthlyDividerStyle?.versoElements !== undefined) {
+                          return p.monthlyDividerStyle.versoElements;
+                      }
+                      const versoContent = p.monthlyDividerVersoContent || 'blank';
+                      if (versoContent === 'notes') {
+                          return [
+                              { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Anotações do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                              { id: 'v-lines', type: 'lines', name: 'Pauta', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { lineSpacing: 25, color: '#d1d5db' } }
+                          ];
+                      } else if (versoContent === 'habit_tracker') {
+                          return [
+                              { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Controle de Hábitos', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                              { id: 'v-ht', type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { habitLabel: 'Hábitos do Mês' } }
+                          ];
+                      } else if (versoContent === 'quote') {
+                          const quoteStyle: TextStyleConfig = {
+                              fontSize: 20,
+                              fontWeight: 'bold',
+                              fontStyle: 'italic',
+                              textAlign: 'center',
+                              verticalAlign: 'middle',
+                              color: '#1f2937',
+                              fontFamily: 'Inter',
+                              lineHeight: 1.5,
+                              letterSpacing: 0,
+                              textTransform: 'none',
+                              backgroundColor: 'transparent',
+                              ...(p.monthlyDividerStyle?.versoQuoteStyle || {})
+                          };
+                          const pos = p.monthlyDividerStyle?.versoQuotePosition || { x: 10, y: 30, w: 80, h: 40 };
+                          return [
+                              { id: 'v-quote', type: 'quote', name: 'Frase Motivacional', x: pos.x, y: pos.y, w: pos.w, h: pos.h, zIndex: 1, style: quoteStyle }
+                          ];
+                      } else if (versoContent !== 'blank') {
+                          const targetPage = p.monthlyIntroPages?.find(pg => pg.id === versoContent) || p.introPages?.find(pg => pg.id === versoContent);
+                          if (targetPage) return targetPage.elements;
+                      }
+                      return [];
+                  };
+
+                  const currentVerso = getBaseVersoElements(prev);
+                  const updated = getNew(currentVerso);
+                  const qEl = updated.find(e => e.id === 'v-quote' || e.type === 'quote');
+                  return {
+                      ...prev,
+                      monthlyDividerStyle: {
+                          ...(prev.monthlyDividerStyle || {}),
+                          versoElements: updated,
+                          ...(qEl ? {
+                              versoQuoteStyle: {
+                                  ...(prev.monthlyDividerStyle?.versoQuoteStyle || {}),
+                                  ...(qEl.style as any)
+                              },
+                              versoQuotePosition: {
+                                  x: qEl.x,
+                                  y: qEl.y,
+                                  w: qEl.w,
+                                  h: qEl.h
+                              }
+                          } : {})
+                      }
+                  };
+              });
+              return;
+          }
           setter(prev => ({
               ...prev,
               monthlyDividerStyle: {
@@ -2545,6 +2989,476 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       updateActiveElements(newElements);
   };
 
+  const computeElementFittedBounds = (
+    el: LayoutElement,
+    overrideStyle?: any,
+    targetDomNode?: HTMLElement | null
+  ): { x: number; y: number; w: number; h: number; style: any } | null => {
+    const currentZoom = zoom || 1;
+    const pageWidthPx = EDITOR_WIDTH_PX || (400 * currentZoom);
+    const pageHeightPx = EDITOR_HEIGHT_PX || (PAGE_HEIGHT_MM * (pageWidthPx / PAGE_WIDTH_MM));
+    const scaleFactor = pageWidthPx / 400;
+
+    const usableWidthMM = PAGE_WIDTH_MM - config.margins.inside - config.margins.outside;
+    const usableHeightMM = PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom;
+
+    const domNode = targetDomNode || (typeof document !== 'undefined' ? document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null : null);
+    const parentEl = (domNode?.parentElement || editorRef.current) as HTMLElement | null;
+    const containerWPx = parentEl?.clientWidth || (usableWidthMM * (pageWidthPx / PAGE_WIDTH_MM));
+    const containerHPx = parentEl?.clientHeight || (usableHeightMM * (pageHeightPx / PAGE_HEIGHT_MM));
+
+    const effectiveStyle = overrideStyle ? { ...el.style, ...overrideStyle } : el.style;
+
+    let naturalWPx = 0;
+    let naturalHPx = 0;
+
+    const isTextual = ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'text', 'verse', 'quote', 'holiday', 'holiday_list'].includes(el.type);
+
+    let fontFamily = effectiveStyle?.fontFamily || 'Inter, sans-serif';
+    let fontWeight = effectiveStyle?.fontWeight || 'normal';
+    let fontStyle = effectiveStyle?.fontStyle || 'normal';
+
+    if (isTextual) {
+      let textToMeasure = '';
+      const currentYear = config?.year || new Date().getFullYear();
+      
+      let currentMonth = config?.startMonth ?? 0;
+      if (editMode === 'divider' || editMode === 'monthly_intro') {
+          currentMonth = typeof (config as any)?.previewMonth === 'number' ? (config as any).previewMonth : (config?.startMonth ?? 0);
+      }
+      const startDay = 1;
+      const startDate = new Date(currentYear, currentMonth, startDay);
+      const dayOfWeek = startDate.getDay();
+
+      if (domNode) {
+          const contentContainer = domNode.querySelector(':scope > div:not(.no-print)');
+          const textChild = (contentContainer ? contentContainer.querySelector('div, span, p') : null) || contentContainer || domNode;
+          
+          if (!overrideStyle) {
+              const t = (textChild.textContent || '').trim();
+              if (t) textToMeasure = t;
+          }
+
+          const computed = window.getComputedStyle(textChild);
+          if (computed.fontFamily) fontFamily = computed.fontFamily;
+          if (computed.fontWeight) fontWeight = computed.fontWeight;
+          if (computed.fontStyle) fontStyle = computed.fontStyle;
+
+          // For multi-column holiday list and multi-column text, skip single-node measurement to measure full multi-column grid
+          if (el.type !== 'holiday_list' && (!effectiveStyle?.columnCount || effectiveStyle.columnCount <= 1)) {
+              // Attempt high-fidelity DOM Range bounding box measurement on text nodes
+              try {
+                  let textNode: Node | null = null;
+                  const walker = document.createTreeWalker(textChild, NodeFilter.SHOW_TEXT);
+                  let n: Node | null = walker.nextNode();
+                  while (n) {
+                      if (n.nodeValue && n.nodeValue.trim().length > 0) {
+                          textNode = n;
+                          break;
+                      }
+                      n = walker.nextNode();
+                  }
+
+                  if (textNode) {
+                      const range = document.createRange();
+                      range.selectNodeContents(textNode);
+                      const rect = range.getBoundingClientRect();
+                      const editorRect = (domNode.parentElement || editorRef.current)?.getBoundingClientRect();
+                      if (rect.width > 0 && rect.height > 0 && editorRect && editorRect.width > 0) {
+                          const padWPx = Math.max(4, Math.round(6 * scaleFactor));
+                          const padHPx = Math.max(2, Math.round(4 * scaleFactor));
+                          const localRectW = (rect.width / editorRect.width) * containerWPx;
+                          const localRectH = (rect.height / editorRect.height) * containerHPx;
+                          naturalWPx = localRectW + padWPx;
+                          naturalHPx = localRectH + padHPx;
+                      }
+                  }
+              } catch (e) {
+                  // Fallback to canvas measurement below
+              }
+          }
+      }
+
+      if (!textToMeasure) {
+          const variant = effectiveStyle?.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
+          if (el.type === 'day_number' || variant === 'day_number') textToMeasure = String(startDay).padStart(2, '0');
+          else if (el.type === 'month_name' || variant === 'month_name') textToMeasure = getMonthName(currentMonth, effectiveStyle?.nameFormat);
+          else if (el.type === 'day_name' || variant === 'day_name') textToMeasure = getDayName(dayOfWeek, effectiveStyle?.nameFormat);
+          else if (el.type === 'month_number' || variant === 'month_number') textToMeasure = String(currentMonth + 1).padStart(2, '0');
+          else if (el.type === 'year' || variant === 'year') textToMeasure = String(currentYear);
+          else if (el.type === 'holiday') textToMeasure = 'Confraternização Universal';
+          else if (el.type === 'holiday_list') textToMeasure = el.content || 'Feriados Nacionais (Editável)';
+          else textToMeasure = el.content || el.name || 'Texto';
+      }
+
+      if (effectiveStyle?.simulateMaxSpace) {
+          const variant = effectiveStyle?.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
+          if (variant === 'day_name' || el.type === 'day_name') textToMeasure = 'Segunda-feira';
+          if (variant === 'month_name' || el.type === 'month_name') textToMeasure = 'Novembro';
+          if (variant === 'day_number' || el.type === 'day_number') textToMeasure = '30';
+          if (variant === 'month_number' || el.type === 'month_number') textToMeasure = '12';
+      }
+
+      const transform = effectiveStyle?.textTransform;
+      if (transform === 'uppercase') textToMeasure = textToMeasure.toUpperCase();
+      else if (transform === 'lowercase') textToMeasure = textToMeasure.toLowerCase();
+      else if (transform === 'capitalize') textToMeasure = textToMeasure.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      else if (transform === 'sentence') textToMeasure = textToMeasure.charAt(0).toUpperCase() + textToMeasure.slice(1).toLowerCase();
+
+      // If DOM range measurement didn't succeed, use Canvas 2D measurement
+      if (naturalWPx <= 0) {
+          const rawFontSize = typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : parseFloat(effectiveStyle?.fontSize || '16') || 16;
+          const editorFontSizePx = rawFontSize * scaleFactor;
+          const rawLetterSpacing = typeof effectiveStyle?.letterSpacing === 'number' ? effectiveStyle.letterSpacing : parseFloat(effectiveStyle?.letterSpacing || '0') || 0;
+          const scaledLetterSpacing = rawLetterSpacing * scaleFactor;
+          const lineHeightMult = typeof effectiveStyle?.lineHeight === 'number' ? effectiveStyle.lineHeight : (parseFloat(String(effectiveStyle?.lineHeight || '1.2')) || 1.2);
+
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+          let maxLineWidth = 0;
+          let maxAscent = 0;
+          let maxDescent = 0;
+          const lines = textToMeasure.split('\n');
+
+          if (ctx) {
+              ctx.font = `${fontStyle} ${fontWeight} ${editorFontSizePx}px ${fontFamily}`;
+              lines.forEach(lineText => {
+                  const metrics = ctx.measureText(lineText);
+                  const actualLeft = metrics.actualBoundingBoxLeft || 0;
+                  const actualRight = metrics.actualBoundingBoxRight || metrics.width;
+                  let w = Math.max(metrics.width, actualLeft + actualRight);
+                  if (scaledLetterSpacing > 0 && lineText.length > 1) {
+                      w += scaledLetterSpacing * (lineText.length - 1);
+                  }
+                  if (w > maxLineWidth) maxLineWidth = w;
+
+                  const asc = metrics.actualBoundingBoxAscent || (editorFontSizePx * 0.85);
+                  const dsc = metrics.actualBoundingBoxDescent || (editorFontSizePx * 0.25);
+                  if (asc > maxAscent) maxAscent = asc;
+                  if (dsc > maxDescent) maxDescent = dsc;
+              });
+          }
+
+          if (maxLineWidth <= 0) {
+              maxLineWidth = textToMeasure.length * (editorFontSizePx * 0.65);
+          }
+
+          const cols = Math.max(1, Math.min(6, effectiveStyle?.columnCount || (el.type === 'holiday_list' ? 2 : 1)));
+          const rawColGap = typeof effectiveStyle?.columnGap === 'number' ? effectiveStyle.columnGap : 24;
+          const scaledColGap = rawColGap * scaleFactor;
+          const padW = Math.max(6, Math.round((cols > 1 ? 10 : 6) * scaleFactor));
+          const padH = Math.max(4, Math.round(6 * scaleFactor));
+
+          const singleLineGlyphH = Math.max(maxAscent + maxDescent, editorFontSizePx * 1.15);
+
+          if (cols > 1) {
+              const linesPerCol = Math.max(1, Math.ceil(lines.length / cols));
+              const currentWPx = Math.max(containerWPx * 0.80, (el.w / 100) * containerWPx);
+              const availColW = Math.max(40, (currentWPx - padW - (cols - 1) * scaledColGap) / cols);
+
+              // Calculate wrapped lines per column
+              let maxColRows = linesPerCol;
+              for (let c = 0; c < cols; c++) {
+                  const chunk = lines.slice(c * linesPerCol, (c + 1) * linesPerCol);
+                  let colRows = 0;
+                  chunk.forEach(lt => {
+                      const estW = lt.length * (editorFontSizePx * 0.58);
+                      const rows = Math.max(1, Math.ceil(estW / availColW));
+                      colRows += rows;
+                  });
+                  if (colRows > maxColRows) maxColRows = colRows;
+              }
+
+              const totalTextHeight = maxColRows * (editorFontSizePx * lineHeightMult + 2 * scaleFactor);
+              naturalHPx = totalTextHeight + padH;
+              naturalWPx = Math.min(containerWPx * 0.94, Math.max(currentWPx, (cols * Math.min(maxLineWidth, availColW)) + (cols - 1) * scaledColGap + padW));
+          } else {
+              const totalTextHeight = lines.length > 1 ? (lines.length * editorFontSizePx * lineHeightMult) : singleLineGlyphH;
+              naturalWPx = maxLineWidth + padW;
+              naturalHPx = totalTextHeight + padH;
+          }
+      }
+    } else if (el.type === 'full_calendar') {
+      naturalWPx = (el.w / 100) * containerWPx;
+      naturalHPx = (el.h / 100) * containerHPx;
+    } else if (el.type === 'mini_calendar') {
+      const miniCal = effectiveStyle?.fullCalendar || effectiveStyle?.miniCalendar || {};
+      const padding = (effectiveStyle?.padding !== undefined ? effectiveStyle.padding : (miniCal.padding !== undefined ? miniCal.padding : 4)) * scaleFactor;
+      const borderWidth = (effectiveStyle?.borderWidth || miniCal.borderWidth || 0) * scaleFactor;
+
+      const titleStyle = { ...effectiveStyle?.title, ...miniCal.title };
+      const titleFontSize = (typeof titleStyle.fontSize === 'number' ? titleStyle.fontSize : 9) * scaleFactor;
+      const titleLineHeight = typeof titleStyle.lineHeight === 'number' ? titleStyle.lineHeight : 1.2;
+      const titleH = Math.ceil(titleFontSize * titleLineHeight + 4 * scaleFactor);
+
+      const weekStyle = { ...effectiveStyle?.weekDays, ...miniCal.weekDays };
+      const rawWeekdayH = miniCal.weekdayHeight !== undefined ? miniCal.weekdayHeight : effectiveStyle?.weekdayHeight;
+      const weekdayH = (rawWeekdayH !== undefined && Number(rawWeekdayH) > 0)
+          ? Number(rawWeekdayH) * scaleFactor
+          : Math.max(10 * scaleFactor, Math.round((typeof weekStyle.fontSize === 'number' ? weekStyle.fontSize : 6.5) * scaleFactor * (weekStyle.lineHeight || 1.2)) + 2 * scaleFactor);
+
+      const dayStyle = { ...effectiveStyle?.days, ...miniCal.days };
+      const dayFontSize = (typeof dayStyle.fontSize === 'number' ? dayStyle.fontSize : 7.5) * scaleFactor;
+
+      const currentWPx = (el.w / 100) * containerWPx;
+      const rawDayRowH = miniCal.dayRowHeight !== undefined ? miniCal.dayRowHeight : effectiveStyle?.dayRowHeight;
+      const naturalCellH = (rawDayRowH !== undefined && Number(rawDayRowH) > 0)
+          ? Number(rawDayRowH) * scaleFactor
+          : Math.max(9 * scaleFactor, Math.ceil(dayFontSize * 1.2 + 2 * scaleFactor));
+
+      naturalHPx = titleH + weekdayH + (6 * naturalCellH) + (padding * 2 + borderWidth * 2);
+      naturalWPx = currentWPx;
+    } else if (el.type === 'table') {
+      const tableConfig = effectiveStyle?.table || {};
+      const rows = tableConfig.rows || 10;
+      const cols = tableConfig.cols || 2;
+      const tableTextStyle = tableConfig.textStyle || {};
+      const defaultFontSize = (typeof tableTextStyle.fontSize === 'number' ? tableTextStyle.fontSize : (typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : 10)) * scaleFactor;
+      const defaultPadding = (tableTextStyle.cellPadding !== undefined ? tableTextStyle.cellPadding : 4) * scaleFactor;
+      const defaultLineHeight = tableTextStyle.lineHeight || 1.2;
+      const tableBorderW = (tableConfig.borderWidth !== undefined ? tableConfig.borderWidth : 1) * scaleFactor;
+
+      let totalRowsH = 0;
+      for (let r = 0; r < rows; r++) {
+          let maxRowLines = 1;
+          let maxCellFontSize = defaultFontSize;
+          let maxCellPadding = defaultPadding;
+
+          for (let c = 0; c < cols; c++) {
+              const cellKey = `${r}-${c}`;
+              const cellKeyAlt = `${r}_${c}`;
+              const content = tableConfig.cellContent?.[cellKey] ?? tableConfig.cellContent?.[cellKeyAlt] ?? '';
+              if (content) {
+                  const lines = String(content).split('\n').length;
+                  if (lines > maxRowLines) maxRowLines = lines;
+              }
+              const cellCustom = tableConfig.cellStyles?.[cellKey] || tableConfig.cellStyles?.[cellKeyAlt];
+              if (cellCustom?.fontSize) {
+                  const fs = cellCustom.fontSize * scaleFactor;
+                  if (fs > maxCellFontSize) maxCellFontSize = fs;
+              }
+              if (cellCustom?.cellPadding !== undefined) {
+                  const cp = cellCustom.cellPadding * scaleFactor;
+                  if (cp > maxCellPadding) maxCellPadding = cp;
+              }
+          }
+
+          const minCellH = Math.max(16 * scaleFactor, Math.ceil(maxCellFontSize * defaultLineHeight + maxCellPadding * 2));
+          const rowH = Math.max(minCellH, Math.ceil(maxRowLines * maxCellFontSize * defaultLineHeight + maxCellPadding * 2));
+          totalRowsH += rowH;
+      }
+
+      naturalHPx = totalRowsH + tableBorderW * 2;
+      naturalWPx = (el.w / 100) * containerWPx;
+    } else if (el.type === 'planner_day_box') {
+      const plannerDayBox = effectiveStyle?.plannerDayBox || {};
+      const showHeader = plannerDayBox.showHeader !== false;
+      const headerH = showHeader ? Math.max(26 * scaleFactor, 24) : 0;
+      const strokeBorderW = (effectiveStyle?.borderWidth || 1) * 2;
+
+      let contentH = 0;
+      if (plannerDayBox.contentStyle === 'timetable') {
+          const startH = plannerDayBox.startHour !== undefined ? plannerDayBox.startHour : 7;
+          const endH = plannerDayBox.endHour !== undefined ? plannerDayBox.endHour : 18;
+          const intervalM = plannerDayBox.timeInterval || 60;
+          const skipLine = plannerDayBox.skipBlankLine || false;
+          let timesCount = 0;
+          for (let min = startH * 60; min <= endH * 60; min += intervalM) {
+              timesCount++;
+              if (skipLine && min < endH * 60) timesCount++;
+          }
+          const rowSpacing = Math.max(12 * scaleFactor, (plannerDayBox.lineSpacing || 20) * scaleFactor);
+          contentH = timesCount * rowSpacing;
+      } else if (plannerDayBox.contentStyle === 'lines') {
+          const lineSpacing = Math.max(14 * scaleFactor, (plannerDayBox.lineSpacing || 20) * scaleFactor);
+          const currentContentH = Math.max(0, ((el.h / 100) * containerHPx) - headerH);
+          const lineCount = Math.max(4, Math.round(currentContentH / lineSpacing));
+          contentH = lineCount * lineSpacing;
+      } else {
+          contentH = Math.max(50 * scaleFactor, ((el.h / 100) * containerHPx) - headerH);
+      }
+
+      naturalHPx = headerH + contentH + strokeBorderW;
+      naturalWPx = (el.w / 100) * containerWPx;
+    } else if (el.type === 'lines') {
+      const lineSpacing = (effectiveStyle?.lineSpacing || 24) * scaleFactor;
+      const isSingleLine = !effectiveStyle?.showTimes && (el.h < 3 || (effectiveStyle?.lineSpacing && (el.h / 100 * containerHPx) <= lineSpacing));
+
+      if (isSingleLine) {
+          naturalHPx = Math.max(10 * scaleFactor, 10);
+      } else if (effectiveStyle?.showTimes) {
+          const startH = effectiveStyle.startHour !== undefined ? effectiveStyle.startHour : 7;
+          const endH = effectiveStyle.endHour !== undefined ? effectiveStyle.endHour : 18;
+          const intervalM = effectiveStyle.timeInterval || 60;
+          const skipLine = effectiveStyle.skipBlankLine || false;
+          let timesCount = 0;
+          for (let min = startH * 60; min <= endH * 60; min += intervalM) {
+              timesCount++;
+              if (skipLine && min < endH * 60) timesCount++;
+          }
+          naturalHPx = timesCount * lineSpacing;
+      } else if (effectiveStyle?.rowCount && effectiveStyle.rowCount > 0) {
+          naturalHPx = effectiveStyle.rowCount * lineSpacing;
+      } else {
+          const currentH = (el.h / 100) * containerHPx;
+          const linesCount = Math.max(3, Math.round(currentH / lineSpacing));
+          naturalHPx = linesCount * lineSpacing;
+      }
+      naturalWPx = (el.w / 100) * containerWPx;
+    } else if (el.type === 'habit_tracker') {
+      const markerSize = (effectiveStyle?.habitMarkerSize || 16) * scaleFactor;
+      const spacing = (effectiveStyle?.habitSpacing || 4) * scaleFactor;
+      const showLabel = effectiveStyle?.habitShowLabel !== false;
+      const labelH = showLabel ? Math.ceil((effectiveStyle?.fontSize || 10) * scaleFactor * 1.3 + 6 * scaleFactor) : 0;
+      const rowH = Math.max(markerSize, 12 * scaleFactor) + spacing;
+      const habitRows = effectiveStyle?.habitCount || effectiveStyle?.habitRows || 5;
+
+      naturalHPx = labelH + (habitRows * rowH) + 6;
+      naturalWPx = (el.w / 100) * containerWPx;
+    } else if (el.type === 'permanent_day_header') {
+      const currentWPx = (el.w / 100) * containerWPx;
+      const daySize = (currentWPx / 7) * 0.85;
+      const isTextBelow = (effectiveStyle?.variant || '').includes('text_below');
+      naturalHPx = (isTextBelow ? (daySize + (effectiveStyle?.fontSize || 10) * scaleFactor * 1.4 + 4) : daySize) + 8 * scaleFactor;
+      naturalWPx = currentWPx;
+    } else if (el.type === 'circle') {
+      const currentWPx = (el.w / 100) * containerWPx;
+      const currentHPx = (el.h / 100) * containerHPx;
+      const sizePx = Math.max(20, Math.min(currentWPx, currentHPx) || Math.round(50 * scaleFactor));
+      naturalWPx = sizePx;
+      naturalHPx = sizePx;
+    } else if (el.type === 'vector_shape') {
+      naturalWPx = (el.w / 100) * containerWPx;
+      naturalHPx = (el.h / 100) * containerHPx;
+    } else if (el.type === 'icon') {
+      const iconSz = (typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : 24) * scaleFactor;
+      naturalWPx = iconSz + 4 * scaleFactor;
+      naturalHPx = iconSz + 4 * scaleFactor;
+    } else if (el.type === 'moon') {
+      const iconSz = (typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : 12) * scaleFactor;
+      const isIconOnly = effectiveStyle?.variant === 'icon_only';
+      naturalWPx = isIconOnly ? (iconSz + 6 * scaleFactor) : (iconSz + 75 * scaleFactor);
+      naturalHPx = iconSz + 8 * scaleFactor;
+    } else if (el.type === 'box') {
+      naturalWPx = (el.w / 100) * containerWPx;
+      naturalHPx = (el.h / 100) * containerHPx;
+    } else if (el.type === 'footer_tracker') {
+      naturalWPx = (el.w / 100) * containerWPx;
+      naturalHPx = (el.h / 100) * containerHPx;
+    } else if (el.type === 'note_grid') {
+      const gridSize = (effectiveStyle?.gridSize || effectiveStyle?.gridSpacing || 15) * scaleFactor;
+      naturalWPx = Math.max(gridSize, Math.round(((el.w / 100) * containerWPx) / gridSize) * gridSize);
+      naturalHPx = Math.max(gridSize, Math.round(((el.h / 100) * containerHPx) / gridSize) * gridSize);
+    } else if (domNode) {
+      const contentWrapper = domNode.querySelector(':scope > div:not(.no-print)') as HTMLElement | null;
+      if (contentWrapper && contentWrapper.scrollHeight > 0 && contentWrapper.scrollWidth > 0) {
+          naturalWPx = contentWrapper.scrollWidth;
+          naturalHPx = contentWrapper.scrollHeight;
+      } else {
+          naturalWPx = (el.w / 100) * containerWPx;
+          naturalHPx = (el.h / 100) * containerHPx;
+      }
+    } else {
+      naturalWPx = (el.w / 100) * containerWPx;
+      naturalHPx = (el.h / 100) * containerHPx;
+    }
+
+    if (naturalWPx <= 0 || naturalHPx <= 0) return null;
+
+    let newW = (naturalWPx / containerWPx) * 100;
+    let newH = (naturalHPx / containerHPx) * 100;
+
+    newW = Math.min(100, Math.max(0.5, Math.round(newW * 10) / 10));
+    newH = Math.min(100, Math.max(0.5, Math.round(newH * 10) / 10));
+
+    let newX = el.x;
+    let newY = el.y;
+
+    if (isTextual) {
+        if (effectiveStyle?.textAlign === 'center') {
+            const centerX = el.x + el.w / 2;
+            newX = centerX - newW / 2;
+        } else if (effectiveStyle?.textAlign === 'right') {
+            newX = (el.x + el.w) - newW;
+        } else {
+            newX = el.x;
+        }
+
+        if (effectiveStyle?.verticalAlign === 'middle') {
+            const centerY = el.y + el.h / 2;
+            newY = centerY - newH / 2;
+        } else if (effectiveStyle?.verticalAlign === 'bottom') {
+            newY = (el.y + el.h) - newH;
+        } else {
+            newY = el.y;
+        }
+    } else {
+        newX = el.x;
+        newY = el.y;
+    }
+
+    const rot = (effectiveStyle?.rotation || 0) % 360;
+    const normalizedRot = (rot + 360) % 360;
+
+    if (normalizedRot === 90 || normalizedRot === 270) {
+        const centerX = el.x + el.w / 2;
+        const centerY = el.y + el.h / 2;
+        const visW = newH * (containerHPx / containerWPx);
+        const visH = newW * (containerWPx / containerHPx);
+
+        let visX = centerX - visW / 2;
+        let visY = centerY - visH / 2;
+
+        if (visX < 0) visX = 0;
+        if (visX + visW > 100) visX = Math.max(0, 100 - visW);
+        if (visY < 0) visY = 0;
+        if (visY + visH > 100) visY = Math.max(0, 100 - visH);
+
+        const adjustedCenterX = visX + visW / 2;
+        const adjustedCenterY = visY + visH / 2;
+
+        newX = adjustedCenterX - newW / 2;
+        newY = adjustedCenterY - newH / 2;
+    } else {
+        if (newX < 0) newX = 0;
+        if (newX + newW > 100) newX = Math.max(0, 100 - newW);
+        if (newY < 0) newY = 0;
+        if (newY + newH > 100) newY = Math.max(0, 100 - newH);
+    }
+
+    newX = Math.round(newX * 10) / 10;
+    newY = Math.round(newY * 10) / 10;
+
+    return { x: newX, y: newY, w: newW, h: newH, style: effectiveStyle };
+  };
+
+  const autoFitElementToContent = (id?: string, overrideStyle?: any) => {
+    const targetIds = id ? [id] : (selectedIds.length > 0 ? selectedIds : (selectedId ? [selectedId] : []));
+    if (targetIds.length === 0) return;
+
+    updateActiveElements(prevList => {
+      let hasChanges = false;
+      const updatedList = prevList.map(el => {
+        if (!targetIds.includes(el.id)) return el;
+        if (el.type === 'full_calendar' || el.type === 'mini_calendar' || el.type === 'holiday_list') {
+          if (id && el.id === id && overrideStyle) {
+            hasChanges = true;
+            return { ...el, style: { ...el.style, ...overrideStyle } };
+          }
+          return el;
+        }
+        const fitted = computeElementFittedBounds(el, overrideStyle);
+        if (fitted) {
+          hasChanges = true;
+          return { ...el, style: fitted.style, x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h };
+        }
+        return (id && el.id === id && overrideStyle) ? { ...el, style: { ...el.style, ...overrideStyle } } : el;
+      });
+      return hasChanges ? updatedList : prevList;
+    }, true);
+  };
+
   const fitToText = () => {
       if (selectedIds.length === 0) return;
       autoFitElementToContent();
@@ -2561,15 +3475,78 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const addIntroTemplate = (template: IntroPage) => {
+      const yearToUse = config.year || new Date().getFullYear();
+      const hasFullCal = template.elements.some(e => e.type === 'full_calendar');
+      const hasHolidayList = template.elements.some(e => e.type === 'holiday_list');
+      const newElements = template.elements.map(el => {
+          const id = Math.random().toString(36).substr(2, 9);
+          let content = el.content;
+          let nextEl: LayoutElement = { ...el, id };
+          if (el.type === 'holiday_list') {
+              content = generateHolidayListText(yearToUse, (el.style?.holidayFormat as HolidayDateFormat) || 'full_written', {
+                  includeOptional: el.style?.includeOptional !== false,
+                  includeEaster: el.style?.includeEaster !== false,
+                  includeMunicipal: el.style?.includeMunicipal !== false
+              });
+              nextEl.content = content;
+          } else if (el.type === 'text' && typeof el.content === 'string' && /CALEND[ÁA]RIO\s*\d{4}/i.test(el.content)) {
+              content = el.content.replace(/\d{4}/, String(yearToUse));
+              nextEl = {
+                  ...nextEl,
+                  content,
+                  x: 10,
+                  y: hasHolidayList ? 3.5 : 4,
+                  w: 80,
+                  h: hasHolidayList ? 5.5 : 6,
+                  zIndex: Math.max(el.zIndex || 1, 2),
+                  style: {
+                      ...el.style,
+                      textAlign: 'center',
+                      verticalAlign: 'middle',
+                      lineHeight: 1.2
+                  }
+              };
+          } else if (el.type === 'full_calendar' && hasFullCal) {
+              nextEl = {
+                  ...nextEl,
+                  x: el.x ?? 5,
+                  y: hasHolidayList ? Math.max(11, el.y || 11) : Math.max(12, el.y || 12),
+                  w: el.w || 90,
+                  h: hasHolidayList ? Math.min(58, el.h || 58) : Math.min(78, el.h || 76)
+              };
+          }
+          return nextEl;
+      });
       const newPage = {
           ...template,
           id: Math.random().toString(36).substr(2, 9),
-          // Deep copy elements to avoid reference issues
-          elements: template.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+          elements: newElements
       };
       if (editMode === 'monthly_intro') {
           setConfig(prev => ({ ...prev, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
           setCurrentMonthlyIntroPageId(newPage.id);
+      } else if (editMode === 'divider') {
+          if (dividerViewMode === 'verso') {
+              setConfig(prev => ({
+                  ...prev,
+                  includeMonthlyDividers: true,
+                  monthlyDividerStyle: {
+                      ...(prev.monthlyDividerStyle || {}),
+                      layout: 'custom',
+                      versoElements: newElements
+                  }
+              }));
+          } else {
+              setConfig(prev => ({
+                  ...prev,
+                  includeMonthlyDividers: true,
+                  monthlyDividerStyle: {
+                      ...(prev.monthlyDividerStyle || {}),
+                      layout: 'custom',
+                      elements: newElements
+                  }
+              }));
+          }
       } else {
           setConfig(prev => ({ ...prev, introPages: [...prev.introPages, newPage] }));
           setCurrentIntroPageId(newPage.id);
@@ -2650,6 +3627,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (editMode === 'monthly_intro') {
           setConfig(prev => ({ ...prev, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
           setCurrentMonthlyIntroPageId(newPage.id);
+      } else if (editMode === 'divider') {
+          if (dividerViewMode === 'verso') {
+              setConfig(prev => ({
+                  ...prev,
+                  includeMonthlyDividers: true,
+                  monthlyDividerStyle: {
+                      ...(prev.monthlyDividerStyle || {}),
+                      layout: 'custom',
+                      versoElements: newPage.elements
+                  }
+              }));
+          } else {
+              setConfig(prev => ({
+                  ...prev,
+                  includeMonthlyDividers: true,
+                  monthlyDividerStyle: {
+                      ...(prev.monthlyDividerStyle || {}),
+                      layout: 'custom',
+                      elements: newPage.elements
+                  }
+              }));
+          }
       } else {
           setConfig(prev => ({ ...prev, introPages: [...prev.introPages, newPage] }));
           setCurrentIntroPageId(newPage.id);
@@ -2690,6 +3689,705 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
       }
   };
+
+  const currentPageTitle = useMemo(() => {
+    if (editMode === 'daily') return 'Layout Diário / Planner';
+    if (editMode === 'intro') {
+      const p = config.introPages.find(ip => ip.id === currentIntroPageId);
+      return p ? `Página Inicial (${p.name})` : 'Página Inicial';
+    }
+    if (editMode === 'monthly_intro') {
+      const p = config.monthlyIntroPages?.find(ip => ip.id === currentMonthlyIntroPageId);
+      return p ? `Abertura Mensal (${p.name})` : 'Abertura Mensal';
+    }
+    if (editMode === 'divider') {
+      return dividerViewMode === 'verso' ? 'Verso da Divisória' : 'Frente da Divisória';
+    }
+    return 'Página Atual';
+  }, [editMode, currentIntroPageId, currentMonthlyIntroPageId, dividerViewMode, config]);
+
+  const currentPageInEditor = useMemo(() => {
+    if (editMode === 'intro') {
+      const idx = config.introPages.findIndex(ip => ip.id === currentIntroPageId);
+      return idx >= 0 ? idx + 1 : 1;
+    }
+    if (editMode === 'daily') {
+      const introCount = config.introPages.length || 0;
+      return introCount + 1;
+    }
+    if (editMode === 'monthly_intro') {
+      const introCount = config.introPages.length || 0;
+      const idx = config.monthlyIntroPages?.findIndex(mp => mp.id === currentMonthlyIntroPageId) ?? 0;
+      return introCount + (config.monthlyDividerStyle ? 1 : 0) + (idx >= 0 ? idx + 1 : 1);
+    }
+    if (editMode === 'divider') {
+      const introCount = config.introPages.length || 0;
+      return introCount + (dividerViewMode === 'verso' ? 2 : 1);
+    }
+    return 1;
+  }, [editMode, currentIntroPageId, currentMonthlyIntroPageId, dividerViewMode, config]);
+
+  const handleImportPdfElements = useCallback(async (
+    importedElements: LayoutElement[],
+    destination: PdfImportDestination,
+    metadata: {
+      pageName?: string;
+      widthMm?: number;
+      heightMm?: number;
+      matchPageDimensions?: boolean;
+      zeroMargins?: boolean;
+      backgroundImage?: string;
+      clearExistingElements?: boolean;
+      clearBackground?: boolean;
+      applyBackground?: boolean;
+      batchPages?: PdfImportBatchItem[];
+    }
+  ) => {
+    pushHistory();
+
+    // Calcular atualizações de dimensões de página e margens se solicitado
+    const dimensionUpdates: Partial<AgendaConfig> = {};
+    if (metadata.matchPageDimensions && metadata.widthMm && metadata.heightMm) {
+      const wMm = Math.round(metadata.widthMm * 10) / 10;
+      const hMm = Math.round(metadata.heightMm * 10) / 10;
+
+      let matchedPageSize: PageSize = 'Custom';
+      let customSize = { width: wMm, height: hMm };
+
+      // Identificar formatos padrão comuns (A5: 148x210, A4: 210x297, Letter: 215.9x279.4)
+      if ((Math.abs(wMm - 148) <= 3 && Math.abs(hMm - 210) <= 3) || (Math.abs(wMm - 210) <= 3 && Math.abs(hMm - 148) <= 3)) {
+        matchedPageSize = 'A5';
+        customSize = { width: 148, height: 210 };
+      } else if ((Math.abs(wMm - 210) <= 3 && Math.abs(hMm - 297) <= 3) || (Math.abs(wMm - 297) <= 3 && Math.abs(hMm - 210) <= 3)) {
+        matchedPageSize = 'A4';
+        customSize = { width: 210, height: 297 };
+      } else if ((Math.abs(wMm - 216) <= 4 && Math.abs(hMm - 279) <= 4) || (Math.abs(wMm - 279) <= 4 && Math.abs(hMm - 216) <= 4)) {
+        matchedPageSize = 'Letter';
+        customSize = { width: 215.9, height: 279.4 };
+      }
+
+      dimensionUpdates.pageSize = matchedPageSize;
+      dimensionUpdates.customPageSize = customSize;
+      dimensionUpdates.orientation = wMm > hMm ? 'landscape' : 'portrait';
+    }
+
+    if (metadata.zeroMargins) {
+      // Preserva de forma inteligente as margens configuradas pelo usuário para o cálculo de espelhamento da encadernação/verso
+      const existingNonZero = (config.margins && (config.margins.inside > 0 || config.margins.outside > 0)) ? config.margins : undefined;
+      const preservedMargins = config.bindingMargins || config.initialMargins || existingNonZero || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 };
+      dimensionUpdates.margins = { top: 0, bottom: 0, inside: 0, outside: 0 };
+      dimensionUpdates.initialMargins = preservedMargins;
+      dimensionUpdates.bindingMargins = preservedMargins;
+    }
+
+    // Se houver imagem de fundo do PDF e applyBackground não for falso
+    let finalBgUrl = metadata.applyBackground !== false ? metadata.backgroundImage : undefined;
+    if (finalBgUrl && finalBgUrl.startsWith('data:image/')) {
+      try {
+        finalBgUrl = await ImageManager.registerImage(finalBgUrl);
+      } catch (err) {
+        console.warn('[handleImportPdfElements] Erro ao registrar imagem de fundo no ImageManager:', err);
+      }
+    }
+
+    const newBgConfig: BackgroundConfig | undefined = finalBgUrl ? {
+      id: `bg-pdf-${Date.now()}`,
+      name: 'Fundo PDF Importado',
+      type: 'image',
+      image: {
+        url: finalBgUrl,
+        opacity: 1,
+        fit: 'fill',
+      },
+      opacity: 1,
+      showOnIntroPages: destination === 'new_intro',
+      showOnDailyPages: destination.startsWith('miolo'),
+    } : undefined;
+
+    const isWeekly = config.layoutType?.startsWith('weekly');
+
+    const dimensionNote = (metadata.matchPageDimensions || metadata.zeroMargins) ? ' (Proporção 1:1 e margens fiéis aplicadas)' : '';
+
+    // Descarregar e otimizar imagens embutidas nos elementos para o IndexedDB
+    let processedElements = importedElements;
+    try {
+      processedElements = await ImageManager.migrateConfigImages(importedElements);
+    } catch (err) {
+      console.warn('[handleImportPdfElements] Aviso ao migrar imagens dos elementos:', err);
+    }
+
+    switch (destination) {
+      case 'miolo_default':
+      case 'miolo_left':
+      case 'miolo_right': {
+        if (metadata.batchPages && metadata.batchPages.length > 1) {
+          let frontElements: LayoutElement[] | undefined = undefined;
+          let frontBg: BackgroundConfig | undefined = undefined;
+          let versoElements: LayoutElement[] | undefined = undefined;
+          let versoBg: BackgroundConfig | undefined = undefined;
+
+          for (const bp of metadata.batchPages) {
+            let bpBgUrl = bp.backgroundImage;
+            if (bpBgUrl && bpBgUrl.startsWith('data:image/')) {
+              try {
+                bpBgUrl = await ImageManager.registerImage(bpBgUrl);
+              } catch (e) {}
+            }
+            const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+              id: `bg-miolo-${Date.now()}-${bp.pageNumber}`,
+              name: `Fundo Miolo Pág ${bp.pageNumber}`,
+              type: 'image',
+              image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+              opacity: 1,
+              showOnDailyPages: true
+            } : undefined;
+
+            let processedBp = bp.elements;
+            try {
+              processedBp = await ImageManager.migrateConfigImages(bp.elements);
+            } catch (e) {}
+
+            if (bp.destination === 'miolo_left' || bp.isDividerVerso) {
+              versoElements = processedBp;
+              versoBg = bpBg;
+            } else {
+              frontElements = processedBp;
+              frontBg = bpBg;
+            }
+          }
+
+          setConfig(prev => {
+            const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+            const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+            if (frontBg) {
+              miolo.odd = frontBg;
+              miolo.default = frontBg;
+              currentRules.global = frontBg;
+            }
+            if (versoBg) {
+              miolo.even = versoBg;
+            }
+            currentRules.miolo = miolo;
+
+            return {
+              ...prev,
+              ...dimensionUpdates,
+              customVerso: versoElements !== undefined ? true : prev.customVerso,
+              elements: frontElements !== undefined ? frontElements : prev.elements,
+              elementsWeeklyRight: frontElements !== undefined ? frontElements : prev.elementsWeeklyRight,
+              elementsVerso: versoElements !== undefined ? versoElements : prev.elementsVerso,
+              elementsWeeklyLeft: versoElements !== undefined ? versoElements : prev.elementsWeeklyLeft,
+              backgroundRules: currentRules
+            };
+          });
+
+          setEditMode('daily');
+          setEditorViewMode('standard');
+          setActiveTab('editor');
+          setToastMessage(`Miolo Frente e Verso importados com sucesso do PDF!${dimensionNote}`);
+          break;
+        }
+
+        if (destination === 'miolo_default') {
+          setConfig(prev => {
+            const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+            const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+            if (newBgConfig) {
+              miolo.default = newBgConfig;
+              currentRules.global = newBgConfig;
+            } else if (metadata.clearBackground) {
+              delete miolo.default;
+              delete currentRules.global;
+            }
+            currentRules.miolo = miolo;
+
+            return {
+              ...prev,
+              ...dimensionUpdates,
+              elements: processedElements,
+              background: newBgConfig || (metadata.clearBackground ? undefined : prev.background),
+              backgroundRules: currentRules
+            };
+          });
+          setEditMode('daily');
+          setEditorViewMode('standard');
+          setSelectedIds(processedElements.map(e => e.id));
+          setActiveTab('editor');
+          setToastMessage(`Layout do Miolo Diário atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        } else if (destination === 'miolo_left') {
+          setConfig(prev => {
+            const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+            const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+            if (newBgConfig) {
+              miolo.even = newBgConfig;
+            } else if (metadata.clearBackground) {
+              delete miolo.even;
+            }
+            currentRules.miolo = miolo;
+
+            return {
+              ...prev,
+              ...dimensionUpdates,
+              customVerso: true,
+              elementsVerso: processedElements,
+              elementsWeeklyLeft: processedElements,
+              backgroundRules: currentRules
+            };
+          });
+          setEditMode('daily');
+          setEditorViewMode(isWeekly ? 'weekly_left' : 'verso');
+          setSelectedIds(processedElements.map(e => e.id));
+          setActiveTab('editor');
+          setToastMessage(`Layout do Miolo (Verso / Página Esquerda) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        } else {
+          setConfig(prev => {
+            const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+            const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+            if (newBgConfig) {
+              miolo.odd = newBgConfig;
+            } else if (metadata.clearBackground) {
+              delete miolo.odd;
+            }
+            currentRules.miolo = miolo;
+
+            return {
+              ...prev,
+              ...dimensionUpdates,
+              elements: processedElements,
+              elementsWeeklyRight: processedElements,
+              backgroundRules: currentRules
+            };
+          });
+          setEditMode('daily');
+          setEditorViewMode(isWeekly ? 'weekly_right' : 'standard');
+          setSelectedIds(processedElements.map(e => e.id));
+          setActiveTab('editor');
+          setToastMessage(`Layout do Miolo (Frente / Página Direita) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        }
+        break;
+      }
+
+      case 'new_intro': {
+        if (metadata.batchPages && metadata.batchPages.length > 0) {
+          const newPages: IntroPage[] = [];
+          for (let i = 0; i < metadata.batchPages.length; i++) {
+            const bp = metadata.batchPages[i];
+            let bpBgUrl = bp.backgroundImage;
+            if (bpBgUrl && bpBgUrl.startsWith('data:image/')) {
+              try {
+                bpBgUrl = await ImageManager.registerImage(bpBgUrl);
+              } catch (e) {}
+            }
+            const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+              id: `bg-intro-${Date.now()}-${i}`,
+              name: `Fundo ${bp.pageName}`,
+              type: 'image',
+              image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+              opacity: 1,
+              showOnIntroPages: true
+            } : undefined;
+
+            let processedBpElements = bp.elements;
+            try {
+              processedBpElements = await ImageManager.migrateConfigImages(bp.elements);
+            } catch (e) {}
+
+            newPages.push({
+              id: `pdf-intro-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`,
+              name: bp.pageName || `Página Inicial ${bp.pageNumber}`,
+              elements: processedBpElements,
+              background: bpBg
+            });
+          }
+
+          setConfig(prev => ({
+            ...prev,
+            ...dimensionUpdates,
+            introPages: [...(prev.introPages || []), ...newPages]
+          }));
+          setEditMode('intro');
+          if (newPages.length > 0) {
+            setCurrentIntroPageId(newPages[0].id);
+            setSelectedIds(newPages[0].elements.map(e => e.id));
+          }
+          setActiveTab('editor');
+          setToastMessage(`${newPages.length} Páginas Iniciais importadas com sucesso do PDF!${dimensionNote}`);
+          break;
+        }
+
+        const newId = `pdf-intro-${Date.now()}`;
+        const newPage: IntroPage = {
+          id: newId,
+          name: metadata.pageName || 'Página Inicial (PDF)',
+          elements: processedElements,
+          background: newBgConfig,
+        };
+        setConfig(prev => ({
+          ...prev,
+          ...dimensionUpdates,
+          introPages: [...(prev.introPages || []), newPage]
+        }));
+        setEditMode('intro');
+        setCurrentIntroPageId(newId);
+        setSelectedIds(processedElements.map(e => e.id));
+        setActiveTab('editor');
+        setToastMessage(`Nova Página Inicial "${newPage.name}" criada com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        break;
+      }
+
+      case 'new_monthly_intro': {
+        if (metadata.batchPages && metadata.batchPages.length > 0) {
+          const newPages: IntroPage[] = [];
+          for (let i = 0; i < metadata.batchPages.length; i++) {
+            const bp = metadata.batchPages[i];
+            let bpBgUrl = bp.backgroundImage;
+            if (bpBgUrl && bpBgUrl.startsWith('data:image/')) {
+              try {
+                bpBgUrl = await ImageManager.registerImage(bpBgUrl);
+              } catch (e) {}
+            }
+            const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+              id: `bg-monthly-${Date.now()}-${i}`,
+              name: `Fundo ${bp.pageName}`,
+              type: 'image',
+              image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+              opacity: 1,
+              showOnIntroPages: true
+            } : undefined;
+
+            let processedBpElements = bp.elements;
+            try {
+              processedBpElements = await ImageManager.migrateConfigImages(bp.elements);
+            } catch (e) {}
+
+            newPages.push({
+              id: `pdf-monthly-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`,
+              name: bp.pageName || `Abertura Mensal ${bp.pageNumber}`,
+              elements: processedBpElements,
+              background: bpBg
+            });
+          }
+
+          setConfig(prev => ({
+            ...prev,
+            ...dimensionUpdates,
+            monthlyIntroPages: [...(prev.monthlyIntroPages || []), ...newPages]
+          }));
+          setEditMode('monthly_intro');
+          if (newPages.length > 0) {
+            setCurrentMonthlyIntroPageId(newPages[0].id);
+            setSelectedIds(newPages[0].elements.map(e => e.id));
+          }
+          setActiveTab('editor');
+          setToastMessage(`${newPages.length} Páginas Mensais importadas com sucesso do PDF!${dimensionNote}`);
+          break;
+        }
+
+        const newId = `pdf-monthly-${Date.now()}`;
+        const newPage: IntroPage = {
+          id: newId,
+          name: metadata.pageName || 'Abertura Mensal (PDF)',
+          elements: processedElements,
+          background: newBgConfig,
+        };
+        setConfig(prev => ({
+          ...prev,
+          ...dimensionUpdates,
+          monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage]
+        }));
+        setEditMode('monthly_intro');
+        setCurrentMonthlyIntroPageId(newId);
+        setSelectedIds(processedElements.map(e => e.id));
+        setActiveTab('editor');
+        setToastMessage(`Nova Abertura Mensal "${newPage.name}" criada com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        break;
+      }
+
+      case 'divider':
+      case 'divider_verso': {
+        if (metadata.batchPages && metadata.batchPages.length > 0) {
+          let frontElements: LayoutElement[] | undefined = undefined;
+          let frontBg: BackgroundConfig | undefined = undefined;
+          let versoElements: LayoutElement[] | undefined = undefined;
+          let versoBg: BackgroundConfig | undefined = undefined;
+
+          for (const bp of metadata.batchPages) {
+            let bpBgUrl = bp.backgroundImage;
+            if (bpBgUrl && bpBgUrl.startsWith('data:image/')) {
+              try {
+                bpBgUrl = await ImageManager.registerImage(bpBgUrl);
+              } catch (e) {}
+            }
+            const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+              id: `bg-div-${Date.now()}-${bp.pageNumber}`,
+              name: `Fundo Divisória Pág ${bp.pageNumber}`,
+              type: 'image',
+              image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+              opacity: 1
+            } : undefined;
+
+            let processedBp = bp.elements;
+            try {
+              processedBp = await ImageManager.migrateConfigImages(bp.elements);
+            } catch (e) {}
+
+            if (bp.isDividerVerso || bp.destination === 'divider_verso') {
+              versoElements = processedBp;
+              versoBg = bpBg;
+            } else {
+              frontElements = processedBp;
+              frontBg = bpBg;
+            }
+          }
+
+          setConfig(prev => ({
+            ...prev,
+            ...dimensionUpdates,
+            includeMonthlyDividers: true,
+            monthlyDividerStyle: {
+              ...(prev.monthlyDividerStyle || {}),
+              layout: 'custom',
+              elements: frontElements !== undefined ? frontElements : (destination === 'divider' ? processedElements : prev.monthlyDividerStyle?.elements),
+              background: frontBg !== undefined ? frontBg : (destination === 'divider' && newBgConfig ? newBgConfig : prev.monthlyDividerStyle?.background),
+              versoElements: versoElements !== undefined ? versoElements : (destination === 'divider_verso' ? processedElements : prev.monthlyDividerStyle?.versoElements),
+              versoBackground: versoBg !== undefined ? versoBg : (destination === 'divider_verso' && newBgConfig ? newBgConfig : prev.monthlyDividerStyle?.versoBackground)
+            }
+          }));
+
+          setEditMode('divider');
+          setDividerViewMode(frontElements !== undefined ? 'front' : 'verso');
+          if (frontElements) setSelectedIds(frontElements.map(e => e.id));
+          else if (versoElements) setSelectedIds(versoElements.map(e => e.id));
+          setActiveTab('editor');
+
+          const parts = [];
+          if (frontElements) parts.push('Frente (Capa)');
+          if (versoElements) parts.push('Verso');
+          setToastMessage(`Divisória Mensal atualizada com ${parts.join(' e ')} a partir do PDF!${dimensionNote}`);
+          break;
+        }
+
+        if (destination === 'divider') {
+          setConfig(prev => ({
+            ...prev,
+            ...dimensionUpdates,
+            includeMonthlyDividers: true,
+            monthlyDividerStyle: {
+              ...(prev.monthlyDividerStyle || {}),
+              layout: 'custom',
+              elements: processedElements,
+              background: newBgConfig || (metadata.clearBackground ? undefined : prev.monthlyDividerStyle?.background)
+            }
+          }));
+          setEditMode('divider');
+          setDividerViewMode('front');
+          setSelectedIds(processedElements.map(e => e.id));
+          setActiveTab('editor');
+          setToastMessage(`Layout da Frente (Capa) da Divisória atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        } else {
+          setConfig(prev => ({
+            ...prev,
+            ...dimensionUpdates,
+            includeMonthlyDividers: true,
+            monthlyDividerStyle: {
+              ...(prev.monthlyDividerStyle || {}),
+              versoElements: processedElements,
+              versoBackground: newBgConfig || (metadata.clearBackground ? undefined : prev.monthlyDividerStyle?.versoBackground)
+            }
+          }));
+          setEditMode('divider');
+          setDividerViewMode('verso');
+          setSelectedIds(processedElements.map(e => e.id));
+          setActiveTab('editor');
+          setToastMessage(`Layout do Verso da Divisória atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+        }
+        break;
+      }
+
+      case 'save_template': {
+        if (metadata.batchPages && metadata.batchPages.length > 0) {
+          const newTemplates: IntroPage[] = [];
+          for (let i = 0; i < metadata.batchPages.length; i++) {
+            const bp = metadata.batchPages[i];
+            let bpBgUrl = bp.backgroundImage;
+            if (bpBgUrl && bpBgUrl.startsWith('data:image/')) {
+              try {
+                bpBgUrl = await ImageManager.registerImage(bpBgUrl);
+              } catch (e) {}
+            }
+            const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+              id: `bg-tmpl-${Date.now()}-${i}`,
+              name: `Fundo ${bp.pageName}`,
+              type: 'image',
+              image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+              opacity: 1
+            } : undefined;
+
+            let processedBp = bp.elements;
+            try {
+              processedBp = await ImageManager.migrateConfigImages(bp.elements);
+            } catch (e) {}
+
+            newTemplates.push({
+              id: 'custom-pdf-' + Date.now() + '-' + i + '-' + Math.random().toString(36).substr(2, 6),
+              name: bp.pageName || `Modelo PDF Pág ${bp.pageNumber}`,
+              elements: processedBp,
+              background: bpBg
+            });
+          }
+          const updated = [...customTemplates, ...newTemplates];
+          setCustomTemplates(updated);
+          try {
+            localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+          } catch (e) {
+            console.error('Erro ao salvar templates em localStorage:', e);
+          }
+          if (Object.keys(dimensionUpdates).length > 0) {
+            setConfig(prev => ({ ...prev, ...dimensionUpdates }));
+          }
+          setTemplateCategory('custom');
+          setTemplateModal(true);
+          setToastMessage(`${newTemplates.length} modelos salvos na sua Biblioteca de Modelos!${dimensionNote}`);
+          break;
+        }
+
+        const newTemplate: IntroPage = {
+          id: 'custom-pdf-' + Math.random().toString(36).substr(2, 9),
+          name: metadata.pageName || 'Modelo Importado PDF',
+          elements: processedElements,
+          background: newBgConfig,
+        };
+        const updated = [...customTemplates, newTemplate];
+        setCustomTemplates(updated);
+        try {
+          localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+        } catch (e) {
+          console.error('Erro ao salvar template em localStorage:', e);
+        }
+        if (Object.keys(dimensionUpdates).length > 0) {
+          setConfig(prev => ({ ...prev, ...dimensionUpdates }));
+        }
+        setTemplateCategory('custom');
+        setTemplateModal(true);
+        setToastMessage(`Modelo "${newTemplate.name}" salvo na sua Biblioteca de Modelos!${dimensionNote}`);
+        break;
+      }
+
+      case 'replace': {
+        updateActiveElements(() => processedElements);
+        if (Object.keys(dimensionUpdates).length > 0) {
+          setConfig(prev => ({ ...prev, ...dimensionUpdates }));
+        }
+        if (newBgConfig) {
+          if (editMode === 'daily') {
+            setConfig(prev => {
+              const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+              const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+              miolo.default = newBgConfig;
+              currentRules.miolo = miolo;
+              currentRules.global = newBgConfig;
+              return { ...prev, background: newBgConfig, backgroundRules: currentRules };
+            });
+          } else if (editMode === 'intro' && currentIntroPageId) {
+            setConfig(prev => ({
+              ...prev,
+              introPages: prev.introPages.map(p => p.id === currentIntroPageId ? { ...p, background: newBgConfig } : p)
+            }));
+          } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
+            setConfig(prev => ({
+              ...prev,
+              monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId ? { ...p, background: newBgConfig } : p)
+            }));
+          } else if (editMode === 'divider') {
+            setConfig(prev => ({
+              ...prev,
+              monthlyDividerStyle: {
+                ...(prev.monthlyDividerStyle || {}),
+                layout: 'custom',
+                background: dividerViewMode === 'verso' ? prev.monthlyDividerStyle?.background : newBgConfig,
+                versoBackground: dividerViewMode === 'verso' ? newBgConfig : prev.monthlyDividerStyle?.versoBackground
+              }
+            }));
+          }
+        } else if (metadata.clearBackground) {
+          if (editMode === 'daily') {
+            setConfig(prev => {
+              const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+              if (currentRules.miolo) delete currentRules.miolo.default;
+              delete currentRules.global;
+              return { ...prev, background: undefined, backgroundRules: currentRules };
+            });
+          } else if (editMode === 'intro' && currentIntroPageId) {
+            setConfig(prev => ({
+              ...prev,
+              introPages: prev.introPages.map(p => p.id === currentIntroPageId ? { ...p, background: undefined } : p)
+            }));
+          } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
+            setConfig(prev => ({
+              ...prev,
+              monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId ? { ...p, background: undefined } : p)
+            }));
+          } else if (editMode === 'divider') {
+            setConfig(prev => ({
+              ...prev,
+              monthlyDividerStyle: {
+                ...(prev.monthlyDividerStyle || {}),
+                background: dividerViewMode === 'verso' ? prev.monthlyDividerStyle?.background : undefined,
+                versoBackground: dividerViewMode === 'verso' ? undefined : prev.monthlyDividerStyle?.versoBackground
+              }
+            }));
+          }
+        }
+        setSelectedIds(importedElements.map(e => e.id));
+        setActiveTab('editor');
+        setToastMessage(`Página atual atualizada com ${importedElements.length} elementos editáveis!${dimensionNote}`);
+        break;
+      }
+
+      case 'append': {
+        updateActiveElements(prev => [...prev, ...importedElements]);
+        if (Object.keys(dimensionUpdates).length > 0) {
+          setConfig(prev => ({ ...prev, ...dimensionUpdates }));
+        }
+        if (newBgConfig) {
+          if (editMode === 'daily') {
+            setConfig(prev => {
+              const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+              const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+              miolo.default = newBgConfig;
+              currentRules.miolo = miolo;
+              currentRules.global = newBgConfig;
+              return { ...prev, background: newBgConfig, backgroundRules: currentRules };
+            });
+          } else if (editMode === 'intro' && currentIntroPageId) {
+            setConfig(prev => ({
+              ...prev,
+              introPages: prev.introPages.map(p => p.id === currentIntroPageId ? { ...p, background: newBgConfig } : p)
+            }));
+          } else if (editMode === 'monthly_intro' && currentMonthlyIntroPageId) {
+            setConfig(prev => ({
+              ...prev,
+              monthlyIntroPages: (prev.monthlyIntroPages || []).map(p => p.id === currentMonthlyIntroPageId ? { ...p, background: newBgConfig } : p)
+            }));
+          } else if (editMode === 'divider') {
+            setConfig(prev => ({
+              ...prev,
+              monthlyDividerStyle: {
+                ...(prev.monthlyDividerStyle || {}),
+                layout: 'custom',
+                background: dividerViewMode === 'verso' ? prev.monthlyDividerStyle?.background : newBgConfig,
+                versoBackground: dividerViewMode === 'verso' ? newBgConfig : prev.monthlyDividerStyle?.versoBackground
+              }
+            }));
+          }
+        }
+        setSelectedIds(importedElements.map(e => e.id));
+        setActiveTab('editor');
+        setToastMessage(`${importedElements.length} elementos adicionados à página atual!${dimensionNote}`);
+        break;
+      }
+    }
+  }, [pushHistory, updateActiveElements, editMode, currentIntroPageId, currentMonthlyIntroPageId, dividerViewMode, customTemplates, config.layoutType]);
 
   const renameIntroPage = (id: string, name: string) => {
       setConfig(prev => ({
@@ -2772,13 +4470,341 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
        });
   };
 
-  const generateHolidayListText = () => {
-      const holidays = generatedData.filter(d => d.holiday).sort((a,b) => a.date.getTime() - b.date.getTime());
-      return holidays.map(h => {
-          const day = String(h.dayOfMonth).padStart(2, '0');
-          const month = String(h.month + 1).padStart(2, '0');
-          return `${day}/${month} - ${h.holiday}`;
-      }).join('\n');
+  const generateHolidayListText = (
+      targetYear?: number,
+      format: HolidayDateFormat = 'full_written',
+      options: { includeOptional?: boolean; includeEaster?: boolean; includeMunicipal?: boolean; padDay?: boolean } = {}
+  ) => {
+      const yearToUse = targetYear || config.year || new Date().getFullYear();
+      return generateHolidayListFullText(yearToUse, {
+          format,
+          includeOptional: options.includeOptional !== false,
+          includeEaster: options.includeEaster !== false,
+          municipalHolidays: options.includeMunicipal !== false ? config.municipalHolidays : undefined,
+          padDay: options.padDay !== false
+      });
+  };
+
+  const insertHolidayListWithCalendar = (
+      calendarId?: string,
+      options: { autoLayout?: boolean; format?: HolidayDateFormat; columns?: number; preserveContent?: boolean; calendarHeight?: number; createCalendarIfMissing?: boolean } = {}
+  ) => {
+      pushHistory();
+      const currentElements = getActiveElements();
+      let calendarEl = calendarId 
+          ? currentElements.find(el => el.id === calendarId)
+          : currentElements.find(el => el.type === 'full_calendar');
+
+      const calYear = calendarEl?.style?.yearOffset 
+          ? (config.year + (calendarEl.style.yearOffset || 0)) 
+          : (config.year || new Date().getFullYear());
+
+      const chosenFormat: HolidayDateFormat = options.format || 'full_written';
+      const chosenColumns = options.columns || 2;
+      const autoLayout = options.autoLayout ?? true;
+      const targetCalH = options.calendarHeight || 58;
+      const targetCalY = 11;
+
+      let updatedElements = [...currentElements];
+      const existingTitleEl = updatedElements.find(
+          el => el.type === 'text' && (el.y < 18 || /CALEND[ÁA]RIO/i.test(el.content || '') || /CALEND[ÁA]RIO/i.test(el.name || ''))
+      );
+
+      // Se não houver título do calendário na página e foi solicitado autoLayout / criar calendário
+      if (!existingTitleEl && (options.createCalendarIfMissing || autoLayout)) {
+          updatedElements.push({
+              id: Math.random().toString(36).substr(2, 9),
+              type: 'text',
+              name: `Título Calendário ${calYear}`,
+              content: `CALENDÁRIO ${calYear}`,
+              x: 10,
+              y: 3.5,
+              w: 80,
+              h: 5.5,
+              zIndex: 2,
+              style: {
+                  fontSize: 18,
+                  fontWeight: 'bold',
+                  textAlign: 'center',
+                  verticalAlign: 'middle',
+                  fontFamily: 'Inter',
+                  color: '#111827',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0,
+                  lineHeight: 1.2
+              }
+          });
+      } else if (existingTitleEl && autoLayout) {
+          updatedElements = updatedElements.map(el => {
+              if (el.id === existingTitleEl.id) {
+                  const updatedContent = typeof el.content === 'string' && /CALEND[ÁA]RIO\s*\d{4}/i.test(el.content)
+                      ? el.content.replace(/\d{4}/, String(calYear))
+                      : el.content;
+                  return {
+                      ...el,
+                      content: updatedContent,
+                      x: 10,
+                      y: 3.5,
+                      w: 80,
+                      h: 5.5,
+                      zIndex: Math.max(el.zIndex || 1, 2),
+                      style: {
+                          ...el.style,
+                          fontSize: Math.min(typeof el.style?.fontSize === 'number' ? el.style.fontSize : 18, 18),
+                          textAlign: 'center',
+                          verticalAlign: 'middle',
+                          lineHeight: 1.2
+                      }
+                  };
+              }
+              return el;
+          });
+      }
+
+      // Se não houver calendário anual na página e foi solicitado criar (ou inserir calendário por extenso completo)
+      if (!calendarEl && (options.createCalendarIfMissing || autoLayout)) {
+          const baseCalStyle = config.customCalendarStyle || defaultCalendarStyle;
+          const newCalId = Math.random().toString(36).substr(2, 9);
+          const createdCal: LayoutElement = {
+              id: newCalId,
+              type: 'full_calendar',
+              name: `Calendário ${calYear}`,
+              x: 5,
+              y: targetCalY,
+              w: 90,
+              h: targetCalH,
+              zIndex: 1,
+              style: {
+                  borderWidth: 0,
+                  monthsPerRow: 3,
+                  gap: 8,
+                  nameFormat: 'full',
+                  fullCalendar: {
+                      ...baseCalStyle,
+                      monthFormat: 'full',
+                      title: { ...(baseCalStyle.title || {}), fontSize: 7.5, letterSpacing: 0 },
+                      weekDays: { ...(baseCalStyle.weekDays || {}), fontSize: 5.5 },
+                      days: { ...(baseCalStyle.days || {}), fontSize: 6.5 },
+                      specialDays: {
+                          ...(baseCalStyle.specialDays || {}),
+                          highlightSundays: true,
+                          highlightHolidays: true,
+                          style: {
+                              ...(baseCalStyle.specialDays?.style || {}),
+                              fontSize: 6.5,
+                              color: baseCalStyle.specialDays?.style?.color || '#dc2626',
+                              fontWeight: 'bold'
+                          }
+                      }
+                  }
+              }
+          };
+          updatedElements.push(createdCal);
+          calendarEl = createdCal;
+      } else if (autoLayout && calendarEl) {
+          updatedElements = updatedElements.map(el => {
+              if (el.id === calendarEl!.id) {
+                  const currentFullCal: any = el.style.fullCalendar || {};
+                  const scaleRatio = Math.max(0.75, Math.min(1.15, targetCalH / 58));
+                  return {
+                      ...el,
+                      x: 5,
+                      y: targetCalY,
+                      w: 90,
+                      h: targetCalH,
+                      style: {
+                          ...el.style,
+                          monthsPerRow: el.style.monthsPerRow || 3,
+                          gap: Math.max(4, Math.min(el.style.gap ?? 8, Math.round(8 * scaleRatio))),
+                          nameFormat: el.style.nameFormat || 'full',
+                          fullCalendar: {
+                              ...currentFullCal,
+                              monthFormat: currentFullCal.monthFormat || el.style.nameFormat || 'full',
+                              title: {
+                                  ...currentFullCal.title,
+                                  fontSize: Math.min(currentFullCal.title?.fontSize ?? 7.5, Number((8 * scaleRatio).toFixed(1))),
+                                  letterSpacing: 0
+                              },
+                              weekDays: {
+                                  ...currentFullCal.weekDays,
+                                  fontSize: Math.min(currentFullCal.weekDays?.fontSize ?? 5.5, Number((6 * scaleRatio).toFixed(1)))
+                              },
+                              days: {
+                                  ...currentFullCal.days,
+                                  fontSize: Math.min(currentFullCal.days?.fontSize ?? 6.5, Number((7 * scaleRatio).toFixed(1)))
+                              }
+                          }
+                      }
+                  };
+              }
+              return el;
+          });
+      }
+
+      const existingHolidayEl = updatedElements.find(el => el.type === 'holiday_list');
+      const holidayY = autoLayout ? Math.min(82, targetCalY + targetCalH + 2) : (calendarEl ? Math.min(76, calendarEl.y + calendarEl.h + 2) : 72);
+      const holidayH = autoLayout ? Math.max(14, 96 - holidayY) : 24;
+
+      let targetHolidayId = '';
+      if (existingHolidayEl) {
+          targetHolidayId = existingHolidayEl.id;
+          const newText = (options.preserveContent && existingHolidayEl.content)
+              ? existingHolidayEl.content
+              : generateHolidayListText(calYear, chosenFormat, {
+                  includeOptional: existingHolidayEl.style?.includeOptional ?? true,
+                  includeEaster: existingHolidayEl.style?.includeEaster ?? true,
+                  includeMunicipal: existingHolidayEl.style?.includeMunicipal ?? true
+              });
+          updatedElements = updatedElements.map(el => {
+              if (el.id === existingHolidayEl.id) {
+                  return {
+                      ...el,
+                      content: newText,
+                      x: autoLayout ? 5 : el.x,
+                      y: autoLayout ? holidayY : el.y,
+                      w: autoLayout ? 90 : el.w,
+                      h: autoLayout ? holidayH : el.h,
+                      style: {
+                          ...el.style,
+                          columnCount: chosenColumns,
+                          columnGap: el.style.columnGap || 24,
+                          holidayFormat: chosenFormat
+                      }
+                  };
+              }
+              return el;
+          });
+      } else {
+          targetHolidayId = Math.random().toString(36).substr(2, 9);
+          const holidayContent = generateHolidayListText(calYear, chosenFormat, {
+              includeOptional: true,
+              includeEaster: true,
+              includeMunicipal: true
+          });
+
+          const newHolidayEl: LayoutElement = {
+              id: targetHolidayId,
+              type: 'holiday_list',
+              name: 'Lista de Feriados',
+              content: holidayContent,
+              x: 5,
+              y: holidayY,
+              w: 90,
+              h: holidayH,
+              zIndex: 2,
+              style: {
+                  fontSize: 7.5,
+                  fontFamily: calendarEl?.style?.fullCalendar?.title?.fontFamily || 'Inter',
+                  fontWeight: 'normal',
+                  color: '#374151',
+                  textAlign: 'left',
+                  lineHeight: 1.4,
+                  columnCount: chosenColumns,
+                  columnGap: 24,
+                  holidayFormat: chosenFormat,
+                  includeOptional: true,
+                  includeEaster: true,
+                  includeMunicipal: true
+              }
+          };
+          updatedElements.push(newHolidayEl);
+      }
+
+      updateActiveElements(() => updatedElements);
+      setSelectedIds([calendarEl ? calendarEl.id : targetHolidayId]);
+  };
+
+  const resizeCalendarAndHolidayLayout = (newCalHeight: number, calendarId?: string) => {
+      const clampedH = Math.max(38, Math.min(76, Math.round(newCalHeight)));
+      const currentElements = getActiveElements();
+      const calendarEl = calendarId
+          ? currentElements.find(el => el.id === calendarId)
+          : currentElements.find(el => el.type === 'full_calendar');
+      if (!calendarEl) return;
+
+      const calY = calendarEl.y || 11;
+      const newHolidayY = Math.min(84, calY + clampedH + 2);
+      const newHolidayH = Math.max(12, 96 - newHolidayY);
+      const scaleRatio = Math.max(0.7, Math.min(1.2, clampedH / 58));
+
+      updateActiveElements(prev => prev.map(el => {
+          if (el.id === calendarEl.id) {
+              const currentFullCal: any = el.style.fullCalendar || {};
+              return {
+                  ...el,
+                  h: clampedH,
+                  style: {
+                      ...el.style,
+                      gap: Math.max(3, Math.round(8 * scaleRatio)),
+                      fullCalendar: {
+                          ...currentFullCal,
+                          title: {
+                              ...currentFullCal.title,
+                              fontSize: Number((7.5 * scaleRatio).toFixed(1))
+                          },
+                          weekDays: {
+                              ...currentFullCal.weekDays,
+                              fontSize: Number((5.5 * scaleRatio).toFixed(1))
+                          },
+                          days: {
+                              ...currentFullCal.days,
+                              fontSize: Number((6.5 * scaleRatio).toFixed(1))
+                          }
+                      }
+                  }
+              };
+          }
+          if (el.type === 'holiday_list') {
+              return {
+                  ...el,
+                  y: newHolidayY,
+                  h: newHolidayH
+              };
+          }
+          return el;
+      }));
+  };
+
+  const removeHolidayListAndRestoreCalendar = (holidayId?: string) => {
+      pushHistory();
+      const currentElements = getActiveElements();
+      const holidayEl = holidayId ? currentElements.find(el => el.id === holidayId) : currentElements.find(el => el.type === 'holiday_list');
+      const calendarEl = currentElements.find(el => el.type === 'full_calendar');
+      
+      let updatedElements = currentElements.filter(el => el.id !== holidayEl?.id);
+      if (calendarEl) {
+          updatedElements = updatedElements.map(el => {
+              if (el.id === calendarEl.id) {
+                  return {
+                      ...el,
+                      y: 12,
+                      h: 76,
+                      style: {
+                          ...el.style,
+                          gap: 8
+                      }
+                  };
+              }
+              if (el.type === 'text' && (el.y < 18 || /CALEND[ÁA]RIO/i.test(el.content || ''))) {
+                  return {
+                      ...el,
+                      x: 10,
+                      y: 4,
+                      w: 80,
+                      h: 6,
+                      style: {
+                          ...el.style,
+                          textAlign: 'center',
+                          verticalAlign: 'middle',
+                          lineHeight: 1.2
+                      }
+                  };
+              }
+              return el;
+          });
+      }
+      updateActiveElements(() => updatedElements);
+      if (calendarEl) setSelectedIds([calendarEl.id]);
   };
 
   const handleScrollToMonth = (monthIndex: number) => {
@@ -2858,8 +4884,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (type === 'lines') { newElement.w = 80; newElement.h = 40; newElement.x = 10; newElement.style.borderWidth = 0.5; }
         if (type === 'box') { newElement.w = 30; newElement.h = 15; newElement.style.backgroundColor = '#f3f4f6'; newElement.style.borderWidth = 0; }
         if (type === 'circle') { 
-            newElement.w = 10; 
-            newElement.h = 10 * (PAGE_WIDTH_MM / PAGE_HEIGHT_MM); 
+            const usableW_MM = Math.max(1, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
+            const usableH_MM = Math.max(1, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+            const sizeMM = 25; // 25mm círculo perfeito
+            newElement.w = Number(((sizeMM / usableW_MM) * 100).toFixed(2)); 
+            newElement.h = Number(((sizeMM / usableH_MM) * 100).toFixed(2)); 
             newElement.style.backgroundColor = '#e0e7ff'; 
             newElement.style.borderRadius = 999; 
             newElement.style.borderWidth = 0; 
@@ -2897,7 +4926,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (type === 'text') { newElement.w = 40; newElement.h = 8; newElement.style.fontSize = 16; newElement.style.borderWidth = 0; }
         if (type === 'holiday') { newElement.w = 50; newElement.h = 6; newElement.style.fontSize = 11; newElement.style.color = '#ef4444'; newElement.style.borderWidth = 0; newElement.style.fontWeight = '500'; }
         if (type === 'moon') { newElement.w = 20; newElement.h = 5; newElement.style.fontSize = 12; newElement.style.color = '#6b7280'; newElement.style.borderWidth = 0; }
-        if (type === 'icon') { newElement.w = 5; newElement.h = 5 * (PAGE_WIDTH_MM / PAGE_HEIGHT_MM); newElement.style.borderWidth = 0; }
+        if (type === 'icon') { 
+            const usableW_MM = Math.max(1, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
+            const usableH_MM = Math.max(1, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+            const sizeMM = 12; // 12mm ícone quadrado
+            newElement.w = Number(((sizeMM / usableW_MM) * 100).toFixed(2)); 
+            newElement.h = Number(((sizeMM / usableH_MM) * 100).toFixed(2)); 
+            newElement.style.borderWidth = 0; 
+        }
         if (type === 'verse') { 
             newElement.w = 80; newElement.h = 10; newElement.x = 10; 
             newElement.style.fontSize = 11; 
@@ -2920,33 +4956,106 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newElement.style.habitShowLabel = true;
             newElement.style.habitLabel = 'Hábitos';
         }
+        if (type === 'footer_tracker') {
+            const ft = (styleOverride as any)?.footerTracker || {
+                mode: 'single',
+                trackerType: 'water',
+                iconVariant: 'glass',
+                itemCount: 8,
+                itemSize: 20,
+                spacing: 5,
+                strokeColor: '#2563eb',
+                fillColor: 'transparent',
+                strokeWidth: 1.2,
+                showLabel: true,
+                label: 'Água',
+                labelPosition: 'left'
+            };
+            newElement.name = ft.label ? `Rodapé - ${ft.label}` : 'Rodapé';
+            newElement.w = sizeOverride.w || (ft.mode === 'composite' ? 76 : 46);
+            newElement.h = sizeOverride.h || 6.8;
+            newElement.x = (100 - newElement.w) / 2;
+            newElement.y = 88;
+            newElement.style.borderWidth = 0;
+            newElement.style.color = ft.strokeColor || '#2563eb';
+            newElement.style.footerTracker = ft;
+        }
         if (type === 'note_grid') { newElement.w = 40; newElement.h = 20; newElement.style.opacity = 0.5; newElement.style.borderWidth = 0; }
         
         if (type === 'mini_calendar') { 
-            newElement.w = 25; newElement.h = 18; 
+            const usableW_MM = PAGE_WIDTH_MM - config.margins.inside - config.margins.outside;
+            const usableH_MM = PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom;
+            const sizeMM = 35; // Proporção quadrada: 35mm x 35mm
+            newElement.w = Number(((sizeMM / Math.max(1, usableW_MM)) * 100).toFixed(2)); 
+            newElement.h = Number(((sizeMM / Math.max(1, usableH_MM)) * 100).toFixed(2)); 
             newElement.style.calendarOffset = 0;
             newElement.style.borderWidth = 0;
-            newElement.style.useGlobalStyle = true;
-            newElement.style.fullCalendar = {} as any; // Start empty to allow sync to work as base
+            newElement.style.useGlobalStyle = false;
+            newElement.style.fullCalendar = {
+                title: { fontSize: 8.5, fontFamily: 'Inter', fontWeight: 'bold', color: '#111827', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5, backgroundColor: 'transparent' },
+                weekDays: { fontSize: 6.5, fontFamily: 'Inter', fontWeight: 'bold', color: '#6b7280', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0, backgroundColor: 'transparent' },
+                days: { fontSize: 7.5, fontFamily: 'Inter', fontWeight: 'normal', color: '#374151', textAlign: 'center', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' },
+                monthFormat: 'full',
+                grid: { 
+                    borderColor: '#e5e7eb', borderWidth: 0.5, cellBackgroundColor: 'transparent', headerBackgroundColor: 'transparent',
+                    borders: { top: false, bottom: false, left: false, right: false, insideHorizontal: false, insideVertical: false, headerSeparator: true }
+                },
+                specialDays: {
+                    highlightSundays: true,
+                    highlightHolidays: false,
+                    style: { fontSize: 7.5, fontFamily: 'Inter', fontWeight: 'bold', color: '#dc2626', textAlign: 'center', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' }
+                }
+            };
         }
         
         if (type === 'full_calendar') { 
-            newElement.w = 90; newElement.h = 80; newElement.x = 5; newElement.y = 10; 
-            newElement.style.borderWidth = 0; newElement.style.monthsPerRow = 3; newElement.style.gap = 15; 
+            newElement.w = 90; newElement.h = 76; newElement.x = 5; newElement.y = 12; 
+            newElement.style.borderWidth = 0; newElement.style.monthsPerRow = 3; newElement.style.gap = 8; 
+            const baseCalStyle = config.customCalendarStyle || defaultCalendarStyle;
             newElement.style.fullCalendar = {
-                ...defaultCalendarStyle,
-                title: { ...defaultCalendarStyle.title, fontSize: 14 },
-                weekDays: { ...defaultCalendarStyle.weekDays, fontSize: 9 },
-                days: { ...defaultCalendarStyle.days, fontSize: 10 },
-                specialDays: { ...defaultCalendarStyle.specialDays, style: { ...defaultCalendarStyle.specialDays.style, fontSize: 10, backgroundColor: '#fee2e2' } }
+                ...baseCalStyle,
+                title: { ...baseCalStyle.title, fontSize: 8, letterSpacing: 0 },
+                weekDays: { ...baseCalStyle.weekDays, fontSize: 6 },
+                days: { ...baseCalStyle.days, fontSize: 7 },
+                specialDays: { ...baseCalStyle.specialDays, style: { ...baseCalStyle.specialDays?.style, fontSize: 7, backgroundColor: baseCalStyle.specialDays?.style?.backgroundColor || 'transparent' } }
             };
         }
         
         if (type === 'holiday_list') {
-            newElement.w = 40; newElement.h = 60; newElement.x = 10; newElement.y = 10;
-            newElement.style.fontSize = 10; newElement.style.color = '#333';
-            newElement.style.columnCount = 1; // Default to 1 column
-            newElement.content = generateHolidayListText();
+            const calEl = getActiveElements().find(el => el.type === 'full_calendar');
+            if (calEl && !(styleOverride as any)?.noAutoLayout) {
+                insertHolidayListWithCalendar(calEl.id, {
+                    autoLayout: true,
+                    format: (styleOverride as any)?.holidayFormat || 'full_written',
+                    columns: (styleOverride as any)?.columnCount || 2
+                });
+                setVariantModal(null);
+                return;
+            }
+            const targetYear = calEl?.style?.yearOffset ? (config.year + (calEl.style.yearOffset || 0)) : (config.year || new Date().getFullYear());
+            const chosenFormat: HolidayDateFormat = (styleOverride as any)?.holidayFormat || 'full_written';
+
+            newElement.w = (sizeOverride as any)?.w || (styleOverride as any)?.w || 90;
+            newElement.h = (sizeOverride as any)?.h || (styleOverride as any)?.h || 24;
+            newElement.x = (styleOverride as any)?.x !== undefined ? (styleOverride as any).x : 5;
+            newElement.y = (styleOverride as any)?.y !== undefined ? (styleOverride as any).y : (calEl ? Math.min(76, calEl.y + calEl.h + 2) : 72);
+            newElement.style.fontSize = (styleOverride as any)?.fontSize || 7.5;
+            newElement.style.fontFamily = (styleOverride as any)?.fontFamily || calEl?.style?.fullCalendar?.title?.fontFamily || 'Inter';
+            newElement.style.fontWeight = (styleOverride as any)?.fontWeight || 'normal';
+            newElement.style.color = (styleOverride as any)?.color || '#374151';
+            newElement.style.textAlign = (styleOverride as any)?.textAlign || 'left';
+            newElement.style.lineHeight = (styleOverride as any)?.lineHeight || 1.4;
+            newElement.style.columnCount = (styleOverride as any)?.columnCount || 2;
+            newElement.style.columnGap = (styleOverride as any)?.columnGap || 24;
+            newElement.style.holidayFormat = chosenFormat;
+            newElement.style.includeOptional = (styleOverride as any)?.includeOptional !== false;
+            newElement.style.includeEaster = (styleOverride as any)?.includeEaster !== false;
+            newElement.style.includeMunicipal = (styleOverride as any)?.includeMunicipal !== false;
+            newElement.content = generateHolidayListText(targetYear, chosenFormat, {
+                includeOptional: newElement.style.includeOptional,
+                includeEaster: newElement.style.includeEaster,
+                includeMunicipal: newElement.style.includeMunicipal
+            });
         }
 
         if (type === 'table') {
@@ -3006,12 +5115,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         if (type === 'vector_shape') {
-            newElement.w = 15;
-            newElement.h = 15 * (PAGE_WIDTH_MM / PAGE_HEIGHT_MM);
-            newElement.style.borderWidth = 1;
-            newElement.style.borderColor = '#000000';
-            newElement.style.backgroundColor = '#e0e7ff';
-            newElement.style.shapeType = (styleOverride as any)?.shapeType || 'rectangle';
+            const targetShapeType = (styleOverride as any)?.shapeType || 'washi_tape';
+            const shapeDef = getVectorShapeById(targetShapeType);
+            const usableW_MM = Math.max(50, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
+            const usableH_MM = Math.max(50, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+            
+            const w_mm = shapeDef.defaultW_MM || 25;
+            const h_mm = shapeDef.defaultH_MM || 25;
+
+            newElement.w = Number(Math.min(90, Math.max(8, (w_mm / usableW_MM) * 100)).toFixed(2));
+            newElement.h = Number(Math.min(90, Math.max(5, (h_mm / usableH_MM) * 100)).toFixed(2));
+            newElement.style.borderWidth = (styleOverride as any)?.borderWidth !== undefined ? (styleOverride as any).borderWidth : 1;
+            newElement.style.borderColor = (styleOverride as any)?.borderColor || shapeDef.defaultStroke || '#6366f1';
+            newElement.style.backgroundColor = (styleOverride as any)?.backgroundColor || shapeDef.defaultFill || '#ede9fe';
+            newElement.style.shapeType = targetShapeType;
         }
         if (type === 'image') {
             newElement.w = 40; newElement.h = 30; newElement.x = 30; newElement.y = 35;
@@ -3020,13 +5137,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
     }
     
+    // Se o tamanho não foi explicitamente sobrescrito, auto-ajusta o quadro imediatamente a partir do conteúdo do objeto
+    if (!sizeOverride.w || !sizeOverride.h) {
+        if (type !== 'holiday_list' && type !== 'full_calendar') {
+            const fitted = computeElementFittedBounds(newElement);
+            if (fitted) {
+                if (!sizeOverride.w) newElement.w = fitted.w;
+                if (!sizeOverride.h) newElement.h = fitted.h;
+                newElement.x = fitted.x;
+                newElement.y = fitted.y;
+                newElement.style = fitted.style;
+            }
+        }
+    }
+    
     if (type === 'holiday') setConfig(prev => ({ ...prev, includeHolidays: true }));
     if (type === 'moon') setConfig(prev => ({ ...prev, includeMoonPhases: true }));
     if (type === 'quote') setConfig(prev => ({ ...prev, includeQuotes: true }));
 
-    updateActiveElements([...activeList, newElement]);
+    updateActiveElements(prevList => [...prevList, newElement]);
     setSelectedIds([newElement.id]);
     setVariantModal(null);
+
+    if (type !== 'mini_calendar' && type !== 'full_calendar' && type !== 'vector_shape' && type !== 'footer_tracker') {
+        setTimeout(() => {
+            autoFitElementToContent(newElement.id);
+        }, 40);
+    }
   };
 
   const openElementSelector = (type: ElementType, label: string) => {
@@ -3035,6 +5172,115 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       } else {
           addElement(type, label);
       }
+  };
+
+  const handleSelectVectorShape = (
+      shapeDef: VectorShapeDefinition, 
+      colorOverride?: { fill: string; stroke: string },
+      options?: { flipX?: boolean; flipY?: boolean }
+  ) => {
+      if (shapeGalleryTargetId) {
+          updateElementStyle(shapeGalleryTargetId, {
+              shapeType: shapeDef.id,
+              ...(colorOverride ? { backgroundColor: colorOverride.fill, borderColor: colorOverride.stroke } : {}),
+              ...(options?.flipX !== undefined ? { flipX: options.flipX } : {}),
+              ...(options?.flipY !== undefined ? { flipY: options.flipY } : {}),
+          });
+          setShapeGalleryTargetId(null);
+          setShapeGalleryOpen(false);
+      } else {
+          const usableW_MM = Math.max(50, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
+          const usableH_MM = Math.max(50, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+          const w_mm = shapeDef.defaultW_MM || 35;
+          const h_mm = shapeDef.defaultH_MM || 35;
+          const calcW = Number(Math.min(90, Math.max(8, (w_mm / usableW_MM) * 100)).toFixed(2));
+          const calcH = Number(Math.min(90, Math.max(5, (h_mm / usableH_MM) * 100)).toFixed(2));
+
+          addElement('vector_shape', shapeDef.name, {
+              shapeType: shapeDef.id,
+              borderColor: colorOverride?.stroke || shapeDef.defaultStroke || '#18181b',
+              backgroundColor: colorOverride?.fill || shapeDef.defaultFill || 'transparent',
+              borderWidth: shapeDef.defaultBorderWidth !== undefined ? shapeDef.defaultBorderWidth : 1.2,
+              flipX: options?.flipX || false,
+              flipY: options?.flipY || false,
+          }, { w: calcW, h: calcH });
+          setShapeGalleryOpen(false);
+      }
+  };
+
+  const handleSelectFooterTracker = (
+      preset: FooterTrackerPreset,
+      options: {
+          colorOverride?: string;
+          alignment: 'center' | 'left' | 'right';
+          showBox: boolean;
+          showLabel: boolean;
+      }
+  ) => {
+      const activeList = getActiveElements();
+      const w = preset.defaultW || 46;
+      const h = preset.defaultH || 6.5;
+
+      let x = (100 - w) / 2;
+      if (options.alignment === 'left') {
+          x = 8;
+      } else if (options.alignment === 'right') {
+          x = Math.max(0, 100 - w - 8);
+      }
+      const y = 88; // Default footer position near the bottom!
+
+      const trackerConfig: FooterTrackerConfig = {
+          ...preset.config,
+          strokeColor: options.colorOverride || preset.config.strokeColor || '#2563eb',
+          showBox: options.showBox,
+          boxBackgroundColor: options.showBox ? '#ffffff' : 'transparent',
+          boxBorderColor: options.showBox ? '#e2e8f0' : 'transparent',
+          boxBorderWidth: 1,
+          boxBorderRadius: 6,
+          boxPadding: 4,
+          showLabel: options.showLabel
+      };
+
+      const newElement: LayoutElement = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'footer_tracker',
+          name: preset.title.toLowerCase().startsWith('rodapé') ? `${preset.title} ${activeList.length + 1}` : `Rodapé - ${preset.title} ${activeList.length + 1}`,
+          x: Math.max(2, Math.min(95, x)),
+          y,
+          w,
+          h,
+          zIndex: activeList.length + 1,
+          style: {
+              fontFamily: 'Inter',
+              fontSize: 10,
+              fontWeight: '600',
+              color: trackerConfig.strokeColor || '#2563eb',
+              textAlign: options.alignment,
+              borderColor: 'transparent',
+              borderWidth: 0,
+              backgroundColor: 'transparent',
+              rotation: 0,
+              opacity: 1,
+              flipX: false,
+              flipY: false,
+              footerTracker: trackerConfig
+          }
+      };
+
+      updateActiveElements(prevList => [...prevList, newElement]);
+      setSelectedIds([newElement.id]);
+      setToastMessage(`Elemento de rodapé "${preset.title}" adicionado!`);
+  };
+
+  const quickAddFooterTracker = (trackerType: FooterTrackerType) => {
+      const preset = FOOTER_TRACKER_PRESETS.find(p => p.config.trackerType === trackerType && (!p.config.mode || p.config.mode === 'single')) 
+          || FOOTER_TRACKER_PRESETS.find(p => p.config.trackerType === trackerType) 
+          || FOOTER_TRACKER_PRESETS[0];
+      handleSelectFooterTracker(preset, {
+          alignment: 'center',
+          showBox: false,
+          showLabel: true
+      });
   };
 
   const removeElement = (id?: string) => {
@@ -3304,6 +5550,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         
         const newStyle = { ...e.style, ...styleUpdate };
         let newH = e.h;
+
+        if ((e.type === 'mini_calendar' || e.type === 'full_calendar') && styleUpdate.fullCalendar) {
+            newStyle.fullCalendar = {
+                ...(e.style.fullCalendar || {}),
+                ...styleUpdate.fullCalendar,
+                title: { ...(e.style.fullCalendar?.title || {}), ...(styleUpdate.fullCalendar.title || {}) },
+                weekDays: { ...(e.style.fullCalendar?.weekDays || {}), ...(styleUpdate.fullCalendar.weekDays || {}) },
+                days: { ...(e.style.fullCalendar?.days || {}), ...(styleUpdate.fullCalendar.days || {}) },
+                grid: { 
+                    ...(e.style.fullCalendar?.grid || {}), 
+                    ...(styleUpdate.fullCalendar.grid || {}),
+                    borders: { 
+                        ...(e.style.fullCalendar?.grid?.borders || {}), 
+                        ...(styleUpdate.fullCalendar.grid?.borders || {}) 
+                    }
+                },
+                specialDays: { 
+                    ...(e.style.fullCalendar?.specialDays || {}), 
+                    ...(styleUpdate.fullCalendar.specialDays || {}),
+                    style: { 
+                        ...(e.style.fullCalendar?.specialDays?.style || {}), 
+                        ...(styleUpdate.fullCalendar.specialDays?.style || {}) 
+                    }
+                }
+            };
+        }
         
         if (e.type === 'table') {
             if (styleUpdate.table) {
@@ -3314,30 +5586,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             } else {
                 const updatedTextStyle = { ...(e.style.table?.textStyle || {}), ...styleUpdate };
                 let newColStyles = e.style.table?.colStyles ? { ...e.style.table.colStyles } : undefined;
-                if (styleUpdate.textAlign && newColStyles) {
+                let newRowStyles = e.style.table?.rowStyles ? { ...e.style.table.rowStyles } : undefined;
+                let newCellStyles = e.style.table?.cellStyles ? { ...e.style.table.cellStyles } : undefined;
+
+                const updatedProps = Object.keys(styleUpdate);
+                if (newColStyles) {
                     const cleanedColStyles: any = {};
-                    Object.keys(newColStyles).forEach(colKey => {
-                        if (newColStyles[colKey]) {
-                            const { textAlign, ...rest } = newColStyles[colKey];
-                            cleanedColStyles[colKey] = rest;
+                    Object.keys(newColStyles).forEach(k => {
+                        if (newColStyles[k]) {
+                            const copy = { ...newColStyles[k] };
+                            updatedProps.forEach(prop => delete copy[prop]);
+                            if (Object.keys(copy).length > 0) cleanedColStyles[k] = copy;
                         }
                     });
                     newColStyles = cleanedColStyles;
                 }
-                if (styleUpdate.verticalAlign && newColStyles) {
-                    const cleanedColStyles: any = {};
-                    Object.keys(newColStyles).forEach(colKey => {
-                        if (newColStyles[colKey]) {
-                            const { verticalAlign, ...rest } = newColStyles[colKey];
-                            cleanedColStyles[colKey] = rest;
+                if (newRowStyles) {
+                    const cleanedRowStyles: any = {};
+                    Object.keys(newRowStyles).forEach(k => {
+                        if (newRowStyles[k]) {
+                            const copy = { ...newRowStyles[k] };
+                            updatedProps.forEach(prop => delete copy[prop]);
+                            if (Object.keys(copy).length > 0) cleanedRowStyles[k] = copy;
                         }
                     });
-                    newColStyles = cleanedColStyles;
+                    newRowStyles = cleanedRowStyles;
                 }
+                if (newCellStyles) {
+                    const cleanedCellStyles: any = {};
+                    Object.keys(newCellStyles).forEach(k => {
+                        if (newCellStyles[k]) {
+                            const copy = { ...newCellStyles[k] };
+                            updatedProps.forEach(prop => delete copy[prop]);
+                            if (Object.keys(copy).length > 0) cleanedCellStyles[k] = copy;
+                        }
+                    });
+                    newCellStyles = cleanedCellStyles;
+                }
+
                 newStyle.table = {
                     ...(e.style.table || {}),
                     textStyle: updatedTextStyle,
-                    ...(newColStyles ? { colStyles: newColStyles } : {})
+                    ...(newColStyles ? { colStyles: newColStyles } : {}),
+                    ...(newRowStyles ? { rowStyles: newRowStyles } : {}),
+                    ...(newCellStyles ? { cellStyles: newCellStyles } : {})
                 };
             }
         } else if (e.type === 'lines') {
@@ -3345,14 +5637,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 const startH = newStyle.startHour !== undefined ? newStyle.startHour : 7;
                 const endH = newStyle.endHour !== undefined ? newStyle.endHour : 18;
                 const intervalM = newStyle.timeInterval || 60;
+                const skipLine = newStyle.skipBlankLine || false;
                 const startMin = startH * 60;
                 const endMin = endH * 60;
                 let tCount = 0;
                 for (let min = startMin; min <= endMin; min += intervalM) {
                     tCount++;
+                    if (skipLine && min < endMin) {
+                        tCount++;
+                    }
                 }
                 const count = Math.max(1, tCount);
-                newH = ((count * newStyle.lineSpacing + 1) / currentPageHeight) * 100;
+                newH = ((count * (newStyle.lineSpacing || 24) + 1) / currentPageHeight) * 100;
             } else if (styleUpdate.lineSpacing !== undefined) {
                 const heightPx = (e.h / 100 * currentPageHeight);
                 const lineCount = Math.max(1, Math.floor((heightPx - 1) / newStyle.lineSpacing));
@@ -3369,6 +5665,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         
         return { ...e, style: newStyle, h: newH };
     }), silent);
+
+    const activeList = getActiveElements();
+    const targetElement = activeList.find(e => e.id === id);
+    const isCalendar = targetElement?.type === 'mini_calendar' || targetElement?.type === 'full_calendar';
+    const isFixedBlock = isCalendar || targetElement?.type === 'holiday_list';
+
+    const styleKeysAffectingBounds = [
+        'fontSize', 'fontFamily', 'fontWeight', 'letterSpacing', 'lineHeight', 'textTransform',
+        'variant', 'nameFormat', 'monthsPerRow', 'weekdayHeight', 'lineSpacing', 'showTimes',
+        'startHour', 'endHour', 'timeInterval', 'skipBlankLine', 'habitMarkerSize', 'habitSpacing',
+        'habitShowLabel', 'habitCount', 'gridSize', 'gridSpacing', 'simulateMaxSpace'
+    ];
+    const shouldAutoFit = !isFixedBlock && (
+        Object.keys(styleUpdate).some(k => styleKeysAffectingBounds.includes(k)) || 
+        !!styleUpdate.table || 
+        (!!styleUpdate.plannerDayBox && Object.keys(styleUpdate.plannerDayBox).some(k => styleKeysAffectingBounds.includes(k)))
+    );
+
+    if (shouldAutoFit) {
+        setTimeout(() => {
+            autoFitElementToContent(id);
+        }, 25);
+    }
   };
 
   const applyPlannerDayBoxStyleToAll = (sourceStyle: any) => {
@@ -3403,239 +5722,83 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const updateElementContent = (id: string, content: string) => {
     const activeList = getActiveElements();
     updateActiveElements(activeList.map(e => e.id === id ? { ...e, content } : e));
+    setTimeout(() => {
+        autoFitElementToContent(id);
+    }, 25);
   };
 
-  const autoFitElementToContent = (id?: string, overrideStyle?: any) => {
-    const targetIds = id ? [id] : (selectedIds.length > 0 ? selectedIds : (selectedId ? [selectedId] : []));
-    if (targetIds.length === 0) return;
-
-    const currentZoom = zoom || 1;
-    const pageWidthPx = EDITOR_WIDTH_PX || (400 * currentZoom);
-    const pageHeightPx = EDITOR_HEIGHT_PX || (PAGE_HEIGHT_MM * (pageWidthPx / PAGE_WIDTH_MM));
-
-    updateActiveElements(prevList => {
-      let hasChanges = false;
-      const updatedList = prevList.map(el => {
-        if (!targetIds.includes(el.id)) return el;
-
-        const effectiveStyle = (id && el.id === id && overrideStyle) ? { ...el.style, ...overrideStyle } : el.style;
-        const domNode = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement;
-
-        let naturalWPx = 0;
-        let naturalHPx = 0;
-
-        const isTextual = ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'text', 'verse', 'quote', 'holiday', 'holiday_list'].includes(el.type);
-
-        if (isTextual) {
-          // 1. Obter o texto exato renderizado ou simulado
-          let textToMeasure = '';
-          const currentYear = config?.year || new Date().getFullYear();
-          
-          let currentMonth = config?.startMonth ?? 0;
-          if (editMode === 'divider' || editMode === 'monthly_intro') {
-              currentMonth = typeof (config as any)?.previewMonth === 'number' ? (config as any).previewMonth : (config?.startMonth ?? 0);
-          }
-          const startDay = 1;
-          const startDate = new Date(currentYear, currentMonth, startDay);
-          const dayOfWeek = startDate.getDay();
-
-          if (!overrideStyle && domNode) {
-              const textContainers = domNode.querySelectorAll('div, span, p');
-              for (const tc of Array.from(textContainers)) {
-                  if (tc.classList.contains('no-print') || tc.closest('.no-print')) continue;
-                  const t = (tc.textContent || '').trim();
-                  if (t) {
-                      textToMeasure = t;
-                      break;
-                  }
-              }
-          }
-
-          if (!textToMeasure) {
-              const variant = effectiveStyle?.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
-              if (el.type === 'day_number' || variant === 'day_number') textToMeasure = String(startDay).padStart(2, '0');
-              else if (el.type === 'month_name' || variant === 'month_name') textToMeasure = getMonthName(currentMonth, effectiveStyle?.nameFormat);
-              else if (el.type === 'day_name' || variant === 'day_name') textToMeasure = getDayName(dayOfWeek, effectiveStyle?.nameFormat);
-              else if (el.type === 'month_number' || variant === 'month_number') textToMeasure = String(currentMonth + 1).padStart(2, '0');
-              else if (el.type === 'year' || variant === 'year') textToMeasure = String(currentYear);
-              else if (el.type === 'holiday') textToMeasure = 'Confraternização Universal';
-              else if (el.type === 'holiday_list') textToMeasure = el.content || 'Feriados Nacionais (Editável)';
-              else textToMeasure = el.content || el.name || 'Texto';
-          }
-
-          if (effectiveStyle?.simulateMaxSpace) {
-              const variant = effectiveStyle?.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
-              if (variant === 'day_name' || el.type === 'day_name') textToMeasure = 'Segunda-feira';
-              if (variant === 'month_name' || el.type === 'month_name') textToMeasure = 'Novembro';
-              if (variant === 'day_number' || el.type === 'day_number') textToMeasure = '30';
-              if (variant === 'month_number' || el.type === 'month_number') textToMeasure = '12';
-          }
-
-          const transform = effectiveStyle?.textTransform;
-          if (transform === 'uppercase') textToMeasure = textToMeasure.toUpperCase();
-          else if (transform === 'lowercase') textToMeasure = textToMeasure.toLowerCase();
-          else if (transform === 'capitalize') textToMeasure = textToMeasure.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-          else if (transform === 'sentence') textToMeasure = textToMeasure.charAt(0).toUpperCase() + textToMeasure.slice(1).toLowerCase();
-
-          // 2. Medição de altíssima precisão com Canvas 2D + Tipografia Real
-          let fontFamily = effectiveStyle?.fontFamily || 'Inter, sans-serif';
-          let fontWeight = String(effectiveStyle?.fontWeight || 'normal');
-          let fontStyle: string = effectiveStyle?.fontStyle || 'normal';
-
-          if (domNode) {
-              const textChild = domNode.querySelector('div, span, p') || domNode;
-              const computed = window.getComputedStyle(textChild);
-              if (computed.fontFamily) fontFamily = computed.fontFamily;
-              if (computed.fontWeight) fontWeight = computed.fontWeight;
-              if (computed.fontStyle) fontStyle = computed.fontStyle;
-          }
-
-          const rawFontSize = typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : parseFloat(effectiveStyle?.fontSize || '16') || 16;
-          const editorFontSizePx = rawFontSize * (pageWidthPx / 400);
-          const rawLetterSpacing = typeof effectiveStyle?.letterSpacing === 'number' ? effectiveStyle.letterSpacing : parseFloat(effectiveStyle?.letterSpacing || '0') || 0;
-          const scaledLetterSpacing = rawLetterSpacing * (pageWidthPx / 400);
-          const lineHeightMult = typeof effectiveStyle?.lineHeight === 'number' ? effectiveStyle.lineHeight : (parseFloat(String(effectiveStyle?.lineHeight || '1.2')) || 1.2);
-
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          let maxLineWidth = 0;
-          let maxAscent = 0;
-          let maxDescent = 0;
-          const lines = textToMeasure.split('\n');
-
-          if (ctx) {
-              ctx.font = `${fontStyle} ${fontWeight} ${editorFontSizePx}px ${fontFamily}`;
-              lines.forEach(lineText => {
-                  const metrics = ctx.measureText(lineText);
-                  const actualLeft = metrics.actualBoundingBoxLeft || 0;
-                  const actualRight = metrics.actualBoundingBoxRight || metrics.width;
-                  let w = Math.max(metrics.width, actualLeft + actualRight);
-                  if (scaledLetterSpacing > 0 && lineText.length > 1) {
-                      w += scaledLetterSpacing * (lineText.length - 1);
-                  }
-                  if (w > maxLineWidth) maxLineWidth = w;
-
-                  const asc = metrics.actualBoundingBoxAscent || (editorFontSizePx * 0.85);
-                  const dsc = metrics.actualBoundingBoxDescent || (editorFontSizePx * 0.25);
-                  if (asc > maxAscent) maxAscent = asc;
-                  if (dsc > maxDescent) maxDescent = dsc;
-              });
-          }
-
-          // Fallback caso canvas retorne 0
-          if (maxLineWidth <= 0) {
-              maxLineWidth = textToMeasure.length * (editorFontSizePx * 0.65);
-          }
-
-          const singleLineGlyphH = Math.max(maxAscent + maxDescent, editorFontSizePx * 1.15);
-          const totalTextHeight = lines.length > 1 ? (lines.length * editorFontSizePx * lineHeightMult) : singleLineGlyphH;
-
-          // Margem óptica refinada para abraçar o texto com perfeição sem cortes
-          const padW = Math.max(6, Math.round(10 * (pageWidthPx / 400)));
-          const padH = Math.max(4, Math.round(6 * (pageWidthPx / 400)));
-
-          naturalWPx = maxLineWidth + padW;
-          naturalHPx = totalTextHeight + padH;
-        } else if (domNode) {
-          const currentResponsiveScale = responsiveScale || 1;
-          if (el.type === 'table') {
-              const tableEl = domNode.querySelector('table');
-              if (tableEl) {
-                  naturalWPx = ((tableEl.scrollWidth + 8) / currentResponsiveScale) * (pageWidthPx / 400);
-                  naturalHPx = ((tableEl.scrollHeight + 8) / currentResponsiveScale) * (pageHeightPx / (PAGE_HEIGHT_MM * (400 / PAGE_WIDTH_MM)));
-              }
-          } else if (el.type === 'icon') {
-              const iconSz = (typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : 24) * (pageWidthPx / 400);
-              naturalWPx = iconSz + 8 * (pageWidthPx / 400);
-              naturalHPx = iconSz + 8 * (pageWidthPx / 400);
-          } else if (el.type === 'mini_calendar' || el.type === 'full_calendar') {
-              const calEl = (domNode.querySelector('table') || domNode.firstElementChild) as HTMLElement;
-              if (calEl) {
-                  naturalWPx = ((calEl.scrollWidth + 6) / currentResponsiveScale) * (pageWidthPx / 400);
-                  naturalHPx = ((calEl.scrollHeight + 6) / currentResponsiveScale) * (pageHeightPx / (PAGE_HEIGHT_MM * (400 / PAGE_WIDTH_MM)));
-              }
-          } else if (el.type === 'permanent_day_header' || el.type === 'planner_day_box' || el.type === 'habit_tracker') {
-              const innerEl = domNode.firstElementChild as HTMLElement;
-              if (innerEl) {
-                  naturalWPx = ((innerEl.scrollWidth + 4) / currentResponsiveScale) * (pageWidthPx / 400);
-                  naturalHPx = ((innerEl.scrollHeight + 4) / currentResponsiveScale) * (pageHeightPx / (PAGE_HEIGHT_MM * (400 / PAGE_WIDTH_MM)));
-              }
-          } else {
-              naturalWPx = (el.w / 100) * pageWidthPx;
-              naturalHPx = (el.h / 100) * pageHeightPx;
-          }
-        }
-
-        if (naturalWPx > 0 && naturalHPx > 0) {
-          let newW = (naturalWPx / pageWidthPx) * 100;
-          let newH = (naturalHPx / pageHeightPx) * 100;
-
-          newW = Math.min(100, Math.max(1, Math.round(newW * 10) / 10));
-          newH = Math.min(100, Math.max(0.5, Math.round(newH * 10) / 10));
-
-          // Preservar o ponto central geométrico do elemento na página
-          const centerX = el.x + el.w / 2;
-          const centerY = el.y + el.h / 2;
-
-          let newX = centerX - newW / 2;
-          let newY = centerY - newH / 2;
-
-          const rot = (effectiveStyle?.rotation || 0) % 360;
-          const normalizedRot = (rot + 360) % 360;
-
-          if (normalizedRot === 90 || normalizedRot === 270) {
-              // Para rotação de 90° e 270°, as dimensões visuais na tela são invertidas
-              const visW = newH * (PAGE_HEIGHT_MM / PAGE_WIDTH_MM);
-              const visH = newW * (PAGE_WIDTH_MM / PAGE_HEIGHT_MM);
-
-              let visX = centerX - visW / 2;
-              let visY = centerY - visH / 2;
-
-              if (visX < 0) visX = 0;
-              if (visX + visW > 100) visX = Math.max(0, 100 - visW);
-              if (visY < 0) visY = 0;
-              if (visY + visH > 100) visY = Math.max(0, 100 - visH);
-
-              const adjustedCenterX = visX + visW / 2;
-              const adjustedCenterY = visY + visH / 2;
-
-              newX = adjustedCenterX - newW / 2;
-              newY = adjustedCenterY - newH / 2;
-          } else {
-              if (newX < 0) newX = 0;
-              if (newX + newW > 100) newX = Math.max(0, 100 - newW);
-              if (newY < 0) newY = 0;
-              if (newY + newH > 100) newY = Math.max(0, 100 - newH);
-          }
-
-          newX = Math.round(newX * 10) / 10;
-          newY = Math.round(newY * 10) / 10;
-
-          hasChanges = true;
-          return { ...el, style: effectiveStyle, x: newX, y: newY, w: newW, h: newH };
-        }
-
-        return (id && el.id === id && overrideStyle) ? { ...el, style: effectiveStyle } : el;
-      });
-
-      return hasChanges ? updatedList : prevList;
-    }, true);
-  };
 
   const updateTableConfig = (id: string, tableUpdate: any) => {
       const activeList = getActiveElements();
       const element = activeList.find(e => e.id === id);
       if (!element || !element.style.table) return;
       
-      let newTableStyle = { ...element.style.table, ...tableUpdate };
-      let newH = element.h;
+      let newTableStyle = { 
+          ...element.style.table, 
+          ...tableUpdate,
+          ...(tableUpdate.textStyle ? {
+              textStyle: {
+                  ...(element.style.table.textStyle || {}),
+                  ...tableUpdate.textStyle
+              }
+          } : {})
+      };
+      let newH = tableUpdate.h !== undefined ? tableUpdate.h : element.h;
+
+      if (tableUpdate.textStyle && !tableUpdate.colStyles && !tableUpdate.rowStyles && !tableUpdate.cellStyles) {
+          const updatedProps = Object.keys(tableUpdate.textStyle);
+          if (newTableStyle.colStyles) {
+              const cleaned: any = {};
+              Object.keys(newTableStyle.colStyles).forEach(k => {
+                  if (newTableStyle.colStyles[k]) {
+                      const copy = { ...newTableStyle.colStyles[k] };
+                      updatedProps.forEach(prop => {
+                          delete copy[prop];
+                      });
+                      if (Object.keys(copy).length > 0) {
+                          cleaned[k] = copy;
+                      }
+                  }
+              });
+              newTableStyle.colStyles = cleaned;
+          }
+          if (newTableStyle.rowStyles) {
+              const cleaned: any = {};
+              Object.keys(newTableStyle.rowStyles).forEach(k => {
+                  if (newTableStyle.rowStyles[k]) {
+                      const copy = { ...newTableStyle.rowStyles[k] };
+                      updatedProps.forEach(prop => {
+                          delete copy[prop];
+                      });
+                      if (Object.keys(copy).length > 0) {
+                          cleaned[k] = copy;
+                      }
+                  }
+              });
+              newTableStyle.rowStyles = cleaned;
+          }
+          if (newTableStyle.cellStyles) {
+              const cleaned: any = {};
+              Object.keys(newTableStyle.cellStyles).forEach(k => {
+                  if (newTableStyle.cellStyles[k]) {
+                      const copy = { ...newTableStyle.cellStyles[k] };
+                      updatedProps.forEach(prop => {
+                          delete copy[prop];
+                      });
+                      if (Object.keys(copy).length > 0) {
+                          cleaned[k] = copy;
+                      }
+                  }
+              });
+              newTableStyle.cellStyles = cleaned;
+          }
+      }
 
       if (tableUpdate.rowHeights) {
           delete (newTableStyle as any).rowHeight;
       }
       
-      if (tableUpdate.cols) {
+      if (tableUpdate.cols && !tableUpdate.columnWidths) {
           const newCols = tableUpdate.cols;
           const oldCols = element.style.table.cols;
           if (newCols > oldCols) {
@@ -3649,7 +5812,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (tableUpdate.rows) {
           const newRows = tableUpdate.rows;
           const oldRows = element.style.table.rows;
-          if (newRows !== oldRows || !newTableStyle.rowHeights) {
+          if (tableUpdate.rowHeights) {
+              newTableStyle.rowHeights = tableUpdate.rowHeights;
+          } else if (newRows !== oldRows || !newTableStyle.rowHeights || newTableStyle.rowHeights.length !== newRows) {
               newTableStyle.rowHeights = Array(newRows).fill(100 / newRows);
           }
       }
@@ -3667,10 +5832,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           style: { ...element.style, table: newTableStyle } 
       };
       
-      updateActiveElements(activeList.map(e => e.id === id ? updatedElement : e));
-  }
+      updateActiveElements(prevList => prevList.map(e => e.id === id ? updatedElement : e));
+      setTimeout(() => {
+          autoFitElementToContent(id);
+      }, 30);
+  };
 
-  const applyScheduleToTable = (elementId: string, startHour: number, endHour: number, intervalMinutes: number = 60) => {
+  const applyScheduleToTable = (elementId: string, startHour: number, endHour: number, intervalMinutes: number = 60, skipLine: boolean = false) => {
+      pushHistory();
+      setActiveTableCell(null);
+
       const activeList = getActiveElements();
       const element = activeList.find(e => e.id === elementId);
       if (!element || !element.style.table) return;
@@ -3678,28 +5849,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const currentTable = element.style.table;
       const slots: string[] = [];
       
-      if (intervalMinutes === 30) {
-          for (let h = startHour; h <= endHour; h++) {
-              slots.push(`${h.toString().padStart(2, '0')}:00`);
-              if (h < endHour) {
-                  slots.push(`${h.toString().padStart(2, '0')}:30`);
-              }
-          }
-      } else {
-          for (let h = startHour; h <= endHour; h++) {
-              slots.push(`${h.toString().padStart(2, '0')}:00`);
+      let startMin = startHour * 60;
+      let endMin = endHour * 60;
+      if (endMin < startMin) {
+          endMin += 24 * 60;
+      }
+      const step = intervalMinutes > 0 ? intervalMinutes : 60;
+
+      for (let min = startMin; min <= endMin; min += step) {
+          const h = Math.floor(min / 60) % 24;
+          const m = min % 60;
+          slots.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+          if (skipLine && min < endMin) {
+              slots.push('');
           }
       }
 
       const hasHeader = currentTable.headerRow ?? true;
       const totalRows = slots.length + (hasHeader ? 1 : 0);
-      const cols = Math.max(2, currentTable.cols || 2);
+      const cols = Math.max(1, currentTable.cols || 2);
 
-      const updatedCellContent = { ...(currentTable.cellContent || {}) };
+      const updatedCellContent: Record<string, string> = { ...(currentTable.cellContent || {}) };
       
+      // Clean up all existing column 0 keys (both hyphen and underscore patterns)
+      Object.keys(updatedCellContent).forEach(k => {
+          if (k.endsWith('-0') || k.endsWith('_0')) {
+              delete updatedCellContent[k];
+          }
+      });
+
       if (hasHeader) {
-          if (!updatedCellContent['0-0']) updatedCellContent['0-0'] = 'Horário';
-          if (!updatedCellContent['0-1']) updatedCellContent['0-1'] = 'Atividade / Compromisso';
+          updatedCellContent['0-0'] = 'Horário';
+          if (cols > 1 && !updatedCellContent['0-1']) {
+              updatedCellContent['0-1'] = 'Atividade / Compromisso';
+          }
       }
 
       slots.forEach((slot, idx) => {
@@ -3707,25 +5890,62 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           updatedCellContent[`${rowIndex}-0`] = slot;
       });
 
-      let colWidths = currentTable.columnWidths ? [...currentTable.columnWidths] : [25, 75];
-      if (colWidths.length < cols) {
-          colWidths = [25, ...Array(cols - 1).fill(75 / (cols - 1))];
+      let colWidths: number[];
+      if (cols === 1) {
+          colWidths = [100];
       } else {
+          colWidths = currentTable.columnWidths && currentTable.columnWidths.length === cols 
+              ? [...currentTable.columnWidths] 
+              : [25, ...Array(cols - 1).fill(75 / (cols - 1))];
           colWidths[0] = 25;
           const restWidth = 75 / (cols - 1);
           for (let c = 1; c < cols; c++) colWidths[c] = restWidth;
       }
 
+      const col0 = { ...((currentTable.colStyles || {})[0] || {}) };
+      if (col0.textAlign === undefined && !currentTable.textStyle?.textAlign) {
+          col0.textAlign = 'center';
+      }
+      if (col0.fontWeight === undefined && !currentTable.textStyle?.fontWeight) {
+          col0.fontWeight = 'bold';
+      }
+      delete (col0 as any).fontSize;
+
+      // Adjust height if needed so rows don't collapse into unreadable slits
+      const currentPageHeight = getCurrentPageHeight();
+      const minRowHeightPx = 20;
+      const currentH = element.h || 30;
+      const currentHeightPx = (currentH / 100) * currentPageHeight;
+      const neededHeightPx = totalRows * (currentTable.rowHeight || minRowHeightPx);
+      let targetH = currentH;
+      if (currentTable.rowHeight || currentHeightPx < neededHeightPx) {
+          targetH = Math.min(95, Math.max(currentH, (neededHeightPx / currentPageHeight) * 100));
+      }
+
       updateTableConfig(elementId, {
           rows: totalRows,
           cols,
+          h: targetH,
           columnWidths: colWidths,
+          rowHeights: Array(totalRows).fill(100 / totalRows),
           cellContent: updatedCellContent,
+          scheduleConfig: {
+              startHour,
+              endHour,
+              intervalMinutes,
+              skipLine
+          },
           colStyles: {
               ...(currentTable.colStyles || {}),
-              0: { ...((currentTable.colStyles || {})[0] || {}), textAlign: 'center', fontWeight: 'bold' }
+              0: col0
           }
       });
+
+      setScheduleAppliedFeedback(true);
+      setTimeout(() => setScheduleAppliedFeedback(false), 2000);
+      setTimeout(() => {
+          autoFitElementToContent(elementId);
+      }, 35);
   };
 
   const addTableRow = (id: string, index: number, position: 'before' | 'after') => {
@@ -4054,11 +6274,136 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
   }, [config.layoutType]);
 
+  const startMarqueeSelection = useCallback((e: React.MouseEvent | MouseEvent) => {
+    // Apenas botão esquerdo
+    if (e.button !== 0) return;
+    // Se estiver no modo pan (ferramenta mão) ou barra de espaço pressionada, não fazer seleção por área
+    if (panMode || isSpacePressed) return;
+    if (marqueeDragRef.current) return;
+
+    const targetEl = e.target as HTMLElement;
+    if (isClickTargetInteractiveOrElement(targetEl)) return;
+
+    window.focus();
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const isShift = e.shiftKey;
+    const baseSelectedIds = isShift ? [...selectedIds] : [];
+
+    marqueeDragRef.current = {
+      startX,
+      startY,
+      currentX: startX,
+      currentY: startY,
+      isShift,
+      initialSelectedIds: baseSelectedIds,
+      hasDragged: false
+    };
+
+    if (!isShift) {
+      setSelectedIds([]);
+    }
+    if (contextMenu) setContextMenu(null);
+
+    const onMarqueeMouseMove = (moveEvent: MouseEvent) => {
+      if (!marqueeDragRef.current) return;
+      const drag = marqueeDragRef.current;
+      drag.currentX = moveEvent.clientX;
+      drag.currentY = moveEvent.clientY;
+
+      const dist = Math.hypot(drag.currentX - drag.startX, drag.currentY - drag.startY);
+      if (dist > 3) {
+        if (!drag.hasDragged) {
+          drag.hasDragged = true;
+          document.body.style.userSelect = 'none';
+        }
+
+        setMarqueeBox({
+          startX: drag.startX,
+          startY: drag.startY,
+          currentX: drag.currentX,
+          currentY: drag.currentY
+        });
+
+        if (editorRef.current) {
+          const editorBounds = editorRef.current.getBoundingClientRect();
+          const minScreenX = Math.min(drag.startX, drag.currentX);
+          const maxScreenX = Math.max(drag.startX, drag.currentX);
+          const minScreenY = Math.min(drag.startY, drag.currentY);
+          const maxScreenY = Math.max(drag.startY, drag.currentY);
+
+          // Converter retângulo da tela para porcentagens em relação à área útil do editor
+          const selXStart = ((minScreenX - editorBounds.left) / editorBounds.width) * 100;
+          const selXEnd = ((maxScreenX - editorBounds.left) / editorBounds.width) * 100;
+          const selYStart = ((minScreenY - editorBounds.top) / editorBounds.height) * 100;
+          const selYEnd = ((maxScreenY - editorBounds.top) / editorBounds.height) * 100;
+
+          const activeList = getActiveElements();
+          const directHits = activeList.filter(el => {
+            const elX2 = el.x + el.w;
+            const elY2 = el.y + el.h;
+            // Teste de intersecção 2D
+            return el.x < selXEnd && elX2 > selXStart && el.y < selYEnd && elY2 > selYStart;
+          });
+
+          // Suporte a grupos: selecionar todos os elementos do mesmo grupo
+          const matchedGroupIds = new Set<string>();
+          directHits.forEach(el => {
+            if (el.groupId) matchedGroupIds.add(el.groupId);
+          });
+
+          const allMatchedIds = new Set<string>();
+          directHits.forEach(el => allMatchedIds.add(el.id));
+          if (matchedGroupIds.size > 0) {
+            activeList.forEach(el => {
+              if (el.groupId && matchedGroupIds.has(el.groupId)) {
+                allMatchedIds.add(el.id);
+              }
+            });
+          }
+
+          const finalIds = drag.isShift
+            ? Array.from(new Set([...drag.initialSelectedIds, ...Array.from(allMatchedIds)]))
+            : Array.from(allMatchedIds);
+
+          setSelectedIds(finalIds);
+        }
+      }
+    };
+
+    const onMarqueeMouseUp = () => {
+      window.removeEventListener('mousemove', onMarqueeMouseMove);
+      window.removeEventListener('mouseup', onMarqueeMouseUp);
+      document.body.style.userSelect = '';
+
+      const drag = marqueeDragRef.current;
+      if (drag) {
+        if (!drag.hasDragged) {
+          // Clique simples no vazio: desseleciona se não estiver com shift
+          if (!drag.isShift) {
+            setSelectedIds([]);
+          }
+        }
+        marqueeDragRef.current = null;
+      }
+      setMarqueeBox(null);
+    };
+
+    window.addEventListener('mousemove', onMarqueeMouseMove);
+    window.addEventListener('mouseup', onMarqueeMouseUp);
+  }, [panMode, isSpacePressed, selectedIds, contextMenu, getActiveElements]);
+
+  useEffect(() => {
+    startMarqueeSelectionRef.current = startMarqueeSelection;
+  }, [startMarqueeSelection]);
+
   const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right', introPageId?: string) => {
     window.focus();
     if (templateType === 'intro' && introPageId) {
-        if (introPageId === 'divider') {
+        if (introPageId === 'divider' || introPageId === 'divider_verso') {
             setEditMode('divider');
+            setDividerViewMode(introPageId === 'divider_verso' ? 'verso' : 'front');
         } else if (config.monthlyIntroPages?.some(p => p.id === introPageId)) {
             setEditMode('monthly_intro');
             setCurrentMonthlyIntroPageId(introPageId);
@@ -4104,22 +6449,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const groupW = Math.max(0.1, maxX - minX);
             const groupH = Math.max(0.1, maxY - minY);
 
+            const domMap = new Map<string, HTMLElement>();
+            if (editorRef.current) {
+                selectedElements.forEach(el => {
+                    const domEl = editorRef.current?.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+                    if (domEl) domMap.set(el.id, domEl);
+                });
+            }
+
             dragRef.current = {
                 ids: selectedIds,
                 isGroupResize: !!dir,
                 startX: e.clientX,
                 startY: e.clientY,
+                domMap,
                 initialGroup: { x: minX, y: minY, w: groupW, h: groupH },
                 initialStates: selectedElements.map(el => ({
                     id: el.id,
                     x: el.x, y: el.y, w: el.w, h: el.h,
-                    fontSize: el.style.fontSize || 12,
+                    fontSize: el.style.fontSize || (
+                        el.type === 'day_number' ? 32 :
+                        (el.type === 'month_name' || el.type === 'month_number' || el.type === 'year') ? 24 :
+                        el.type === 'day_name' ? 22 :
+                        el.type === 'icon' ? 24 :
+                        el.type === 'quote' ? 14 :
+                        (el.type === 'verse' || el.type === 'holiday') ? 11 : 16
+                    ),
                     tableFontSize: el.style.table?.textStyle?.fontSize || 10,
                     calendarFontSizes: el.style.fullCalendar ? {
-                        title: el.style.fullCalendar.title?.fontSize || 12,
-                        weekDays: el.style.fullCalendar.weekDays?.fontSize || 8,
-                        days: el.style.fullCalendar.days?.fontSize || 10,
-                        specialDays: el.style.fullCalendar.specialDays?.style?.fontSize || 10
+                        title: el.style.fullCalendar.title?.fontSize || (el.type === 'mini_calendar' ? 8.5 : 12),
+                        weekDays: el.style.fullCalendar.weekDays?.fontSize || (el.type === 'mini_calendar' ? 6.5 : 8),
+                        days: el.style.fullCalendar.days?.fontSize || (el.type === 'mini_calendar' ? 7.5 : 10),
+                        specialDays: el.style.fullCalendar.specialDays?.style?.fontSize || el.style.fullCalendar.days?.fontSize || (el.type === 'mini_calendar' ? 7.5 : 10),
+                        hasCustomSpecialDaysFontSize: typeof el.style.fullCalendar.specialDays?.style?.fontSize === 'number'
                     } : null
                 })),
                 initialX: minX,
@@ -4129,6 +6491,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             };
 
             if (dir) setResizeDir(dir); else setIsDragging(true);
+            document.body.classList.add('dragging-active');
+            domMap.forEach(el => el.classList.add('is-dragging-target'));
             return;
         }
     }
@@ -4180,24 +6544,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const groupW = Math.max(0.1, maxX - minX);
     const groupH = Math.max(0.1, maxY - minY);
 
+    const domMap = new Map<string, HTMLElement>();
+    if (editorRef.current) {
+        selectedElements.forEach(el => {
+            const domEl = editorRef.current?.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+            if (domEl) domMap.set(el.id, domEl);
+        });
+    }
+
     dragRef.current = { 
         ids: newSelectedIds,
         isGroupResize: false,
         startX: e.clientX, 
         startY: e.clientY,
+        domMap,
         initialGroup: { x: minX, y: minY, w: groupW, h: groupH },
-        initialStates: selectedElements.map(el => ({
-            id: el.id,
-            x: el.x, y: el.y, w: el.w, h: el.h,
-            fontSize: el.style.fontSize || 12,
-            tableFontSize: el.style.table?.textStyle?.fontSize || 10,
-            calendarFontSizes: el.style.fullCalendar ? {
-                title: el.style.fullCalendar.title?.fontSize || 12,
-                weekDays: el.style.fullCalendar.weekDays?.fontSize || 8,
-                days: el.style.fullCalendar.days?.fontSize || 10,
-                specialDays: el.style.fullCalendar.specialDays?.style?.fontSize || 10
-            } : null
-        })),
+        initialStates: selectedElements.map(el => {
+            const isMini = el.type === 'mini_calendar';
+            const defaultTitle = isMini ? 8.5 : 12;
+            const defaultWeek = isMini ? 6.5 : 8;
+            const defaultDays = isMini ? 7.5 : 10;
+            return {
+                id: el.id,
+                x: el.x, y: el.y, w: el.w, h: el.h,
+                fontSize: el.style.fontSize || (
+                    el.type === 'day_number' ? 32 :
+                    (el.type === 'month_name' || el.type === 'month_number' || el.type === 'year') ? 24 :
+                    el.type === 'day_name' ? 22 :
+                    el.type === 'icon' ? 24 :
+                    el.type === 'quote' ? 14 :
+                    (el.type === 'verse' || el.type === 'holiday') ? 11 : 
+                    (el.type === 'date_placeholder' ? 24 : 16)
+                ),
+                tableFontSize: el.style.table?.textStyle?.fontSize || 10,
+                calendarFontSizes: (el.type === 'mini_calendar' || el.type === 'full_calendar') ? {
+                    title: el.style.fullCalendar?.title?.fontSize ?? defaultTitle,
+                    weekDays: el.style.fullCalendar?.weekDays?.fontSize ?? defaultWeek,
+                    days: el.style.fullCalendar?.days?.fontSize ?? defaultDays,
+                    specialDays: el.style.fullCalendar?.specialDays?.style?.fontSize ?? el.style.fullCalendar?.days?.fontSize ?? defaultDays,
+                    hasCustomSpecialDaysFontSize: typeof el.style.fullCalendar?.specialDays?.style?.fontSize === 'number',
+                    weekdayHeight: el.style.fullCalendar?.weekdayHeight,
+                    dayRowHeight: el.style.fullCalendar?.dayRowHeight
+                } : null
+            };
+        }),
         initialX: element.x, 
         initialY: element.y, 
         initialW: element.w, 
@@ -4205,6 +6595,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     };
     
     if (dir) setResizeDir(dir); else setIsDragging(true);
+    document.body.classList.add('dragging-active');
+    domMap.forEach(el => el.classList.add('is-dragging-target'));
   };
 
   const handleMouseMove = (e: MouseEvent | React.MouseEvent) => {
@@ -4218,14 +6610,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         requestRef.current = null;
         if (!lastMouseEvent.current || !editorRef.current) return;
         const { clientX, clientY } = lastMouseEvent.current;
-
-        if (marquee && marqueeRef.current) {
-            const rect = editorRef.current.getBoundingClientRect();
-            const x2 = ((clientX - rect.left) / rect.width) * 100;
-            const y2 = ((clientY - rect.top) / rect.height) * 100;
-            setMarquee(prev => prev ? { ...prev, x2, y2 } : null);
-            return;
-        }
 
         if (resizingTableRow && dragRef.current) {
             const { elementId, rowIndex } = resizingTableRow;
@@ -4313,29 +6697,79 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const activeList = getActiveElements();
         
         if (isDragging) {
-            // Multi-move
             let guidesToSet: SnapGuide[] = [];
             const movedElementsMap = new Map<string, {x: number, y: number}>();
+            const otherElements = activeList.filter(el => !dragIds.includes(el.id));
             
-            dragRef.current.initialStates.forEach((initial: any, idx: number) => {
-                const { x, y, guides } = calculateDragPosition(
-                    deltaX, deltaY, 
-                    initial.x, initial.y, initial.w, initial.h,
-                    editorRect.width, editorRect.height,
-                    activeList.filter(el => !dragIds.includes(el.id)),
-                    idx === 0 // Only first element generates guides to avoid mess
-                );
+            // Elemento principal calcula o alinhamento magnético (Smart Snap)
+            const primaryInitial = dragRef.current.initialStates[0];
+            if (!primaryInitial) return;
+
+            const { x: primX, y: primY, guides } = calculateDragPosition(
+                deltaX, deltaY, 
+                primaryInitial.x, primaryInitial.y, primaryInitial.w, primaryInitial.h,
+                editorRect.width, editorRect.height,
+                otherElements,
+                true
+            );
+            if (guides) guidesToSet = guides;
+
+            const appliedDeltaX = primX - primaryInitial.x;
+            const appliedDeltaY = primY - primaryInitial.y;
+
+            // Translação de grupo rígida: mantém distância exata entre elementos selecionados sem oscilações
+            dragRef.current.initialStates.forEach((initial: any) => {
+                const x = Number((initial.x + appliedDeltaX).toFixed(2));
+                const y = Number((initial.y + appliedDeltaY).toFixed(2));
                 movedElementsMap.set(initial.id, { x, y });
-                if (idx === 0 && guides) guidesToSet = guides;
+
+                // Atualização direta no DOM para 60-120 FPS ultra fluido sem re-render do React durante o arraste
+                const domEl = dragRef.current.domMap?.get(initial.id) || (editorRef.current?.querySelector(`[data-element-id="${initial.id}"]`) as HTMLElement | null);
+                if (domEl) {
+                    domEl.style.left = `${x}%`;
+                    domEl.style.top = `${y}%`;
+                }
             });
+
+            if (!dragRef.current.groupBoxEl && editorRef.current) {
+                dragRef.current.groupBoxEl = editorRef.current.querySelector('.group-multi-selection') as HTMLElement | null;
+            }
+            if (dragRef.current.groupBoxEl && dragRef.current.initialGroup) {
+                dragRef.current.groupBoxEl.style.left = `${Number((dragRef.current.initialGroup.x + appliedDeltaX).toFixed(2))}%`;
+                dragRef.current.groupBoxEl.style.top = `${Number((dragRef.current.initialGroup.y + appliedDeltaY).toFixed(2))}%`;
+            }
 
             const updatedList = activeList.map(el => {
                 const moved = movedElementsMap.get(el.id);
                 return moved ? { ...el, x: moved.x, y: moved.y } : el;
             });
 
-            updateActiveElements(updatedList, true);
-            setActiveGuides(guidesToSet);
+            dragRef.current.pendingList = updatedList;
+
+            // Renderiza guias magnéticas diretamente no DOM sem disparar re-render no componente React
+            if (guidesOverlayRef.current) {
+                if (guidesToSet.length === 0) {
+                    if (guidesOverlayRef.current.childElementCount > 0) {
+                        guidesOverlayRef.current.innerHTML = '';
+                    }
+                } else {
+                    guidesOverlayRef.current.innerHTML = guidesToSet.map(guide => `
+                        <div 
+                            class="absolute bg-indigo-500 pointer-events-none no-print"
+                            style="
+                                left: ${guide.axis === 'x' ? `${guide.pos}%` : 0};
+                                top: ${guide.axis === 'y' ? `${guide.pos}%` : 0};
+                                width: ${guide.axis === 'x' ? '1px' : '100%'};
+                                height: ${guide.axis === 'y' ? '1px' : '100%'};
+                                transform: ${guide.axis === 'x' ? 'translateX(-50%)' : 'translateY(-50%)'};
+                                opacity: 0.7;
+                                border-style: dashed;
+                                border-width: ${guide.axis === 'x' ? '0 0 0 1px' : '1px 0 0 0'};
+                            "
+                        ></div>
+                    `).join('');
+                }
+            }
         } else if (resizeDir && (dragRef.current.isGroupResize || dragIds.length > 1)) {
             const initialGroup = dragRef.current.initialGroup || {
                 x: dragRef.current.initialX,
@@ -4380,7 +6814,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     h: Number(newH.toFixed(2))
                 };
 
-                const textTypes = ['text', 'quote', 'holiday', 'holiday_list', 'day_number', 'month_name', 'month_number', 'day_name', 'year', 'verse', 'permanent_day_header'];
+                const textTypes = ['text', 'quote', 'holiday', 'holiday_list', 'day_number', 'month_name', 'month_number', 'day_name', 'year', 'verse', 'permanent_day_header', 'date_placeholder', 'moon', 'icon'];
                 const fontScale = (scaleX + scaleY) / 2;
 
                 if (textTypes.includes(element.type) && initial.fontSize) {
@@ -4395,28 +6829,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             textStyle: { ...newElementConfig.style.table?.textStyle, fontSize: newFontSize } 
                         } 
                     };
-                } else if (element.type === 'full_calendar' && initial.calendarFontSizes) {
+                } else if ((element.type === 'full_calendar' || element.type === 'mini_calendar') && initial.calendarFontSizes) {
                     const { title, weekDays, days, specialDays } = initial.calendarFontSizes;
                     newElementConfig.style = { 
                         ...newElementConfig.style, 
                         fullCalendar: { 
                             ...newElementConfig.style.fullCalendar,
-                            title: { ...newElementConfig.style.fullCalendar?.title, fontSize: Math.max(4, Math.round(title * fontScale)) },
-                            weekDays: { ...newElementConfig.style.fullCalendar?.weekDays, fontSize: Math.max(4, Math.round(weekDays * fontScale)) },
-                            days: { ...newElementConfig.style.fullCalendar?.days, fontSize: Math.max(4, Math.round(days * fontScale)) },
+                            title: { ...newElementConfig.style.fullCalendar?.title, fontSize: Math.max(3, Math.round(title * fontScale * 2) / 2) },
+                            weekDays: { ...newElementConfig.style.fullCalendar?.weekDays, fontSize: Math.max(2.5, Math.round(weekDays * fontScale * 2) / 2) },
+                            days: { ...newElementConfig.style.fullCalendar?.days, fontSize: Math.max(2.5, Math.round(days * fontScale * 2) / 2) },
                             specialDays: { 
                                 ...newElementConfig.style.fullCalendar?.specialDays, 
-                                style: { ...newElementConfig.style.fullCalendar?.specialDays?.style, fontSize: Math.max(4, Math.round(specialDays * fontScale)) } 
+                                style: { ...newElementConfig.style.fullCalendar?.specialDays?.style, fontSize: Math.max(2.5, Math.round(specialDays * fontScale * 2) / 2) } 
                             }
                         } 
                     };
                 }
 
+                // Atualização direta no DOM durante redimensionamento em grupo
+                const domEl = dragRef.current.domMap?.get(element.id) || (editorRef.current?.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null);
+                if (domEl) {
+                    domEl.style.left = `${newElementConfig.x}%`;
+                    domEl.style.top = `${newElementConfig.y}%`;
+                    domEl.style.width = `${newElementConfig.w}%`;
+                    domEl.style.height = `${newElementConfig.h}%`;
+
+                    if (textTypes.includes(element.type) && newElementConfig.style.fontSize) {
+                        const currentScaleFactor = (EDITOR_WIDTH_PX / 400) || 1;
+                        const renderedPx = Math.max(1, newElementConfig.style.fontSize * currentScaleFactor);
+                        const textElements = domEl.querySelectorAll(':scope > div:not(.no-print) div, :scope > div:not(.no-print) span, :scope > div:not(.no-print) p');
+                        textElements.forEach(tEl => {
+                            (tEl as HTMLElement).style.fontSize = `${renderedPx}px`;
+                        });
+                    }
+
+                    if (element.type === 'mini_calendar' || element.type === 'full_calendar') {
+                        const titleEl = domEl.querySelector('[data-cal-part="title"]') as HTMLElement | null;
+                        if (titleEl && newElementConfig.style.fullCalendar?.title?.fontSize) {
+                            titleEl.style.fontSize = `${newElementConfig.style.fullCalendar.title.fontSize}px`;
+                        }
+                        const weekEls = domEl.querySelectorAll('[data-cal-part="week"]') as NodeListOf<HTMLElement>;
+                        if (weekEls.length && newElementConfig.style.fullCalendar?.weekDays?.fontSize) {
+                            const sz = `${newElementConfig.style.fullCalendar.weekDays.fontSize}px`;
+                            weekEls.forEach(el => el.style.fontSize = sz);
+                        }
+                        const dayEls = domEl.querySelectorAll('[data-cal-part="day"]') as NodeListOf<HTMLElement>;
+                        if (dayEls.length && newElementConfig.style.fullCalendar?.days?.fontSize) {
+                            const sz = `${newElementConfig.style.fullCalendar.days.fontSize}px`;
+                            dayEls.forEach(el => el.style.fontSize = sz);
+                        }
+                    }
+                }
+
                 updatedElementsMap.set(element.id, newElementConfig);
             });
 
+            if (!dragRef.current.groupBoxEl && editorRef.current) {
+                dragRef.current.groupBoxEl = editorRef.current.querySelector('.group-multi-selection') as HTMLElement | null;
+            }
+            if (dragRef.current.groupBoxEl) {
+                dragRef.current.groupBoxEl.style.left = `${Number(newGroup.x.toFixed(2))}%`;
+                dragRef.current.groupBoxEl.style.top = `${Number(newGroup.y.toFixed(2))}%`;
+                dragRef.current.groupBoxEl.style.width = `${Number(finalGroupW.toFixed(2))}%`;
+                dragRef.current.groupBoxEl.style.height = `${Number(finalGroupH.toFixed(2))}%`;
+            }
+
             const updatedList = activeList.map(el => updatedElementsMap.get(el.id) || el);
-            updateActiveElements(updatedList, true);
+            dragRef.current.pendingList = updatedList;
         } else if (resizeDir && dragIds.length === 1) {
             const currentId = dragIds[0];
             const element = activeList.find(el => el.id === currentId);
@@ -4447,12 +6926,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             
             let newElementConfig = { ...element, x, y, w, h: finalH };
 
-            if (element.type === 'circle') {
-                if (resizeDir.includes('n') || resizeDir.includes('s')) {
-                    finalW = h * (unscaledEditorHeight / unscaledEditorWidth);
-                } else {
-                    finalH = w * (unscaledEditorWidth / unscaledEditorHeight);
-                }
+            const isCorner = ['nw', 'ne', 'se', 'sw'].includes(resizeDir);
+            const textTypes = ['text', 'quote', 'holiday', 'holiday_list', 'day_number', 'month_name', 'month_number', 'day_name', 'year', 'verse', 'date_placeholder', 'icon', 'moon', 'permanent_day_header'];
+
+            if (element.type === 'circle' || (element.type === 'mini_calendar' && isCorner)) {
+                const currentW_px = (w / 100) * editorRect.width;
+                const currentH_px = (h / 100) * editorRect.height;
+                const initialW_px = (initial.w / 100) * editorRect.width;
+                const initialH_px = (initial.h / 100) * editorRect.height;
+
+                const changeW = Math.abs(currentW_px - initialW_px);
+                const changeH = Math.abs(currentH_px - initialH_px);
+
+                const targetSize_px = Math.max(15, changeW >= changeH ? currentW_px : currentH_px);
+                finalW = (targetSize_px / editorRect.width) * 100;
+                finalH = (targetSize_px / editorRect.height) * 100;
+            } else if ((element.type === 'vector_shape' || element.type === 'image' || textTypes.includes(element.type)) && isCorner) {
+                const currentW_px = (w / 100) * editorRect.width;
+                const currentH_px = (h / 100) * editorRect.height;
+                const initialW_px = (initial.w / 100) * editorRect.width;
+                const initialH_px = (initial.h / 100) * editorRect.height;
+
+                const changeW = Math.abs(currentW_px - initialW_px);
+                const changeH = Math.abs(currentH_px - initialH_px);
+
+                const scaleX = currentW_px / (initialW_px || 1);
+                const scaleY = currentH_px / (initialH_px || 1);
+                const cornerScale = Math.max(0.05, changeW >= changeH ? scaleX : scaleY);
+
+                finalW = Math.max(0.5, initial.w * cornerScale);
+                finalH = Math.max(0.5, initial.h * cornerScale);
             } else if (element.type === 'lines') {
                 if (!element.style.showTimes && (!element.style.rowCount || element.style.rowCount === 0) && !isSingleLine) {
                     const heightPx = (h / 100 * unscaledEditorHeight);
@@ -4522,14 +7025,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             newElementConfig.x = finalX; newElementConfig.y = finalY; newElementConfig.w = finalW; newElementConfig.h = finalH;
 
-            const textTypes = ['text', 'quote', 'holiday', 'holiday_list', 'day_number', 'month_name', 'month_number', 'day_name', 'year', 'verse'];
-            const scale = h / initial.h;
+            const scale = (textTypes.includes(element.type) && isCorner)
+                ? (finalW / (initial.w || 1))
+                : 1;
 
-            if (textTypes.includes(element.type) && initial.fontSize) {
+            if (textTypes.includes(element.type) && isCorner && initial.fontSize) {
                 const newFontSize = Math.max(4, Math.round(initial.fontSize * scale));
                 newElementConfig.style = { ...newElementConfig.style, fontSize: newFontSize };
             } else if (element.type === 'table' && initial.tableFontSize) {
-                const newFontSize = Math.max(4, Math.round(initial.tableFontSize * scale));
+                const tableScale = isCorner ? (finalW / (initial.w || 1)) : (h / (initial.h || 1));
+                const newFontSize = Math.max(4, Math.round(initial.tableFontSize * tableScale));
                 newElementConfig.style = { 
                     ...newElementConfig.style, 
                     table: { 
@@ -4537,23 +7042,94 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         textStyle: { ...newElementConfig.style.table?.textStyle, fontSize: newFontSize } 
                     } 
                 };
-            } else if (element.type === 'full_calendar' && initial.calendarFontSizes) {
-                const { title, weekDays, days, specialDays } = initial.calendarFontSizes;
+            } else if ((element.type === 'full_calendar' || element.type === 'mini_calendar') && initial.calendarFontSizes) {
+                const { title, weekDays, days, specialDays, weekdayHeight, dayRowHeight, hasCustomSpecialDaysFontSize } = initial.calendarFontSizes;
+                const initialW_px = (initial.w / 100) * editorRect.width;
+                const initialH_px = (initial.h / 100) * editorRect.height;
+                const finalW_px = (finalW / 100) * editorRect.width;
+                const finalH_px = (finalH / 100) * editorRect.height;
+
+                const scaleX = finalW_px / (initialW_px || 1);
+                const scaleY = finalH_px / (initialH_px || 1);
+                const currentDir = resizeDir || '';
+                const calendarScale = isCorner
+                    ? (scaleX + scaleY) / 2
+                    : (['e', 'w'].includes(currentDir) ? scaleX : (['n', 's'].includes(currentDir) ? scaleY : (scaleX + scaleY) / 2));
+
+                const newDaysFontSize = Math.max(2.5, Math.round(days * calendarScale * 2) / 2);
+                const newSpecialDaysFontSize = hasCustomSpecialDaysFontSize
+                    ? Math.min(newDaysFontSize, Math.max(2.5, Math.round(specialDays * calendarScale * 2) / 2))
+                    : newDaysFontSize;
+
                 newElementConfig.style = { 
                     ...newElementConfig.style, 
                     fullCalendar: { 
                         ...newElementConfig.style.fullCalendar,
-                        title: { ...newElementConfig.style.fullCalendar?.title, fontSize: Math.max(4, Math.round(title * scale)) },
-                        weekDays: { ...newElementConfig.style.fullCalendar?.weekDays, fontSize: Math.max(4, Math.round(weekDays * scale)) },
-                        days: { ...newElementConfig.style.fullCalendar?.days, fontSize: Math.max(4, Math.round(days * scale)) },
+                        title: { ...newElementConfig.style.fullCalendar?.title, fontSize: Math.max(3, Math.round(title * calendarScale * 2) / 2) },
+                        weekDays: { ...newElementConfig.style.fullCalendar?.weekDays, fontSize: Math.max(2.5, Math.round(weekDays * calendarScale * 2) / 2) },
+                        days: { ...newElementConfig.style.fullCalendar?.days, fontSize: newDaysFontSize },
                         specialDays: { 
                             ...newElementConfig.style.fullCalendar?.specialDays, 
-                            style: { ...newElementConfig.style.fullCalendar?.specialDays?.style, fontSize: Math.max(4, Math.round(specialDays * scale)) } 
-                        }
+                            style: { 
+                                ...newElementConfig.style.fullCalendar?.specialDays?.style, 
+                                ...(hasCustomSpecialDaysFontSize ? { fontSize: newSpecialDaysFontSize } : {})
+                            } 
+                        },
+                        ...(weekdayHeight !== undefined ? { weekdayHeight: Math.max(6, Math.round(weekdayHeight * calendarScale)) } : {}),
+                        ...(dayRowHeight !== undefined ? { dayRowHeight: Math.max(4, Math.round(dayRowHeight * calendarScale)) } : {})
                     } 
                 };
             }
-            updateActiveElements(activeList.map(el => el.id === currentId ? newElementConfig : el), true);
+
+            // Atualização direta no DOM durante redimensionamento individual
+            const domEl = dragRef.current.domMap?.get(currentId) || (editorRef.current?.querySelector(`[data-element-id="${currentId}"]`) as HTMLElement | null);
+            if (domEl) {
+                domEl.style.left = `${newElementConfig.x}%`;
+                domEl.style.top = `${newElementConfig.y}%`;
+                domEl.style.width = `${newElementConfig.w}%`;
+                domEl.style.height = `${newElementConfig.h}%`;
+
+                if (textTypes.includes(element.type) && newElementConfig.style?.fontSize) {
+                    const currentScaleFactor = (EDITOR_WIDTH_PX / 400) || 1;
+                    const renderedPx = Math.max(1, newElementConfig.style.fontSize * currentScaleFactor);
+                    const innerContainer = domEl.querySelector(':scope > div:not(.no-print)') as HTMLElement | null;
+                    if (innerContainer) {
+                        innerContainer.style.fontSize = `${renderedPx}px`;
+                    }
+                    const textElements = domEl.querySelectorAll(':scope > div:not(.no-print) div, :scope > div:not(.no-print) span, :scope > div:not(.no-print) p, :scope > div:not(.no-print) svg');
+                    textElements.forEach(tEl => {
+                        (tEl as HTMLElement).style.fontSize = `${renderedPx}px`;
+                    });
+                }
+
+                if (element.type === 'table' && newElementConfig.style.table?.textStyle?.fontSize) {
+                    const currentScaleFactor = (EDITOR_WIDTH_PX / 400) || 1;
+                    const renderedPx = Math.max(1, newElementConfig.style.table.textStyle.fontSize * currentScaleFactor);
+                    const cellElements = domEl.querySelectorAll('td, th, td div, th div');
+                    cellElements.forEach(cEl => {
+                        (cEl as HTMLElement).style.fontSize = `${renderedPx}px`;
+                    });
+                }
+
+                if (element.type === 'mini_calendar' || element.type === 'full_calendar') {
+                    const titleEl = domEl.querySelector('[data-cal-part="title"]') as HTMLElement | null;
+                    if (titleEl && newElementConfig.style.fullCalendar?.title?.fontSize) {
+                        titleEl.style.fontSize = `${newElementConfig.style.fullCalendar.title.fontSize}px`;
+                    }
+                    const weekEls = domEl.querySelectorAll('[data-cal-part="week"]') as NodeListOf<HTMLElement>;
+                    if (weekEls.length && newElementConfig.style.fullCalendar?.weekDays?.fontSize) {
+                        const sz = `${newElementConfig.style.fullCalendar.weekDays.fontSize}px`;
+                        weekEls.forEach(el => el.style.fontSize = sz);
+                    }
+                    const dayEls = domEl.querySelectorAll('[data-cal-part="day"]') as NodeListOf<HTMLElement>;
+                    if (dayEls.length && newElementConfig.style.fullCalendar?.days?.fontSize) {
+                        const sz = `${newElementConfig.style.fullCalendar.days.fontSize}px`;
+                        dayEls.forEach(el => el.style.fontSize = sz);
+                    }
+                }
+            }
+
+            dragRef.current.pendingList = activeList.map(el => el.id === currentId ? newElementConfig : el);
         }
     });
   };
@@ -4564,29 +7140,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           requestRef.current = null;
       }
 
-      if (marquee && editorRef.current) {
-          const xStart = Math.min(marquee.x1, marquee.x2);
-          const xEnd = Math.max(marquee.x1, marquee.x2);
-          const yStart = Math.min(marquee.y1, marquee.y2);
-          const yEnd = Math.max(marquee.y1, marquee.y2);
-          
-          const activeList = getActiveElements();
-          const newlySelected = activeList.filter(el => {
-              const elX2 = el.x + el.w;
-              const elY2 = el.y + el.h;
-              return el.x < xEnd && elX2 > xStart && el.y < yEnd && elY2 > yStart;
-          }).map(el => el.id);
+      if (guidesOverlayRef.current) {
+          guidesOverlayRef.current.innerHTML = '';
+      }
 
-          if (e && e.shiftKey) {
-              setSelectedIds(prev => {
-                  const union = new Set([...prev, ...newlySelected]);
-                  return Array.from(union);
-              });
-          } else {
-              setSelectedIds(newlySelected);
-          }
-          setMarquee(null);
-          marqueeRef.current = null;
+      if (document.body.classList.contains('dragging-active')) {
+          document.body.classList.remove('dragging-active');
+      }
+      document.querySelectorAll('.is-dragging-target').forEach(el => el.classList.remove('is-dragging-target'));
+
+      if (dragRef.current?.pendingList) {
+          updateActiveElements(dragRef.current.pendingList, false);
       }
 
       setIsDragging(false); 
@@ -4594,7 +7158,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setResizingTableCol(null);
       setResizingTableRow(null);
       dragRef.current = null; 
-      setActiveGuides([]);
   };
 
   const handleMouseMoveRef = useRef(handleMouseMove);
@@ -4606,7 +7169,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   });
 
   useEffect(() => {
-    if (isDragging || resizeDir || resizingTableCol || resizingTableRow || marquee) {
+    if (isDragging || resizeDir || resizingTableCol || resizingTableRow) {
       if (resizingTableRow) document.body.style.cursor = 'row-resize';
       else if (resizingTableCol) document.body.style.cursor = 'col-resize';
       else if (isDragging) document.body.style.cursor = 'move';
@@ -4626,7 +7189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         window.removeEventListener('mouseup', onGlobalMouseUp);
       };
     }
-  }, [isDragging, resizeDir, resizingTableCol, resizingTableRow, marquee]);
+  }, [isDragging, resizeDir, resizingTableCol, resizingTableRow]);
 
   const getRotatedCursor = (dir: string, rotation: number) => {
       const baseAngles: Record<string, number> = {
@@ -4662,7 +7225,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       return <div key={dir} className="no-print hover:scale-125 transition-transform" style={{ ...pos, cursor }} onMouseDown={(e) => handleInteractionStart(e, handleTargetId, dir)} />;
   }
 
-  const getGlobalCalendarStyle = useCallback(() => {
+  const getGlobalCalendarStyle = useCallback((): (NonNullable<LayoutElement['style']['fullCalendar']> & { startOfWeekDay: number }) => {
     for (const page of config.introPages) {
         const calendarEl = page.elements.find(el => el.type === 'full_calendar');
         if (calendarEl && calendarEl.style.fullCalendar) {
@@ -4683,11 +7246,278 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
         }
     }
+    if (config.customCalendarStyle) {
+        return {
+            startOfWeekDay: config.startOfWeekDay ?? 0,
+            ...config.customCalendarStyle
+        };
+    }
     return {
         ...defaultCalendarStyle,
         startOfWeekDay: config.startOfWeekDay ?? 0
     };
-  }, [config.introPages, config.monthlyIntroPages, config.startOfWeekDay]);
+  }, [config.introPages, config.monthlyIntroPages, config.startOfWeekDay, config.customCalendarStyle]);
+
+  const findCustomizedMiniCalendar = useCallback((): LayoutElement | null => {
+    const active = getActiveElements();
+    const activeCurrent = active.find(el => el.id === selectedId && el.type === 'mini_calendar');
+    if (activeCurrent?.style?.fullCalendar) return activeCurrent;
+
+    const activeMini = active.find(el => el.type === 'mini_calendar' && el.style?.fullCalendar);
+    if (activeMini) return activeMini;
+
+    const groups = [
+        config.elements,
+        config.elementsVerso,
+        config.elementsWeeklyLeft,
+        config.elementsWeeklyRight,
+        config.elementsSaturday,
+        config.elementsSunday,
+        config.elementsTop,
+        config.elementsBottom,
+    ];
+    for (const group of groups) {
+        if (group && Array.isArray(group)) {
+            const found = group.find(el => el.type === 'mini_calendar' && el.style?.fullCalendar);
+            if (found) return found;
+        }
+    }
+
+    if (config.monthlyIntroPages) {
+        for (const p of config.monthlyIntroPages) {
+            const found = p.elements?.find(el => el.type === 'mini_calendar' && el.style?.fullCalendar);
+            if (found) return found;
+        }
+    }
+
+    if (config.introPages) {
+        for (const p of config.introPages) {
+            const found = p.elements?.find(el => el.type === 'mini_calendar' && el.style?.fullCalendar);
+            if (found) return found;
+        }
+    }
+
+    if (config.monthlyDividerStyle?.elements) {
+        const found = config.monthlyDividerStyle.elements.find(el => el.type === 'mini_calendar' && el.style?.fullCalendar);
+        if (found) return found;
+    }
+    if (config.monthlyDividerStyle?.versoElements) {
+        const found = config.monthlyDividerStyle.versoElements.find(el => el.type === 'mini_calendar' && el.style?.fullCalendar);
+        if (found) return found;
+    }
+
+    for (const group of groups) {
+        if (group && Array.isArray(group)) {
+            const found = group.find(el => el.type === 'mini_calendar');
+            if (found) return found;
+        }
+    }
+    return null;
+  }, [config, getActiveElements, selectedId]);
+
+  const syncMiniCalendarToAnnual = useCallback((miniEl?: LayoutElement | null) => {
+    const activeList = getActiveElements();
+    const currentSelected = activeList.find(e => e.id === selectedId);
+    const sourceEl = miniEl || (currentSelected?.type === 'mini_calendar' ? currentSelected : findCustomizedMiniCalendar());
+    if (!sourceEl) {
+        alert('Nenhum Mini Calendário encontrado no projeto para sincronizar.');
+        return;
+    }
+
+    const miniFullCal = sourceEl.style?.fullCalendar;
+    if (!miniFullCal) {
+        alert('O Mini Calendário selecionado não possui configurações de estilo para sincronizar.');
+        return;
+    }
+
+    const copiedFullCal = JSON.parse(JSON.stringify(miniFullCal));
+    const containerStyles = {
+        backgroundColor: sourceEl.style.backgroundColor,
+        borderColor: sourceEl.style.borderColor,
+        borderWidth: sourceEl.style.borderWidth,
+        borderRadius: sourceEl.style.borderRadius,
+        highlightCurrentDay: sourceEl.style.highlightCurrentDay,
+        currentDayHighlightColor: sourceEl.style.currentDayHighlightColor,
+        currentDayHighlightTextColor: sourceEl.style.currentDayHighlightTextColor,
+    };
+
+    let updatedCount = 0;
+    const updateCalendarElement = (el: LayoutElement): LayoutElement => {
+        if (el.type !== 'full_calendar') return el;
+        updatedCount++;
+        return {
+            ...el,
+            style: {
+                ...el.style,
+                ...containerStyles,
+                fullCalendar: {
+                    ...(el.style.fullCalendar || {}),
+                    ...copiedFullCal,
+                    monthsPerRow: el.style.monthsPerRow ?? (el.style.fullCalendar as any)?.monthsPerRow ?? 3,
+                    showYearInTitle: el.style.fullCalendar?.showYearInTitle ?? true,
+                    title: { ...(el.style.fullCalendar?.title || {}), ...(copiedFullCal.title || {}) },
+                    weekDays: { ...(el.style.fullCalendar?.weekDays || {}), ...(copiedFullCal.weekDays || {}) },
+                    days: { ...(el.style.fullCalendar?.days || {}), ...(copiedFullCal.days || {}) },
+                    grid: {
+                        ...(el.style.fullCalendar?.grid || {}),
+                        ...(copiedFullCal.grid || {}),
+                        borders: {
+                            ...(el.style.fullCalendar?.grid?.borders || {}),
+                            ...(copiedFullCal.grid?.borders || {})
+                        }
+                    },
+                    specialDays: {
+                        ...(el.style.fullCalendar?.specialDays || {}),
+                        ...(copiedFullCal.specialDays || {}),
+                        style: {
+                            ...(el.style.fullCalendar?.specialDays?.style || {}),
+                            ...(copiedFullCal.specialDays?.style || {})
+                        }
+                    }
+                }
+            }
+        };
+    };
+
+    setConfig(prev => ({
+        ...prev,
+        customCalendarStyle: copiedFullCal,
+        introPages: prev.introPages.map(page => ({
+            ...page,
+            elements: page.elements.map(updateCalendarElement)
+        })),
+        monthlyIntroPages: prev.monthlyIntroPages?.map(page => ({
+            ...page,
+            elements: page.elements.map(updateCalendarElement)
+        })),
+        elements: prev.elements.map(updateCalendarElement),
+        elementsVerso: prev.elementsVerso?.map(updateCalendarElement),
+        elementsWeeklyLeft: prev.elementsWeeklyLeft?.map(updateCalendarElement),
+        elementsWeeklyRight: prev.elementsWeeklyRight?.map(updateCalendarElement),
+        elementsSaturday: prev.elementsSaturday?.map(updateCalendarElement),
+        elementsSunday: prev.elementsSunday?.map(updateCalendarElement),
+        elementsTop: prev.elementsTop?.map(updateCalendarElement),
+        elementsBottom: prev.elementsBottom?.map(updateCalendarElement),
+        monthlyDividerStyle: prev.monthlyDividerStyle ? {
+            ...prev.monthlyDividerStyle,
+            elements: prev.monthlyDividerStyle.elements?.map(updateCalendarElement),
+            versoElements: prev.monthlyDividerStyle.versoElements?.map(updateCalendarElement)
+        } : undefined
+    }));
+
+    updateActiveElements(prevList => prevList.map(updateCalendarElement));
+
+    if (updatedCount > 0) {
+        alert(`Aparência do Calendário Anual sincronizada com sucesso a partir do Mini Calendário! (${updatedCount} calendário(s) anual(is) atualizado(s))`);
+    } else {
+        alert('Aparência do Mini Calendário sincronizada e salva! Como ainda não há página de Calendário Anual adicionada nas Páginas Iniciais, o modelo anual usará este mesmo estilo quando inserido.');
+    }
+  }, [selectedId, getActiveElements, findCustomizedMiniCalendar, setConfig, updateActiveElements]);
+
+  const copyStyleFromMiniCalendarToFull = useCallback((fullCalendarId: string) => {
+    const miniEl = findCustomizedMiniCalendar();
+    if (!miniEl || !miniEl.style?.fullCalendar) {
+        alert('Nenhum Mini Calendário personalizado encontrado no projeto para copiar a aparência.');
+        return;
+    }
+
+    const miniFullCal = miniEl.style.fullCalendar;
+    const containerStyles = {
+        backgroundColor: miniEl.style.backgroundColor,
+        borderColor: miniEl.style.borderColor,
+        borderWidth: miniEl.style.borderWidth,
+        borderRadius: miniEl.style.borderRadius,
+        highlightCurrentDay: miniEl.style.highlightCurrentDay,
+        currentDayHighlightColor: miniEl.style.currentDayHighlightColor,
+        currentDayHighlightTextColor: miniEl.style.currentDayHighlightTextColor,
+    };
+
+    updateElementStyle(fullCalendarId, {
+        ...containerStyles,
+        fullCalendar: JSON.parse(JSON.stringify(miniFullCal))
+    });
+
+    setConfig(prev => ({
+        ...prev,
+        customCalendarStyle: JSON.parse(JSON.stringify(miniFullCal))
+    }));
+
+    alert('Aparência sincronizada com sucesso a partir do Mini Calendário!');
+  }, [findCustomizedMiniCalendar, updateElementStyle, setConfig]);
+
+  const applyFullCalendarStyleToAllMini = useCallback((fullCalEl: LayoutElement) => {
+    const fullCalStyle = fullCalEl.style?.fullCalendar;
+    if (!fullCalStyle) {
+        alert('O Calendário Anual não possui configurações de estilo.');
+        return;
+    }
+
+    const copiedFullCal = JSON.parse(JSON.stringify(fullCalStyle));
+    const containerStyles = {
+        backgroundColor: fullCalEl.style.backgroundColor,
+        borderColor: fullCalEl.style.borderColor,
+        borderWidth: fullCalEl.style.borderWidth,
+        borderRadius: fullCalEl.style.borderRadius,
+        highlightCurrentDay: fullCalEl.style.highlightCurrentDay,
+        currentDayHighlightColor: fullCalEl.style.currentDayHighlightColor,
+        currentDayHighlightTextColor: fullCalEl.style.currentDayHighlightTextColor,
+    };
+
+    let updatedCount = 0;
+    const updateMiniElement = (el: LayoutElement): LayoutElement => {
+        if (el.type !== 'mini_calendar') return el;
+        updatedCount++;
+        return {
+            ...el,
+            style: {
+                ...el.style,
+                ...containerStyles,
+                fullCalendar: {
+                    ...(el.style.fullCalendar || {}),
+                    ...copiedFullCal,
+                    splitMode: el.style.fullCalendar?.splitMode,
+                    calendarMonthMode: (el.style as any)?.calendarMonthMode,
+                    calendarOffset: (el.style as any)?.calendarOffset,
+                    calendarFixedMonth: (el.style as any)?.calendarFixedMonth,
+                }
+            }
+        };
+    };
+
+    setConfig(prev => ({
+        ...prev,
+        customCalendarStyle: copiedFullCal,
+        elements: prev.elements.map(updateMiniElement),
+        elementsVerso: prev.elementsVerso?.map(updateMiniElement),
+        elementsWeeklyLeft: prev.elementsWeeklyLeft?.map(updateMiniElement),
+        elementsWeeklyRight: prev.elementsWeeklyRight?.map(updateMiniElement),
+        elementsSaturday: prev.elementsSaturday?.map(updateMiniElement),
+        elementsSunday: prev.elementsSunday?.map(updateMiniElement),
+        elementsTop: prev.elementsTop?.map(updateMiniElement),
+        elementsBottom: prev.elementsBottom?.map(updateMiniElement),
+        introPages: prev.introPages.map(page => ({
+            ...page,
+            elements: page.elements.map(updateMiniElement)
+        })),
+        monthlyIntroPages: prev.monthlyIntroPages?.map(page => ({
+            ...page,
+            elements: page.elements.map(updateMiniElement)
+        })),
+        monthlyDividerStyle: prev.monthlyDividerStyle ? {
+            ...prev.monthlyDividerStyle,
+            elements: prev.monthlyDividerStyle.elements?.map(updateMiniElement),
+            versoElements: prev.monthlyDividerStyle.versoElements?.map(updateMiniElement)
+        } : undefined
+    }));
+
+    updateActiveElements(prevList => prevList.map(updateMiniElement));
+
+    if (updatedCount > 0) {
+        alert(`Aparência aplicada a ${updatedCount} Mini Calendário(s) no projeto!`);
+    } else {
+        alert('Nenhum Mini Calendário encontrado no projeto para atualizar.');
+    }
+  }, [setConfig, updateActiveElements]);
 
   const getProjectFirstDay = useCallback((offset: number = 0): DayData => {
     const year = config.year || new Date().getFullYear();
@@ -4732,7 +7562,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const elementsWithIndices = elements.map(el => {
         let finalStyle = {
             ...el.style,
-            dayIndex: effectiveIndices[el.id] ?? el.style.dayIndex ?? 0
+            dayIndex: effectiveIndices[el.id] ?? el.style.dayIndex ?? 0,
+            ...(isEditor ? {} : { simulateMaxSpace: false })
         };
 
         if ((el.type === 'mini_calendar' || el.type === 'full_calendar') && config.monthlyIntroPages) {
@@ -4821,52 +7652,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             window.focus();
             if (isEditor) {
                 const targetEl = e.target as HTMLElement;
-                const isInsideElement = targetEl.closest('.layout-element-wrapper') || targetEl.closest('.no-print');
-                const isInputOrButton = targetEl.tagName === 'INPUT' || targetEl.tagName === 'BUTTON' || targetEl.tagName === 'TEXTAREA' || targetEl.closest('button');
-                
-                if (!isInsideElement && !isInputOrButton) {
-                    if (!e.shiftKey) {
-                        setSelectedIds([]);
-                    }
-                    setContextMenu(null);
-                    
-                    // Marquee Select Start
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = ((e.clientX - rect.left) / rect.width) * 100;
-                    const y = ((e.clientY - rect.top) / rect.height) * 100;
-                    setMarquee({ x1: x, y1: y, x2: x, y2: y });
-                    marqueeRef.current = { x1: x, y1: y };
+                if (!isClickTargetInteractiveOrElement(targetEl)) {
+                    startMarqueeSelection(e);
                 }
             }
         }}
       >
-        {marquee && (
-            <div 
-                className="absolute border border-indigo-500 bg-indigo-500/10 z-[100] pointer-events-none no-print"
-                style={{
-                    left: `${Math.min(marquee.x1, marquee.x2)}%`,
-                    top: `${Math.min(marquee.y1, marquee.y2)}%`,
-                    width: `${Math.abs(marquee.x1 - marquee.x2)}%`,
-                    height: `${Math.abs(marquee.y1 - marquee.y2)}%`
-                }}
-            />
+        {isEditor && (
+            <div ref={guidesOverlayRef} className="absolute inset-0 pointer-events-none z-[100] no-print" />
         )}
-        {isEditor && isDragging && activeGuides.map((guide, idx) => (
-            <div 
-                key={`guide-${idx}`}
-                className="absolute bg-indigo-500 z-[100] pointer-events-none no-print"
-                style={{
-                    left: guide.axis === 'x' ? `${guide.pos}%` : 0,
-                    top: guide.axis === 'y' ? `${guide.pos}%` : 0,
-                    width: guide.axis === 'x' ? '1px' : '100%',
-                    height: guide.axis === 'y' ? '1px' : '100%',
-                    transform: guide.axis === 'x' ? 'translateX(-50%)' : 'translateY(-50%)',
-                    opacity: 0.7,
-                    borderStyle: 'dashed',
-                    borderWidth: guide.axis === 'x' ? '0 0 0 1px' : '1px 0 0 0'
-                }}
-            />
-        ))}
         {elementsWithIndices.filter(el => {
             if (isEditor || !el.style.displayOn || el.style.displayOn === 'all') return true;
             if (pageNumber === undefined) return true;
@@ -4899,7 +7693,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               willChange: isEditor && isSelectedThis && (isDragging || !!resizeDir) ? 'left, top, width, height' : 'auto'
           };
           const containerClass = `absolute group ${isSelected ? 'ring-2 ring-indigo-500 z-50' : 'hover:ring-1 hover:ring-indigo-300'} ${isEditor || activeTab === 'preview' ? 'cursor-pointer' : ''} ${isEditor ? 'cursor-move' : ''}`;
-          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon'].includes(el.type);
+          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list'].includes(el.type);
           const shouldClip = ['lines', 'note_grid', 'habit_tracker', 'mini_calendar', 'full_calendar', 'table', 'permanent_day_header', 'vector_shape'].includes(el.type);
           
           return (
@@ -4911,7 +7705,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 onMouseDown={(e) => handleInteractionStart(e, el.id, null, templateType, introPageId)} 
                 onDoubleClick={(e) => {
                     e.stopPropagation();
-                    if (isEditor) autoFitElementToContent(el.id);
+                    if (isEditor) {
+                        if (el.type === 'vector_shape') {
+                            setShapeGalleryTargetId(el.id);
+                            setShapeGalleryOpen(true);
+                        } else {
+                            autoFitElementToContent(el.id);
+                        }
+                    }
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => handleContextMenu(e, el.id)}
@@ -4919,6 +7720,94 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             >
                 {isEditor && selectedIds.length === 1 && selectedIds[0] === el.id && (
                     <div className="no-print">
+                        {el.type === 'vector_shape' && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShapeGalleryTargetId(el.id);
+                                    setShapeGalleryOpen(true);
+                                }}
+                                className="absolute -top-7 left-1/2 -translate-x-1/2 bg-white/95 text-stone-800 hover:text-amber-700 shadow-md border border-stone-200 hover:border-amber-300 px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 z-50 whitespace-nowrap cursor-pointer hover:bg-amber-50/50 transition-all select-none"
+                                title="Abrir Galeria de Elementos & Formas"
+                            >
+                                <Sparkles className="w-3 h-3 text-amber-500" />
+                                Elementos & Formas
+                            </button>
+                        )}
+                        {el.type === 'full_calendar' && (() => {
+                            const hasHoliday = getActiveElements().some(item => item.type === 'holiday_list');
+                            const holidayEl = getActiveElements().find(item => item.type === 'holiday_list');
+                            return (
+                                <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-50 whitespace-nowrap select-none">
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (hasHoliday && holidayEl) {
+                                                setSelectedIds([holidayEl.id]);
+                                            } else {
+                                                insertHolidayListWithCalendar(el.id, { autoLayout: true, format: 'full_written', columns: 2 });
+                                            }
+                                        }}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md border border-indigo-500 px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                                        title={hasHoliday ? "Selecionar e editar texto da lista de feriados" : "Inserir lista com as datas e nomes dos feriados por extenso editável junto ao calendário"}
+                                    >
+                                        <Flag className="w-3 h-3 text-amber-300" />
+                                        {hasHoliday ? 'Editar Texto dos Feriados' : 'Inserir Feriados por Extenso'}
+                                    </button>
+                                    {!hasHoliday && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                insertHolidayListWithCalendar(el.id, { autoLayout: false, format: 'full_written', columns: 2 });
+                                            }}
+                                            className="bg-white/95 text-indigo-900 hover:text-indigo-600 shadow-md border border-indigo-200 px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 cursor-pointer transition-all"
+                                            title="Inserir bloco de texto de feriados sem alterar o tamanho do calendário"
+                                        >
+                                            <Plus className="w-2.5 h-2.5 text-indigo-600" /> Texto Livre
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                        {el.type === 'holiday_list' && (
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1 z-50 whitespace-nowrap select-none bg-white/95 p-0.5 rounded-full border border-indigo-200 shadow-md">
+                                <span className="bg-indigo-700 text-white px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1">
+                                    <Flag className="w-2.5 h-2.5 text-amber-300" /> Feriados
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateElementStyle(el.id, { columnCount: 1 });
+                                    }}
+                                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
+                                        (el.style.columnCount || 2) === 1
+                                            ? 'bg-indigo-600 text-white shadow-2xs'
+                                            : 'text-gray-600 hover:text-indigo-700 hover:bg-indigo-50'
+                                    }`}
+                                    title="Exibir feriados em 1 coluna vertical"
+                                >
+                                    1 Coluna
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateElementStyle(el.id, { columnCount: 2 });
+                                    }}
+                                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
+                                        (el.style.columnCount || 2) === 2
+                                            ? 'bg-indigo-600 text-white shadow-2xs'
+                                            : 'text-gray-600 hover:text-indigo-700 hover:bg-indigo-50'
+                                    }`}
+                                    title="Exibir feriados em 2 colunas lado a lado"
+                                >
+                                    2 Colunas ✨
+                                </button>
+                            </div>
+                        )}
                         {(() => {
                             const isSingleLine = el.type === 'lines' && !el.style.showTimes && (
                                 el.h < 3 || 
@@ -5025,15 +7914,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     );
   };
 
+  const getEffectiveBindingMargins = useCallback((cfg: AgendaConfig): PageMargins => {
+      if ((cfg.margins?.inside || 0) > 0 || (cfg.margins?.outside || 0) > 0) {
+          return cfg.margins;
+      }
+      if (cfg.bindingMargins && ((cfg.bindingMargins.inside || 0) > 0 || (cfg.bindingMargins.outside || 0) > 0)) {
+          return cfg.bindingMargins;
+      }
+      if (cfg.initialMargins && ((cfg.initialMargins.inside || 0) > 0 || (cfg.initialMargins.outside || 0) > 0)) {
+          return cfg.initialMargins;
+      }
+      if (initialConfig?.margins && ((initialConfig.margins.inside || 0) > 0 || (initialConfig.margins.outside || 0) > 0)) {
+          return initialConfig.margins;
+      }
+      return { top: 15, bottom: 15, inside: 20, outside: 10 };
+  }, [initialConfig]);
+
   const getMirroredElements = (elements: LayoutElement[]): LayoutElement[] => {
       if (!config.mirrorEvenPages) return elements;
-      // Se mirrorContentOnVerso for explicitamente false, apenas as margens da página invertem; o conteúdo mantém a mesma posição
-      if (config.mirrorContentOnVerso === false) return elements;
+
+      const effectiveMargins = getEffectiveBindingMargins(config);
+      const isZeroMargins = (config.margins?.inside || 0) === 0 && (config.margins?.outside || 0) === 0;
+
+      // Se mirrorContentOnVerso for explicitamente false, apenas as margens da página invertem; o conteúdo mantém a mesma posição/orientação
+      if (config.mirrorContentOnVerso === false) {
+          if (isZeroMargins) {
+              const insideMm = effectiveMargins.inside || 0;
+              const outsideMm = effectiveMargins.outside || 0;
+              const deltaMm = insideMm - outsideMm;
+              if (deltaMm !== 0 && PAGE_WIDTH_MM > 0) {
+                  const shiftPercent = -((deltaMm) / PAGE_WIDTH_MM) * 100;
+                  return elements.map(el => {
+                      if (el.w >= 99.5) return el;
+                      const maxX = Math.max(0, 100 - el.w);
+                      const newX = Math.round(Math.max(0, Math.min(maxX, el.x + shiftPercent)) * 1000) / 1000;
+                      return { ...el, x: newX };
+                  });
+              }
+          }
+          return elements;
+      }
+
       return elements.map(el => {
           const newX = 100 - el.x - el.w;
           let newTextAlign = el.style.textAlign;
-          if (newTextAlign === 'left') newTextAlign = 'right';
-          else if (newTextAlign === 'right') newTextAlign = 'left';
+          const isCalendarType = el.type === 'mini_calendar' || el.type === 'full_calendar';
+          if (!isCalendarType) {
+              if (newTextAlign === 'left') newTextAlign = 'right';
+              else if (newTextAlign === 'right') newTextAlign = 'left';
+          }
           
           let newFlipX = el.style.flipX;
           // Apply auto-mirroring for images and icons if enabled
@@ -5213,32 +8142,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const monthDummyDay = getProjectFirstDay(0);
 
         if (dividerViewMode === 'verso') {
-            const versoContent = config.monthlyDividerVersoContent || 'blank';
-            let versoElements: LayoutElement[] = [];
-            if (versoContent === 'notes') {
-                versoElements = [
-                    { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Anotações do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
-                    { id: 'v-lines', type: 'lines', name: 'Pauta', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { lineSpacing: 25, color: '#d1d5db' } }
-                ];
-            } else if (versoContent === 'habit_tracker') {
-                versoElements = [
-                    { id: 'v-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Controle de Hábitos', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
-                    { id: 'v-ht', type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { habitLabel: 'Hábitos do Mês' } }
-                ];
-            } else if (versoContent === 'quote') {
-                versoElements = [
-                    { id: 'v-quote', type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', fontStyle: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
-                ];
-            } else if (versoContent !== 'blank') {
-                const targetPage = config.monthlyIntroPages?.find(p => p.id === versoContent) || config.introPages?.find(p => p.id === versoContent);
-                if (targetPage) versoElements = targetPage.elements;
-            }
-
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
                     {renderBackgroundsForPage('divider_verso', editorPageNum, dividerStyle.versoBackground)}
                     <div className={usefulAreaClass}>
-                        {renderTemplate(versoElements, monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider_verso')}
+                        {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider_verso')}
                     </div>
                 </div>
             );
@@ -5255,6 +8163,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     const activeElements = getActiveElements();
+    const shouldMirrorInEditor = isEditorEven && !config.customVerso;
+    const elementsToRenderInEditor = shouldMirrorInEditor ? getMirroredElements(activeElements) : activeElements;
+    const isInteractiveInEditor = !shouldMirrorInEditor;
+
     if (config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.layoutType === 'devotional') {
         const maxOffset = getMaxDayIndex(activeElements);
         const mockBatch: DayData[] = Array.from({ length: maxOffset + 1 }, (_, i) => getProjectFirstDay(i));
@@ -5263,7 +8175,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
-                    {renderTemplate(activeElements, mockBatch[0], true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockBatch)}
+                    {renderTemplate(elementsToRenderInEditor, mockBatch[0], isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockBatch)}
                 </div>
             </div>
         );
@@ -5279,10 +8191,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     {renderBackgroundsForPage('daily', editorPageNum)}
                     <div className={`${usefulAreaClass} flex flex-col`}>
                         <div className="flex-1 border-b border-dashed border-indigo-200 relative overflow-visible">
-                            {renderTemplate(config.elements, mockDay1, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
+                            {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockDay1, isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
                         </div>
                         <div className="flex-1 relative overflow-visible">
-                            {renderTemplate(config.elements, mockDay2, true, false, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
+                            {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockDay2, isInteractiveInEditor, false, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
                         </div>
                     </div>
                 </div>
@@ -5342,7 +8254,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 <div className={containerClass} style={containerStyle}>
                     {renderBackgroundsForPage('daily', editorPageNum)}
                     <div className={usefulAreaClass}>
-                        {renderTemplate(config.elements, mockWeekday, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard')}
+                        {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockWeekday, isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard')}
                     </div>
                 </div>
             );
@@ -5395,7 +8307,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
-                    {renderTemplate(activeElements, mockWeek[0], true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
+                    {renderTemplate(elementsToRenderInEditor, mockWeek[0], isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
                 </div>
             </div>
         );
@@ -5483,7 +8395,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     return null;
   };
 
-  const renderPrintLayout = (limitStart?: number, limitEnd?: number, maxRenderCount?: number, countOnly?: boolean) => {
+  const renderPrintLayout = (limitStart?: number, limitEnd?: number, maxRenderCount?: number, countOnly?: boolean, hidePageNumbers?: boolean) => {
     const pages: React.ReactNode[] = [];
     const pageStyle = { width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm` };
     const borderStyle = showMargins ? 'border border-indigo-200 border-dashed' : '';
@@ -5501,7 +8413,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         hideNumbers = false, 
         pageSpecificBg?: BackgroundConfig, 
         customPageStyle?: React.CSSProperties,
-        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard' = 'daily'
+        pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard' = 'daily',
+        pageMonth?: number
     ) => {
         pageCount++;
         
@@ -5513,11 +8426,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         categoryRelativeCounters[catKey] = (categoryRelativeCounters[catKey] || 0) + 1;
         const catRelIndex = categoryRelativeCounters[catKey];
 
-        if (countOnly) return <div key={key} />;
+        if (countOnly) return <div key={key} data-page={pageCount} data-month={pageMonth} data-type={pageType} />;
 
         if (limitStart !== undefined && limitEnd !== undefined) {
             if (pageCount < limitStart || pageCount > limitEnd) return null;
         }
+
+        const shouldHideNumbers = hideNumbers || hidePageNumbers;
 
         const isEven = pageCount % 2 === 0;
         let marginLeft = config.margins.inside;
@@ -5529,26 +8444,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const pagePadding = `${config.margins.top}mm ${marginRight}mm ${config.margins.bottom}mm ${marginLeft}mm`;
 
         return (
-            <div id={`preview-page-${pageCount}`} key={key} className="bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 transition-transform hover:scale-[1.01]" style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
+            <div id={`preview-page-${pageCount}`} data-page={pageCount} data-month={pageMonth} data-type={pageType} key={key} className={`bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 ${shouldHideNumbers ? '' : 'transition-transform hover:scale-[1.01]'}`} style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
                 {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg, catRelIndex)}
                 <div className="relative z-10 h-full w-full">
-                    <div className="absolute -top-7 left-0 right-0 flex justify-between items-center no-print px-2 bg-indigo-900/5 py-1 rounded-t-lg">
-                    <div className="flex items-center gap-1.5">
-                        <span className="w-4 h-4 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center text-white font-black">{pageCount}</span>
-                        <span className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Página {pageCount}</span>
+                    {!shouldHideNumbers && (
+                        <div className="absolute -top-7 left-0 right-0 flex justify-between items-center no-print px-2 bg-indigo-900/5 py-1 rounded-t-lg">
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center text-white font-black">{pageCount}</span>
+                                <span className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Página {pageCount}</span>
+                            </div>
+                            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-tighter">{isEven ? 'Lado Esquerdo' : 'Lado Direito'}</span>
+                        </div>
+                    )}
+                    <div className={`w-full h-full relative ${borderStyle} print:border-none overflow-visible`}>
+                        {children}
                     </div>
-                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-tighter">{isEven ? 'Lado Esquerdo' : 'Lado Direito'}</span>
-                </div>
-                <div className={`w-full h-full relative ${borderStyle} print:border-none overflow-visible`}>
-                    {children}
-                </div>
-                {!hideNumbers && (
-                    <div className={`absolute bottom-3 text-[10px] font-black text-indigo-500/20 no-print pointer-events-none w-full text-center flex items-center justify-center gap-2 italic uppercase tracking-widest`}>
-                        <div className="h-px w-8 bg-indigo-500/10"></div>
-                        {pageCount} / {actualTotalPagesCount || generatedData.length}
-                        <div className="h-px w-8 bg-indigo-500/10"></div>
-                    </div>
-                )}
+                    {!shouldHideNumbers && (
+                        <div className={`absolute bottom-3 text-[10px] font-black text-indigo-500/20 no-print pointer-events-none w-full text-center flex items-center justify-center gap-2 italic uppercase tracking-widest`}>
+                            <div className="h-px w-8 bg-indigo-500/10"></div>
+                            {pageCount} / {actualTotalPagesCount || generatedData.length}
+                            <div className="h-px w-8 bg-indigo-500/10"></div>
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -5591,7 +8508,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             false,
             dividerBg,
             customStyle,
-            'divider'
+            'divider',
+            month
         );
     };
 
@@ -5599,7 +8517,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         let elements: LayoutElement[] = [];
         let versoBg: BackgroundConfig | undefined = undefined;
         
-        if (content === 'notes') {
+        if (config.monthlyDividerStyle?.versoElements !== undefined) {
+            elements = config.monthlyDividerStyle.versoElements;
+            if (config.monthlyDividerStyle?.versoBackground) {
+                versoBg = getEffectiveBg(config.monthlyDividerStyle.versoBackground);
+            }
+        } else if (content === 'notes') {
             elements = [
                 { id: `verso-title-${pNum}`, type: 'text', name: 'Título', x: 10, y: 10, w: 80, h: 5, content: 'Anotações do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
                 { id: `verso-lines-${pNum}`, type: 'lines', name: 'Linhas', x: 10, y: 20, w: 80, h: 70, zIndex: 1, style: { lineSpacing: 25, color: '#e5e7eb' } }
@@ -5610,9 +8533,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 { id: `verso-habit-${pNum}`, type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 20, w: 80, h: 70, zIndex: 1, style: { habitLabel: 'Meus Hábitos' } }
             ];
         } else if (content === 'quote') {
+            const currentQuoteStyle: TextStyleConfig = {
+                fontSize: 20,
+                fontWeight: 'bold',
+                fontStyle: 'italic',
+                textAlign: 'center',
+                verticalAlign: 'middle',
+                color: '#1f2937',
+                fontFamily: 'Inter',
+                lineHeight: 1.5,
+                letterSpacing: 0,
+                textTransform: 'none',
+                backgroundColor: 'transparent',
+                ...(config.monthlyDividerStyle?.versoQuoteStyle || {})
+            };
+            const pos = config.monthlyDividerStyle?.versoQuotePosition || { x: 10, y: 30, w: 80, h: 40 };
             elements = [
-                { id: `verso-quote-${pNum}`, type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                { id: `verso-quote-${pNum}`, type: 'quote', name: 'Frase', x: pos.x, y: pos.y, w: pos.w, h: pos.h, zIndex: 1, style: currentQuoteStyle }
             ];
+            if (config.monthlyDividerStyle?.versoBackground) {
+                versoBg = getEffectiveBg(config.monthlyDividerStyle.versoBackground);
+            }
         } else if (content !== 'blank') {
             const introPage = config.introPages.find(p => p.id === content);
             if (introPage) {
@@ -5638,12 +8579,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         };
         
         return renderPageContainer(
-            renderTemplate(elementsToRender, monthDummyDay, false, false, pNum, printW, printH, 'intro', content),
+            renderTemplate(elementsToRender, monthDummyDay, false, false, pNum, printW, printH, 'intro', 'divider_verso'),
             `divider-verso-${month}-${year}-${pNum}`,
             false,
             versoBg,
             undefined,
-            'divider_verso'
+            'divider_verso',
+            month
         );
     };
 
@@ -5651,7 +8593,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const printW = PAGE_WIDTH_MM * PRINT_SCALE;
     const printH = PAGE_HEIGHT_MM * PRINT_SCALE;
 
-    const renderFillerPage = (pNum: number) => {
+    const renderFillerPage = (pNum: number, fillerMonth?: number) => {
         const content = config.fillerPageContent || 'blank';
         let elements: LayoutElement[] = [];
         let fillerBg: BackgroundConfig | undefined = undefined;
@@ -5693,7 +8635,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             false,
             fillerBg,
             undefined,
-            'intro'
+            'intro',
+            fillerMonth
         );
     };
 
@@ -5721,7 +8664,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             // Se pageCount for ímpar (pageCount % 2 !== 0), a próxima página seria par (esquerda).
             // Inserimos uma página de preenchimento para que a divisória fique na página ímpar (direita).
             if (pageCount % 2 !== 0) {
-                const filler = renderFillerPage(pageCount + 1);
+                const filler = renderFillerPage(pageCount + 1, currentMonth);
                 if (filler) pages.push(filler);
             }
             const divider = renderMonthDivider(currentMonth, currentYear);
@@ -5748,7 +8691,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         false,
                         pageBg,
                         undefined,
-                        idx === 0 ? 'divider_verso' : 'monthly_intro'
+                        idx === 0 ? 'divider_verso' : 'monthly_intro',
+                        currentMonth
                     );
                     if (container) pages.push(container);
                 });
@@ -5777,7 +8721,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             false,
                             pageBg,
                             undefined,
-                            'monthly_intro'
+                            'monthly_intro',
+                            currentMonth
                         );
                         if (container) pages.push(container);
                     });
@@ -5786,7 +8731,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         } else if (hasIntroPages && hasIntroPagesData) {
             // Se não tem divisórias, mas tem páginas mensais ativas, inicia as páginas mensais na PÁGINA DIREITA (Ímpar)
             if (pageCount % 2 !== 0) {
-                const filler = renderFillerPage(pageCount + 1);
+                const filler = renderFillerPage(pageCount + 1, currentMonth);
                 if (filler) pages.push(filler);
             }
             const monthDummyDay: DayData = {
@@ -5806,7 +8751,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false,
                     pageBg,
                     undefined,
-                    'monthly_intro'
+                    'monthly_intro',
+                    currentMonth
                 );
                 if (container) pages.push(container);
             });
@@ -5819,7 +8765,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const shouldStartMonthOnRight = (config.startMonthOnRightPage ?? true);
         if (shouldStartMonthOnRight) {
             if (pageCount % 2 !== 0) {
-                const filler = renderFillerPage(pageCount + 1);
+                const filler = renderFillerPage(pageCount + 1, currentMonth);
                 if (filler) pages.push(filler);
             }
         }
@@ -5858,7 +8804,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false,
                     undefined,
                     undefined,
-                    'daily'
+                    'daily',
+                    currentMonth
                 );
                 if (container) pages.push(container);
                 i += daysInCurrentMonth.length;
@@ -5877,7 +8824,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false, 
                     undefined, 
                     undefined, 
-                    'daily'
+                    'daily',
+                    currentMonth
                 );
                 if(containerFrente) pages.push(containerFrente);
 
@@ -5892,7 +8840,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false, 
                     undefined, 
                     undefined, 
-                    'daily'
+                    'daily',
+                    currentMonth
                 );
                 if(containerVerso) pages.push(containerVerso);
 
@@ -5908,7 +8857,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false, 
                     undefined, 
                     undefined, 
-                    'daily'
+                    'daily',
+                    currentMonth
                 );
                 if(container) pages.push(container);
                 i += daysPerPage;
@@ -5946,7 +8896,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             Página de Transição
                         </div>
                     </div>
-                , `transition-${dayTop.date.toISOString()}`, false, undefined, undefined, 'daily');
+                , `transition-${dayTop.date.toISOString()}`, false, undefined, undefined, 'daily', dayTop.month);
                 if (container) pages.push(container);
 
                 i += 1; // Consome apenas dayTop; dayBottom será processado como dayTop na próxima iteração
@@ -5969,7 +8919,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         {dayBottom ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(bottomToRender, dayBottom, false, false, pageCount + 1, printW, printH / 2, 'bottom')}</div>) : null}
                     </div>
                 </div>
-            , i, false, undefined, undefined, 'daily');
+            , i, false, undefined, undefined, 'daily', dayTop.month);
             if(container) pages.push(container);
             i += 2;
         }
@@ -6008,7 +8958,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 Página de Transição
                             </div>
                         </div>
-                    , `we-trans-${i}`, false, undefined, undefined, 'daily');
+                    , `we-trans-${i}`, false, undefined, undefined, 'daily', day.month);
                     if(container) pages.push(container);
                     
                     i += 1; // Consome apenas sábado; domingo será processado na próxima iteração
@@ -6032,14 +8982,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             {effectiveDays[i+1] ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, effectiveDays[i+1], false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
                         </div>
                     </div>
-                , `we-${i}`, false, undefined, undefined, 'daily');
+                , `we-${i}`, false, undefined, undefined, 'daily', day.month);
                 if(container) pages.push(container);
                 i += 2;
             } else {
                 const elementsToRender = (isEven && config.customVerso && config.elementsVerso)
                     ? config.elementsVerso
                     : (isEven ? getMirroredElements(config.elements) : config.elements);
-                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, undefined, undefined, 'daily');
+                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, undefined, undefined, 'daily', day.month);
                 if(container) pages.push(container);
                 i += 1;
             }
@@ -6078,7 +9028,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         {renderTemplate(frenteElements, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
                     </div>,
                     `week-single-frente-${weekIndex}`,
-                    false, undefined, undefined, 'daily'
+                    false, undefined, undefined, 'daily', currentMonth
                 );
                 if (containerFrente) pages.push(containerFrente);
 
@@ -6092,7 +9042,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         {renderTemplate(versoElements, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
                     </div>,
                     `week-single-verso-${weekIndex}`,
-                    false, undefined, undefined, 'daily'
+                    false, undefined, undefined, 'daily', currentMonth
                 );
                 if (containerVerso) pages.push(containerVerso);
             } else {
@@ -6108,7 +9058,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false,
                     undefined,
                     undefined,
-                    'daily'
+                    'daily',
+                    currentMonth
                 );
                 if (container) pages.push(container);
             }
@@ -6145,7 +9096,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             // Ensure Week Left Page is on an EVEN page (Left)
             // To make the next page EVEN, current pageCount must be ODD.
             if (pageCount % 2 === 0 && !config.disableSequenceSkip) {
-                const filler = renderFillerPage(pageCount + 1);
+                const filler = renderFillerPage(pageCount + 1, currentMonth);
                 if (filler) pages.push(filler);
             }
 
@@ -6159,7 +9110,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 false,
                 undefined,
                 undefined,
-                'daily'
+                'daily',
+                currentMonth
             );
             if (containerL) pages.push(containerL);
 
@@ -6173,7 +9125,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 false,
                 undefined,
                 undefined,
-                'daily'
+                'daily',
+                currentMonth
             );
             if (containerR) pages.push(containerR);
         });
@@ -6264,6 +9217,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                <div className="flex gap-1.5 flex-wrap justify-end">
                  <button 
                    type="button"
+                   onClick={() => setActiveTab('opentype')} 
+                   className="text-[9px] text-amber-600 hover:text-amber-700 font-bold uppercase tracking-tighter flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hover:bg-amber-100 transition-colors"
+                   title="Abrir catálogo de glifos e letras decorativas desta fonte"
+                 >
+                   <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+                   Glifos
+                 </button>
+                 <button 
+                   type="button"
                    onClick={handleLoadLocalFonts} 
                    className="text-[9px] text-indigo-600 hover:text-indigo-800 font-bold uppercase tracking-tighter flex items-center gap-0.5"
                    title="Puxar as fontes instaladas no seu computador"
@@ -6274,7 +9236,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                    ) : (
                      <Monitor className="w-2.5 h-2.5" />
                    )}
-                   {localFonts.length > 0 ? `${localFonts.length} no PC` : 'Buscar PC'}
+                   {localFonts.length > 0 ? `Buscar fontes instaladas no pc (${localFonts.length})` : 'Buscar fontes instaladas no pc'}
                  </button>
                  <button 
                    type="button"
@@ -6307,8 +9269,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                      <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
                    ))}
                  </optgroup>
-                 <optgroup label="Fontes do PC (Instaladas)">
-                   {SYSTEM_FONTS.map(font => (
+                 <optgroup label={`Fontes do Computador (${allSystemFonts.length})`}>
+                   {allSystemFonts.map(font => (
                      <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
                    ))}
                  </optgroup>
@@ -6319,27 +9281,87 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                      ))}
                    </optgroup>
                  )}
-                 {manualFonts.length > 0 && (
-                   <optgroup label="Fontes do PC (Digitadas)">
-                     {manualFonts.map(font => (
-                       <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
-                     ))}
-                   </optgroup>
-                 )}
-                 {localFonts.length > 0 && (
-                   <optgroup label="Fontes do PC (Auto)">
-                     {localFonts.map(font => (
-                       <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
-                     ))}
-                   </optgroup>
-                 )}
                </select>
                <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2 top-2.5 pointer-events-none" />
              </div>
            </div>
-           <div className="flex gap-2"><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tamanho</label><input type="number" min="4" max="100" value={values.fontSize || 12} onChange={(e) => onChange({ fontSize: parseInt(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Cor Texto</label><div className="flex h-[30px] border border-gray-200 rounded overflow-hidden"><input type="color" value={(values.color && values.color.startsWith('#')) ? values.color : '#000000'} onChange={(e) => onChange({ color: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" /><input type="text" value={values.color || '#000000'} onChange={(e) => onChange({ color: e.target.value })} className="w-full text-[10px] uppercase p-1 border-l" /></div></div></div>
+           <div className="flex gap-2">
+             <div className="flex-1">
+               <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tamanho</label>
+               <div className="flex items-center gap-1">
+                 <button
+                   type="button"
+                   onClick={() => onChange({ fontSize: Math.max(3, Math.round(((values.fontSize || 12) - 0.5) * 10) / 10) })}
+                   className="w-7 h-[30px] rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-xs font-bold flex items-center justify-center cursor-pointer select-none"
+                   title="Diminuir fonte em 0.5"
+                 >
+                   -
+                 </button>
+                 <input 
+                   type="number" 
+                   step="0.5" 
+                   min="3" 
+                   max="120" 
+                   value={values.fontSize || 12} 
+                   onChange={(e) => {
+                     const val = parseFloat(e.target.value);
+                     if (!isNaN(val)) onChange({ fontSize: val });
+                   }} 
+                   className="w-full text-xs p-1.5 h-[30px] text-center border border-gray-200 rounded font-bold" 
+                 />
+                 <button
+                   type="button"
+                   onClick={() => onChange({ fontSize: Math.min(120, Math.round(((values.fontSize || 12) + 0.5) * 10) / 10) })}
+                   className="w-7 h-[30px] rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-xs font-bold flex items-center justify-center cursor-pointer select-none"
+                   title="Aumentar fonte em 0.5"
+                 >
+                   +
+                 </button>
+               </div>
+             </div>
+             <div className="flex-1">
+               <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Cor Texto</label>
+               <div className="flex h-[30px] border border-gray-200 rounded overflow-hidden">
+                 <input type="color" value={(values.color && values.color.startsWith('#')) ? values.color : '#000000'} onChange={(e) => onChange({ color: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
+                 <input type="text" value={values.color || '#000000'} onChange={(e) => onChange({ color: e.target.value })} className="w-full text-[10px] uppercase p-1 border-l" />
+               </div>
+             </div>
+           </div>
            <div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Cor Fundo</label><div className="flex h-[30px] border border-gray-200 rounded overflow-hidden"><input type="color" value={(values.backgroundColor && values.backgroundColor.startsWith('#')) ? values.backgroundColor : '#ffffff'} onChange={(e) => onChange({ backgroundColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" /><div className="flex-1 flex items-center px-1"><button onClick={() => onChange({ backgroundColor: 'transparent' })} className="text-[10px] text-gray-500 hover:text-red-500 bg-transparent">Sem Fundo</button></div></div></div>
-           <div className="flex gap-2"><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Peso</label><select value={values.fontWeight || 'normal'} onChange={(e) => onChange({ fontWeight: e.target.value })} className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"><option value="normal">Normal</option><option value="bold">Bold</option><option value="300">Light</option><option value="900">Black</option></select></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tracking</label><input type="number" step="0.5" value={values.letterSpacing || 0} onChange={(e) => onChange({ letterSpacing: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div><div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Alt. Linha</label><input type="number" step="0.1" min="0.5" max="5" value={values.lineHeight || 1.5} onChange={(e) => onChange({ lineHeight: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" /></div></div>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Peso</label>
+                <select value={values.fontWeight || 'normal'} onChange={(e) => onChange({ fontWeight: e.target.value })} className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white">
+                  <option value="normal">Normal</option>
+                  <option value="bold">Bold</option>
+                  <option value="300">Light</option>
+                  <option value="900">Black</option>
+                </select>
+              </div>
+              <div className="w-[45px]">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Itálico</label>
+                <button 
+                  type="button"
+                  onClick={() => onChange({ fontStyle: values.fontStyle === 'italic' ? 'normal' : 'italic' })} 
+                  className={`w-full h-[30px] rounded border flex items-center justify-center transition-all ${
+                    values.fontStyle === 'italic' 
+                      ? 'bg-indigo-50 border-indigo-400 text-indigo-700 font-bold' 
+                      : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                  }`}
+                  title="Itálico (Alternar itálico)"
+                >
+                  <Italic className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tracking</label>
+                <input type="number" step="0.5" value={values.letterSpacing || 0} onChange={(e) => onChange({ letterSpacing: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Alt. Linha</label>
+                <input type="number" step="0.1" min="0.5" max="5" value={values.lineHeight || 1.5} onChange={(e) => onChange({ lineHeight: parseFloat(e.target.value) })} className="w-full text-xs p-1.5 border border-gray-200 rounded" />
+              </div>
+            </div>
            <div className="space-y-2"><label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo & Alinhamento</label>
            <div className="flex flex-col gap-1">
                <div className="flex border border-gray-200 rounded overflow-hidden divide-x divide-gray-100">
@@ -6668,117 +9690,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
       `}</style>
       
-      {!isMobile && (
-          <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-[100] no-print">
-              <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                      <Calendar className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                      <h1 className="text-lg font-black text-gray-900 leading-none">AgendaMaster <span className="text-indigo-600">AI</span></h1>
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Editor Profissional</p>
-                  </div>
-              </div>
-
-              <div className="flex items-center bg-gray-100 p-1 rounded-xl gap-1">
-                  <button 
-                  onClick={() => setActiveTab('editor')}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'editor' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                  >
-                  <Layout className="w-4 h-4" />
-                  EDITOR
-                  </button>
-                  <button 
-                  onClick={() => setActiveTab('preview')}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'preview' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                  >
-                  <Eye className="w-4 h-4" />
-                  VISUALIZAR
-                  </button>
-                  <button 
-                  onClick={() => setActiveTab('opentype')}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'opentype' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                  >
-                  <Type className="w-4 h-4" />
-                  GLIFOS OPENTYPE
-                  </button>
-              </div>
-
-              <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-100">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tight">{user.name}</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-1">
-                      <button 
-                      onClick={() => executePrint()}
-                      className="p-2 transition-all hover:bg-gray-100 rounded-lg text-gray-400 hover:text-indigo-600"
-                      title="Exportar PDF"
-                      >
-                      <FileDown className="w-5 h-5" />
-                      </button>
-                      <button 
-                      onClick={onLogout}
-                      className="p-2 transition-all hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500"
-                      title="Sair"
-                      >
-                      <LogOut className="w-5 h-5" />
-                      </button>
-                  </div>
-              </div>
-          </header>
-      )}
-
-      {isMobile && (
-          <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-3 z-[100] no-print shrink-0 shadow-xs">
-              <div className="flex items-center gap-1.5 shrink-0">
-                  <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center shadow-xs">
-                    <Calendar className="w-4 h-4 text-white" />
-                  </div>
-                  <span className="text-xs font-black text-gray-900 tracking-tight hidden sm:inline">AgendaMaster</span>
-              </div>
-
-              <div className="flex items-center bg-gray-100 p-1 rounded-xl gap-0.5 text-[10px]">
-                  <button 
-                    onClick={() => setActiveTab('editor')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTab === 'editor' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500'}`}
-                  >
-                    Editor
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('preview')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTab === 'preview' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500'}`}
-                  >
-                    Ver
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('opentype')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTab === 'opentype' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500'}`}
-                  >
-                    Glifos
-                  </button>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0">
-                  <button 
-                      onClick={() => executePrint()}
-                      className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-xs hover:bg-indigo-700 transition-colors"
-                      title="Exportar PDF"
-                  >
-                      <FileDown className="w-4 h-4" />
-                  </button>
-                  <button 
-                      onClick={onLogout}
-                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-gray-100 rounded-lg transition-colors"
-                      title="Sair"
-                  >
-                      <LogOut className="w-4 h-4" />
-                  </button>
-              </div>
-          </header>
-      )}
-      
       {printStatus !== 'idle' && (
           <div id="print-container" className="absolute top-0 left-0 -z-50 opacity-0 print:opacity-100 print:z-50 pointer-events-none print:pointer-events-auto">
               {renderPrintLayout(undefined, undefined, renderedPrintCount)}
@@ -7097,6 +10008,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                   </button>
                               )}
                           </div>
+                          <button 
+                              type="button"
+                              onClick={() => {
+                                  cancelPrint();
+                                  setActiveTab('mockup');
+                              }}
+                              className="w-full mt-3 py-2.5 px-4 rounded-xl border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-800 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                          >
+                              <Box className="w-4 h-4 text-orange-600"/>
+                              <span>Estúdio 3D: Criar Mockup deste Miolo</span>
+                          </button>
                       </div>
                   </div>
               )}
@@ -7772,7 +10694,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                           <div className="bg-indigo-600 p-1.5 rounded-lg shadow-sm"><Layout className="w-4 h-4 text-white"/></div>
                           <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Modelos Prontos</h3>
                       </div>
-                      <button onClick={() => setTemplateModal(false)} className="text-gray-400 hover:text-red-500 transition-colors p-1 hover:bg-red-50 rounded-full"><X className="w-5 h-5"/></button>
+                      <div className="flex items-center gap-2">
+                          <button
+                              onClick={() => {
+                                  setTemplateModal(false);
+                                  setPdfImportModalOpen(true);
+                              }}
+                              className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+                              title="Importar layout editável de PDF (CorelDraw, Canva, Illustrator)"
+                          >
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Importar PDF (Corel)</span>
+                          </button>
+                          <button onClick={() => setTemplateModal(false)} className="text-gray-400 hover:text-red-500 transition-colors p-1 hover:bg-red-50 rounded-full"><X className="w-5 h-5"/></button>
+                      </div>
                   </div>
                   
                   <div className="flex border-b border-gray-100">
@@ -8141,6 +11076,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           currentPageCount={renderPrintLayout ? renderPrintLayout(undefined, undefined, undefined, true).length : 150}
       />
 
+      <PdfImportModal 
+          isOpen={pdfImportModalOpen}
+          onClose={() => {
+            setPdfImportModalOpen(false);
+            setPdfImportInitialFile(null);
+          }}
+          onImport={handleImportPdfElements}
+          currentPageTitle={currentPageTitle}
+          initialFile={pdfImportInitialFile}
+          initialDestination={pdfImportInitialDestination}
+      />
+
+      <VectorShapeGalleryModal
+          isOpen={shapeGalleryOpen}
+          onClose={() => {
+              setShapeGalleryOpen(false);
+              setShapeGalleryTargetId(null);
+          }}
+          onSelectShape={handleSelectVectorShape}
+          currentShapeId={
+              shapeGalleryTargetId 
+                  ? selectedElement?.style?.shapeType 
+                  : undefined
+          }
+          isUpdatingExisting={!!shapeGalleryTargetId}
+      />
+
+      <FooterTrackerGalleryModal
+          isOpen={footerGalleryOpen}
+          onClose={() => setFooterGalleryOpen(false)}
+          onSelectPreset={handleSelectFooterTracker}
+      />
+
       <div className="flex-1 flex flex-col overflow-hidden no-print">
           <header className="bg-white border-b border-gray-200 h-14 flex items-center justify-between px-4 z-20 shrink-0">
             <div className="flex items-center space-x-3">
@@ -8174,10 +11142,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 Auto-salvo localmente
               </div>
             </div>
-            <div className="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg">
-              <button onClick={() => setActiveTab('editor')} className={`px-3 py-1.5 text-xs font-medium rounded-md ${activeTab === 'editor' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}>Editar</button>
-              <button onClick={() => setActiveTab('preview')} className={`px-3 py-1.5 text-xs font-medium rounded-md ${activeTab === 'preview' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}>Visualizar</button>
-              <button onClick={() => setActiveTab('opentype')} className={`px-3 py-1.5 text-xs font-medium rounded-md ${activeTab === 'opentype' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}>Glifos OpenType</button>
+            <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-xl">
+              <button 
+                onClick={() => setActiveTab('editor')} 
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'editor' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                <Layout className="w-3.5 h-3.5" />
+                <span>Editor</span>
+              </button>
+              <button 
+                onClick={() => {
+                  clearSimulationMode();
+                  setActiveTab('preview');
+                }} 
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'preview' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Visualizar</span>
+              </button>
+              <button 
+                onClick={() => setActiveTab('opentype')} 
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'opentype' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="Ver letras decorativas, swashes e glifos especiais"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Glifos & Letras Especiais</span>
+              </button>
+              <button 
+                onClick={() => setActiveTab('mockup')} 
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'mockup' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="Estúdio de Mockup 3D: exiba e exporte fotos realistas da agenda com wire-o e cenários"
+              >
+                <Box className="w-3.5 h-3.5 text-orange-500" />
+                <span>Mockup 3D</span>
+              </button>
             </div>
             <div className="flex items-center space-x-3">
                 <button 
@@ -8218,6 +11216,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     >
                         <Upload className="w-4 h-4 mr-2" />
                         Abrir
+                    </button>
+                    <div className="w-px h-3 bg-gray-200"></div>
+                    <button 
+                        onClick={() => setPdfImportModalOpen(true)} 
+                        className="flex items-center px-3 py-1.5 text-xs font-bold uppercase tracking-tight text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 rounded transition-all border border-indigo-200/80 shadow-2xs cursor-pointer" 
+                        title="Importar layout editável de PDF (CorelDraw, Canva, Illustrator)"
+                    >
+                        <Sparkles className="w-4 h-4 mr-1.5 text-indigo-600" />
+                        Importar PDF
                     </button>
                 </div>
                 <input 
@@ -8289,6 +11296,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 >
                   <icons.RefreshCw className="w-4 h-4" />
                 </button>
+                {user?.name && (
+                  <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 rounded-lg border border-gray-200/80">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                    <span className="text-[10px] font-bold text-gray-600 uppercase tracking-tight">{user.name}</span>
+                  </div>
+                )}
                 <button onClick={onLogout} className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors" title="Sair da Conta"><LogOut className="w-4 h-4" /></button>
             </div>
           </header>
@@ -8296,7 +11309,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           <div className="flex-1 flex overflow-hidden relative">
             {/* Sidebar (Templates & Elements) */}
             <AnimatePresence>
-                {(!isMobile || mobileDrawer === 'sidebar') && activeTab !== 'opentype' && (
+                {(!isMobile || mobileDrawer === 'sidebar') && activeTab !== 'opentype' && activeTab !== 'mockup' && (
                     <motion.aside 
                         initial={isMobile ? { y: '100%' } : undefined}
                         animate={isMobile ? { y: 0 } : undefined}
@@ -8311,46 +11324,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
                         <div className={`${isMobile ? 'flex-1 overflow-y-auto pb-20' : 'flex-1 overflow-y-auto custom-scrollbar'}`}>
-                            <div className="p-4 border-b border-gray-100 bg-gray-50/50">
-                        <div className="flex items-center mb-3 text-indigo-600"><Settings2 className="w-4 h-4 mr-2" /><h3 className="text-xs font-bold uppercase tracking-wider">Configuração do Projeto</h3></div>
-                        <div className="space-y-3">
+                            <div className="p-3.5 border-b border-gray-200 bg-gray-50/70">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsProjectConfigOpen(prev => !prev)}
+                                    className="w-full flex items-center justify-between text-indigo-700 hover:text-indigo-900 transition-all cursor-pointer select-none group"
+                                    title={isProjectConfigOpen ? "Recolher Configuração do Projeto" : "Expandir Configuração do Projeto"}
+                                >
+                                    <div className="flex items-center text-indigo-700 min-w-0">
+                                        <Settings2 className="w-4 h-4 mr-2 text-indigo-700 shrink-0 group-hover:rotate-45 transition-transform duration-200" />
+                                        <h3 className="text-xs font-black uppercase tracking-wider text-indigo-900 truncate">Configuração do Projeto</h3>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                        {!isProjectConfigOpen && (
+                                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 border border-indigo-200 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+                                                {config.year} • {getLayoutTypeShortLabel(config.layoutType)}
+                                            </span>
+                                        )}
+                                        <ChevronDown className={`w-4 h-4 text-indigo-700 transition-transform duration-200 ${isProjectConfigOpen ? 'rotate-180' : ''}`} />
+                                    </div>
+                                </button>
+                                {isProjectConfigOpen && (
+                                    <div className="space-y-3 pt-3 mt-2 border-t border-gray-200">
                             {!(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                 <>
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Ano de Referência</label>
+                                        <label className="block text-[11px] font-black text-gray-900 uppercase mb-1">Ano de Referência</label>
                                         <div className="flex items-center gap-2">
                                             <input 
                                                 type="number" 
                                                 value={config.year} 
                                                 onChange={(e) => setConfig({ ...config, year: parseInt(e.target.value) || 2027 })} 
-                                                className={`flex-1 p-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold ${
+                                                className={`flex-1 p-2 text-sm border-2 rounded-lg focus:ring-2 focus:ring-indigo-500/30 outline-none font-black ${
                                                   isProjectYearRestricted(config.projectType, config.year, config.startMonth ?? 0, config.durationMonths ?? 12, user.plan)
-                                                    ? 'border-amber-400 bg-amber-50/25 text-amber-900' 
-                                                    : 'border-gray-200 text-gray-700'
+                                                    ? 'border-amber-500 bg-amber-50/40 text-amber-950' 
+                                                    : 'border-gray-300 text-gray-950 bg-white focus:border-indigo-600'
                                                 }`}
                                             />
-                                            <div className="p-2 bg-indigo-100 rounded text-indigo-700" title="O ano altera calendários e feriados automaticamente">
+                                            <div className="p-2 bg-indigo-100 rounded-lg text-indigo-800" title="O ano altera calendários e feriados automaticamente">
                                                 <Info className="w-4 h-4" />
                                             </div>
                                         </div>
 
                                         {(isProjectYearRestricted(config.projectType, config.year, config.startMonth ?? 0, config.durationMonths ?? 12, user.plan)) && (
-                                            <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 leading-normal shadow-sm">
-                                                <p className="font-bold flex items-center gap-1 mb-1 text-amber-955">
-                                                    <Lock className="w-3 h-3 text-amber-600" /> Período/Ano Restrito
+                                            <div className="mt-2.5 p-3 bg-amber-50 border-2 border-amber-300 rounded-xl text-xs text-amber-950 leading-normal shadow-sm">
+                                                <p className="font-black flex items-center gap-1.5 mb-1 text-amber-950">
+                                                    <Lock className="w-3.5 h-3.5 text-amber-700" /> Período/Ano Restrito
                                                 </p>
-                                                <p>Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
-                                                <p className="mt-1 font-semibold">Os botões de exportação e download do PDF foram desabilitados para esta configuração.</p>
-                                                <div className="mt-2 flex gap-1.5">
+                                                <p className="font-medium text-amber-950">Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
+                                                <p className="mt-1 font-bold text-amber-950">Os botões de exportação e download do PDF foram desabilitados para esta configuração.</p>
+                                                <div className="mt-2.5 flex gap-2">
                                                     <button 
                                                         onClick={() => setConfig({ ...config, year: 2027, startMonth: 0, durationMonths: 12 })} 
-                                                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-0.5 px-2 rounded text-[9px] transition-colors"
+                                                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-black py-1 px-2.5 rounded-lg text-[10px] transition-colors shadow-xs cursor-pointer"
                                                     >
                                                         Ajustar para 2027 (12 Meses)
                                                     </button>
                                                     <button 
                                                         onClick={() => setConfig({ ...config, year: 2027, startMonth: 0, durationMonths: 13 })} 
-                                                        className="bg-white hover:bg-gray-100 text-gray-700 font-bold py-0.5 px-2 rounded text-[9px] border border-gray-200 transition-colors"
+                                                        className="bg-white hover:bg-gray-100 text-gray-950 font-black py-1 px-2.5 rounded-lg text-[10px] border-2 border-gray-300 transition-colors shadow-xs cursor-pointer"
                                                     >
                                                         Jan/27 a Jan/28 (13 Meses)
                                                     </button>
@@ -8360,20 +11392,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     </div>
 
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Mês Inicial</label>
+                                        <label className="block text-[11px] font-black text-gray-900 uppercase mb-1">Mês Inicial</label>
                                         <select 
                                             value={config.startMonth ?? 0} 
                                             onChange={(e) => setConfig({ ...config, startMonth: parseInt(e.target.value) })} 
-                                            className="w-full p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700 bg-white"
+                                            className="w-full p-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-600 outline-none font-black text-gray-950 bg-white"
                                         >
                                             {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((mName, idx) => (
-                                                <option key={idx} value={idx}>{mName}</option>
+                                                <option key={idx} value={idx} className="text-gray-950 font-bold">{mName}</option>
                                             ))}
                                         </select>
                                     </div>
 
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Início da Semana (Calendários)</label>
+                                        <label className="block text-[11px] font-black text-gray-900 uppercase mb-1">Início da Semana (Calendários)</label>
                                          <select 
                                              value={config.startOfWeekDay ?? 0} 
                                              onChange={(e) => {
@@ -8406,30 +11438,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                      };
                                                  });
                                              }} 
-                                             className="w-full p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700 bg-white mb-3"
+                                             className="w-full p-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-600 outline-none font-black text-gray-950 bg-white mb-3"
                                          >
-                                             <option value={0}>Domingo</option>
-                                             <option value={1}>Segunda-feira</option>
-                                             <option value={2}>Terça-feira</option>
-                                             <option value={3}>Quarta-feira</option>
-                                             <option value={4}>Quinta-feira</option>
-                                             <option value={5}>Sexta-feira</option>
-                                             <option value={6}>Sábado</option>
+                                             <option value={0} className="text-gray-950 font-bold">Domingo</option>
+                                             <option value={1} className="text-gray-950 font-bold">Segunda-feira</option>
+                                             <option value={2} className="text-gray-950 font-bold">Terça-feira</option>
+                                             <option value={3} className="text-gray-950 font-bold">Quarta-feira</option>
+                                             <option value={4} className="text-gray-950 font-bold">Quinta-feira</option>
+                                             <option value={5} className="text-gray-950 font-bold">Sexta-feira</option>
+                                             <option value={6} className="text-gray-950 font-bold">Sábado</option>
                                          </select>
-                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Duração da Agenda</label>
+                                         <label className="block text-[11px] font-black text-gray-900 uppercase mb-1">Duração da Agenda</label>
                                         <select 
                                             value={config.durationMonths ?? 12} 
                                             onChange={(e) => setConfig({ ...config, durationMonths: parseInt(e.target.value) })} 
-                                            className="w-full p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700 bg-white"
+                                            className="w-full p-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-600 outline-none font-black text-gray-950 bg-white"
                                         >
                                             {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
-                                                <option key={m} value={m}>{m} {m === 1 ? 'mês' : 'meses'}</option>
+                                                <option key={m} value={m} className="text-gray-950 font-bold">{m} {m === 1 ? 'mês' : 'meses'}</option>
                                             ))}
                                         </select>
                                     </div>
 
                                     <div className="pt-2">
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tipo de Layout</label>
+                                        <label className="block text-[11px] font-black text-gray-900 uppercase mb-1">Tipo de Layout</label>
                                         <select 
                                             value={config.layoutType} 
                                             onChange={(e) => {
@@ -8455,81 +11487,83 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 }));
                                                 setEditorViewMode('standard');
                                             }}
-                                            className="w-full p-2 text-xs border border-gray-200 rounded bg-white font-medium shadow-sm transition-all focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                            className="w-full p-2 text-xs border-2 border-gray-300 rounded-lg bg-white font-black text-gray-950 shadow-xs transition-all focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-600"
                                         >
                                             {(config.projectType as string) === 'planner' || config.layoutType.startsWith('weekly') ? (
                                                 <>
-                                                    <option value="weekly_vertical">Semanal Vertical (2 Págs)</option>
-                                                    <option value="weekly_horizontal">Semanal Horizontal (2 Págs)</option>
-                                                    <option value="weekly_one_page_vertical">Semanal 1 Pág (Colunas)</option>
-                                                    <option value="weekly_one_page_horizontal">Semanal 1 Pág (Linhas)</option>
+                                                    <option value="weekly_vertical" className="text-gray-950 font-bold">Semanal Vertical (2 Págs)</option>
+                                                    <option value="weekly_horizontal" className="text-gray-950 font-bold">Semanal Horizontal (2 Págs)</option>
+                                                    <option value="weekly_one_page_vertical" className="text-gray-950 font-bold">Semanal 1 Pág (Colunas)</option>
+                                                    <option value="weekly_one_page_horizontal" className="text-gray-950 font-bold">Semanal 1 Pág (Linhas)</option>
                                                 </>
                                             ) : ((config.projectType as string) === 'notebook' || config.layoutType === 'notebook') ? (
-                                                <option value="notebook">Caderno (Livre)</option>
+                                                <option value="notebook" className="text-gray-950 font-bold">Caderno (Livre)</option>
                                             ) : (
                                                 <>
-                                                    <option value="1_per_page">1 Dia por Página</option>
-                                                    <option value="1_per_page_weekend_shared">1 por Pág (Fim de Semana Junto)</option>
-                                                    <option value="2_per_page">2 Dias por Página</option>
+                                                    <option value="1_per_page" className="text-gray-950 font-bold">1 Dia por Página</option>
+                                                    <option value="1_per_page_weekend_shared" className="text-gray-950 font-bold">1 por Pág (Fim de Semana Junto)</option>
+                                                    <option value="2_per_page" className="text-gray-950 font-bold">2 Dias por Página</option>
                                                 </>
                                             )}
                                         </select>
-                                        <p className="text-[8px] text-gray-400 mt-1 italic">Mudar o layout no menu acima preserva seus elementos personalizados.</p>
+                                        <p className="text-[10px] text-gray-800 mt-1.5 font-bold">Mudar o layout no menu acima preserva seus elementos personalizados.</p>
                                     </div>
                                 </>
                             )}
 
-                            <div className="pt-2 border-t border-gray-100 mt-2 space-y-3">
+                            <div className="pt-2 border-t-2 border-gray-200 mt-2 space-y-3">
                                 <div>
-                                    <label className="flex items-center gap-2 cursor-pointer">
+                                    <label className="flex items-center gap-2.5 cursor-pointer">
                                         <input 
                                             type="checkbox" 
                                             checked={config.mirrorEvenPages} 
                                             onChange={(e) => setConfig({ ...config, mirrorEvenPages: e.target.checked })} 
-                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
+                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-2 border-gray-400" 
                                         />
-                                        <span className="text-xs text-gray-700 font-medium">Espelhar páginas pares no verso</span>
+                                        <span className="text-xs text-gray-950 font-black">Espelhar páginas pares no verso</span>
                                     </label>
-                                    <p className="text-[9px] text-gray-400 mt-0.5">Inverte as margens interna/externa para encadernação.</p>
+                                    <p className="text-[10px] text-gray-800 mt-0.5 font-semibold">Inverte as margens interna/externa para encadernação.</p>
 
                                     {config.mirrorEvenPages && (
-                                        <div className="ml-6 mt-2 p-2.5 bg-gray-50 rounded-md border border-gray-200 space-y-2">
-                                            <span className="block text-[9px] uppercase font-bold text-gray-500 tracking-wider">Modo de Espelhamento no Verso:</span>
-                                            <div className="grid grid-cols-2 gap-1 bg-white p-1 rounded border border-gray-200">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setConfig({ ...config, mirrorContentOnVerso: false })}
-                                                    className={`py-1 px-1.5 text-[10px] font-bold rounded transition-all text-center ${
-                                                        !config.mirrorContentOnVerso
-                                                            ? 'bg-indigo-600 text-white shadow-xs'
-                                                            : 'text-gray-600 hover:bg-gray-100'
-                                                    }`}
-                                                >
-                                                    Apenas Margens
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setConfig({ ...config, mirrorContentOnVerso: true })}
-                                                    className={`py-1 px-1.5 text-[10px] font-bold rounded transition-all text-center ${
-                                                        config.mirrorContentOnVerso
-                                                            ? 'bg-indigo-600 text-white shadow-xs'
-                                                            : 'text-gray-600 hover:bg-gray-100'
-                                                    }`}
-                                                >
-                                                    Margens + Conteúdo
-                                                </button>
+                                        <div className="ml-6 mt-2 p-3 bg-gray-100 rounded-xl border-2 border-gray-300 space-y-2.5">
+                                            <div>
+                                                <span className="block text-[10px] uppercase font-black text-gray-900 tracking-wider mb-1.5">Modo de Espelhamento no Verso:</span>
+                                                <div className="grid grid-cols-2 gap-1.5 bg-gray-200 p-1 rounded-lg border border-gray-300">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConfig({ ...config, mirrorContentOnVerso: false })}
+                                                        className={`py-1.5 px-2 text-xs font-black rounded-md transition-all text-center cursor-pointer ${
+                                                            !config.mirrorContentOnVerso
+                                                                ? 'bg-indigo-600 text-white shadow-sm'
+                                                                : 'text-gray-800 hover:text-gray-950 hover:bg-gray-100'
+                                                        }`}
+                                                    >
+                                                        Apenas Margens
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConfig({ ...config, mirrorContentOnVerso: true })}
+                                                        className={`py-1.5 px-2 text-xs font-black rounded-md transition-all text-center cursor-pointer ${
+                                                            config.mirrorContentOnVerso
+                                                                ? 'bg-indigo-600 text-white shadow-sm'
+                                                                : 'text-gray-800 hover:text-gray-950 hover:bg-gray-100'
+                                                        }`}
+                                                    >
+                                                        Margens + Conteúdo
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-gray-800 font-semibold leading-normal mt-1.5">
+                                                    {!config.mirrorContentOnVerso
+                                                        ? '✓ Apenas as margens interna/externa invertem. O conteúdo mantém a mesma posição/orientação da frente.'
+                                                        : '✓ As margens e a posição horizontal de todos os elementos são invertidas no verso.'}
+                                                </p>
                                             </div>
-                                            <p className="text-[9px] text-gray-500 leading-normal">
-                                                {!config.mirrorContentOnVerso
-                                                    ? '✓ Apenas as margens interna/externa invertem. O conteúdo mantém a mesma posição da frente.'
-                                                    : '✓ As margens e a posição horizontal de todos os elementos são invertidas no verso.'}
-                                            </p>
                                         </div>
                                     )}
                                 </div>
 
                                 <div>
-                                    <label className="flex items-center gap-2 cursor-pointer">
+                                    <label className="flex items-center gap-2.5 cursor-pointer">
                                         <input 
                                             type="checkbox" 
                                             checked={!!config.customVerso} 
@@ -8548,40 +11582,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     setEditorViewMode('standard');
                                                 }
                                             }} 
-                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
+                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-2 border-gray-400" 
                                         />
-                                        <span className="text-xs font-semibold text-gray-800">Diferenciar Frente e Verso (Costas)</span>
+                                        <span className="text-xs font-black text-gray-950">Diferenciar Frente e Verso (Costas)</span>
                                     </label>
-                                    <p className="text-[9px] text-gray-400 mt-0.5">Permite criar um layout exclusivo para o verso (páginas pares) do miolo.</p>
+                                    <p className="text-[10px] text-gray-800 mt-0.5 font-semibold">Permite criar um layout exclusivo para o verso (páginas pares) do miolo.</p>
                                 </div>
 
                                 {config.customVerso && (
-                                    <div className="pl-6 space-y-2 pt-1 border-l-2 border-indigo-100">
-                                        <label className="flex items-center gap-2 cursor-pointer">
+                                    <div className="pl-6 space-y-2 pt-1 border-l-2 border-indigo-400">
+                                        <label className="flex items-center gap-2.5 cursor-pointer">
                                             <input 
                                                 type="checkbox" 
                                                 checked={config.versoAdvancesSequence === false} 
                                                 onChange={(e) => setConfig({ ...config, versoAdvancesSequence: !e.target.checked })} 
-                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
+                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-2 border-gray-400" 
                                             />
-                                            <span className="text-xs font-medium text-gray-700">Não pular sequência no verso</span>
+                                            <span className="text-xs font-black text-gray-950">Não pular sequência no verso</span>
                                         </label>
-                                        <p className="text-[9px] text-gray-400">
+                                        <p className="text-[10px] text-gray-800 font-semibold">
                                             {config.versoAdvancesSequence === false 
                                                 ? 'O verso de cada dia/semana manterá a mesma data/conteúdo da frente.' 
                                                 : 'Cada página (frente e verso) avançará para o próximo dia/semana na sequência.'}
                                         </p>
 
-                                        <label className="flex items-center gap-2 cursor-pointer pt-1">
+                                        <label className="flex items-center gap-2.5 cursor-pointer pt-1">
                                             <input 
                                                 type="checkbox" 
                                                 checked={!!config.disableSequenceSkip} 
                                                 onChange={(e) => setConfig({ ...config, disableSequenceSkip: e.target.checked })} 
-                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
+                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-2 border-gray-400" 
                                             />
-                                            <span className="text-xs font-medium text-gray-700">Não inserir páginas de preenchimento</span>
+                                            <span className="text-xs font-black text-gray-950">Não inserir páginas de preenchimento</span>
                                         </label>
-                                        <p className="text-[9px] text-gray-400">
+                                        <p className="text-[10px] text-gray-800 font-semibold">
                                             Desativa páginas em branco/preenchimento automáticas ao alinhar divisórias de mês.
                                         </p>
                                     </div>
@@ -8590,7 +11624,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                             {(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                 <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Quantidade de Páginas</label>
+                                    <label className="block text-[11px] font-black text-gray-900 uppercase mb-1">Quantidade de Páginas</label>
                                     <div className="flex items-center gap-2">
                                         <input 
                                             type="number" 
@@ -8598,62 +11632,69 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             max="500"
                                             value={config.pageCount || 100} 
                                             onChange={(e) => setConfig({ ...config, pageCount: Math.max(1, parseInt(e.target.value) || 1) })} 
-                                            className="flex-1 p-2 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-700"
+                                            className="flex-1 p-2 text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-600 outline-none font-black text-gray-950 bg-white"
                                         />
-                                        <div className="p-2 bg-emerald-100 rounded text-emerald-700" title="Número total de páginas do miolo">
+                                        <div className="p-2 bg-emerald-100 rounded-lg text-emerald-800" title="Número total de páginas do miolo">
                                             <FileText className="w-4 h-4" />
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            <div className="pt-3 border-t border-gray-100 mt-3 text-left space-y-2.5">
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5 align-middle">Versículos das Páginas</label>
-                                    <div className="bg-indigo-50/50 rounded-lg p-2.5 border border-indigo-100/60 flex flex-col gap-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-bold text-gray-600">Fonte ativa:</span>
-                                            {customVerses.length > 0 ? (
-                                                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">Importados ({customVerses.length})</span>
-                                            ) : (
-                                                <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
-                                            )}
+                            {(hasVerseElement || hasQuoteElement) && (
+                                <div className="pt-3 border-t-2 border-gray-200 mt-3 text-left space-y-2.5">
+                                    {hasVerseElement && (
+                                        <div>
+                                            <label className="block text-[11px] font-black text-gray-900 uppercase mb-1.5 align-middle">Versículos das Páginas</label>
+                                            <div className="bg-indigo-50/70 rounded-xl p-3 border-2 border-indigo-200 flex flex-col gap-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-black text-gray-900">Fonte ativa:</span>
+                                                    {customVerses.length > 0 ? (
+                                                        <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-black border border-emerald-300">Importados ({customVerses.length})</span>
+                                                    ) : (
+                                                        <span className="text-[10px] bg-gray-200 text-gray-900 px-2 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
+                                                    )}
+                                                </div>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setVersesModalOpen(true)}
+                                                    className="w-full py-2 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg justify-center font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                                                >
+                                                    <BookOpen className="w-3.5 h-3.5 text-white" />
+                                                    <span>Personalizar Bíblia</span>
+                                                </button>
+                                            </div>
                                         </div>
-                                        <button 
-                                            type="button"
-                                            onClick={() => setVersesModalOpen(true)}
-                                            className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded justify-center font-bold text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
-                                        >
-                                            <BookOpen className="w-3 h-3" />
-                                            <span>Personalizar Bíblia</span>
-                                        </button>
-                                    </div>
-                                </div>
+                                    )}
 
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5 align-middle">Mensagens Motivacionais</label>
-                                    <div className="bg-amber-50/50 rounded-lg p-2.5 border border-amber-100/60 flex flex-col gap-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-bold text-gray-600">Fonte ativa:</span>
-                                            {customQuotes.length > 0 ? (
-                                                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">Importadas ({customQuotes.length})</span>
-                                            ) : (
-                                                <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
-                                            )}
+                                    {hasQuoteElement && (
+                                        <div>
+                                            <label className="block text-[11px] font-black text-gray-900 uppercase mb-1.5 align-middle">Mensagens Motivacionais</label>
+                                            <div className="bg-amber-50/70 rounded-xl p-3 border-2 border-amber-200 flex flex-col gap-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-black text-gray-900">Fonte ativa:</span>
+                                                    {customQuotes.length > 0 ? (
+                                                        <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-black border border-emerald-300">Importadas ({customQuotes.length})</span>
+                                                    ) : (
+                                                        <span className="text-[10px] bg-gray-200 text-gray-900 px-2 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
+                                                    )}
+                                                </div>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setQuotesModalOpen(true)}
+                                                    className="w-full py-2 px-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg justify-center font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                                                >
+                                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                                    <span>Personalizar Frases</span>
+                                                </button>
+                                            </div>
                                         </div>
-                                        <button 
-                                            type="button"
-                                            onClick={() => setQuotesModalOpen(true)}
-                                            className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded justify-center font-bold text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
-                                        >
-                                            <Sparkles className="w-3 h-3" />
-                                            <span>Personalizar Frases</span>
-                                        </button>
-                                    </div>
+                                    )}
                                 </div>
+                            )}
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    </div>
 
                     <div className="p-4 border-b border-gray-100">
                         <div className="flex items-center mb-3 text-gray-400"><Book className="w-4 h-4 mr-2" /><h3 className="text-xs font-semibold uppercase tracking-wider">Estrutura</h3></div>
@@ -8719,15 +11760,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 Divisórias
                             </button>
                         </div>
-                        {editMode === 'daily' && (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
-                            <div className="mb-4">
+                        {editMode === 'daily' && (
+                            <div className="mb-3 flex gap-1.5">
                                 <button 
-                                    onClick={() => { setTemplateCategory('planner'); setTemplateModal(true); }}
-                                    className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-sm"
+                                    onClick={() => { 
+                                        setPdfImportInitialDestination('miolo_default'); 
+                                        setPdfImportModalOpen(true); 
+                                    }}
+                                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                    title="Importar objetos de um PDF para usar como layout do Miolo"
                                 >
-                                    <Layout className="w-3.5 h-3.5" />
-                                    Modelos de Planner
+                                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Layout Miolo (PDF)</span>
                                 </button>
+                                {(config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
+                                    <button 
+                                        onClick={() => { setTemplateCategory('planner'); setTemplateModal(true); }}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-gray-50 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs"
+                                    >
+                                        <Layout className="w-3.5 h-3.5" />
+                                        <span>Modelos</span>
+                                    </button>
+                                )}
                             </div>
                         )}
                         {editMode === 'intro' && (
@@ -8735,6 +11789,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         <div className="flex items-center justify-between text-[10px] text-gray-500 font-bold uppercase mb-1">
                                             <span>Lista de Páginas</span>
                                             <div className="flex gap-1">
+                                                <button onClick={() => { setPdfImportInitialDestination('new_intro'); setPdfImportModalOpen(true); }} className="text-indigo-600 hover:text-indigo-800 px-1.5 py-0.5 bg-indigo-50 rounded flex items-center gap-1 cursor-pointer" title="Importar PDF como Nova Página Inicial"><Sparkles className="w-3 h-3" /> <span className="text-[8px]">PDF</span></button>
                                                 <button onClick={() => setTemplateModal(true)} className="text-indigo-600 hover:text-indigo-800 px-1.5 py-0.5 bg-indigo-50 rounded flex items-center gap-1" title="Modelos Prontos"><Layout className="w-3 h-3" /> <span className="text-[8px]">Modelos</span></button>
                                                 <button onClick={addIntroPage} className="text-indigo-600 hover:text-indigo-800 p-1 bg-indigo-50 rounded" title="Nova Página em Branco"><Plus className="w-3 h-3" /></button>
                                             </div>
@@ -8793,6 +11848,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         <div className="flex items-center justify-between text-[10px] text-gray-500 font-bold uppercase mb-1">
                                             <span>Páginas Mensais</span>
                                             <div className="flex gap-1.5">
+                                                <button onClick={() => { setPdfImportInitialDestination('new_monthly_intro'); setPdfImportModalOpen(true); }} className="text-indigo-600 hover:text-indigo-800 px-1.5 py-0.5 bg-indigo-50 rounded flex items-center gap-1 cursor-pointer" title="Importar PDF como Nova Página Mensal"><Sparkles className="w-3 h-3" /> <span className="text-[8px]">PDF</span></button>
                                                 <button onClick={() => { setTemplateCategory('intro'); setTemplateModal(true); }} className="text-indigo-600 hover:text-indigo-800 px-1 py-0.5 bg-indigo-50 rounded flex items-center gap-1" title="Modelos Prontos"><Layout className="w-3.5 h-3.5" /> <span className="text-[10px]">Modelos</span></button>
                                                 <button onClick={addMonthlyIntroPage} className="text-indigo-600 hover:text-indigo-800 p-1 bg-indigo-50 rounded flex items-center gap-1" title="Nova Página Mensal"><Plus className="w-3.5 h-3.5" /> <span className="text-[10px]">Nova</span></button>
                                             </div>
@@ -8846,73 +11902,105 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         </div>
                                     </div>
                                 )}
-                            </div>
+                                {editMode === 'divider' && (
+                                    <div className="space-y-3">
+                                        {config.includeMonthlyDividers === false && (
+                                            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
+                                                <p className="font-semibold text-[11px] mb-1">Divisórias desativadas no projeto</p>
+                                                <p className="text-[10px] text-amber-750 mb-2 leading-tight">As divisórias de meses não serão inseridas no PDF final com esta opção desativada.</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfig(prev => ({ ...prev, includeMonthlyDividers: true }))}
+                                                    className="w-full py-1 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
+                                                >
+                                                    Ativar Divisórias no Projeto
+                                                </button>
+                                            </div>
+                                        )}
 
-                       {!(config.projectType === 'notebook' || config.projectType === 'devotional') && (
-                        <div className="p-4 border-b border-gray-100">
-                            <div className="flex items-center mb-3 text-gray-400"><BookOpen className="w-4 h-4 mr-2" /><h3 className="text-xs font-semibold uppercase tracking-wider">Transição de Meses</h3></div>
-                            <div className="space-y-4">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={config.includeMonthlyDividers ?? true} 
-                                        onChange={(e) => setConfig({ ...config, includeMonthlyDividers: e.target.checked })} 
-                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
-                                    />
-                                    <span className="text-xs font-semibold text-gray-750">Incluir Divisórias de Meses (Capas)</span>
-                                </label>
+                                        <div className="flex gap-1.5">
+                                            <button 
+                                                type="button"
+                                                onClick={() => { 
+                                                    setPdfImportInitialDestination(dividerViewMode === 'verso' ? 'divider_verso' : 'divider'); 
+                                                    setPdfImportModalOpen(true); 
+                                                }}
+                                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                title={`Importar layout de um PDF para usar na Divisória Mensal (${dividerViewMode === 'verso' ? 'Verso' : 'Frente'})`}
+                                            >
+                                                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                                <span>Layout Divisória (PDF)</span>
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                onClick={() => {
+                                                    setTemplateCategory('intro');
+                                                    setTemplateModal(true);
+                                                }}
+                                                className="flex items-center justify-center gap-1 py-1.5 px-2.5 bg-gray-50 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                title="Modelos Prontos para a Divisória"
+                                            >
+                                                <Layout className="w-3.5 h-3.5 text-gray-600" />
+                                                <span>Modelos</span>
+                                            </button>
+                                        </div>
 
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={config.includeMonthlyIntroPages ?? true} 
-                                        onChange={(e) => setConfig({ ...config, includeMonthlyIntroPages: e.target.checked })} 
-                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
-                                    />
-                                    <span className="text-xs font-semibold text-gray-750">Incluir Páginas Mensais (Notas/Planejamentos)</span>
-                                </label>
+                                        <div>
+                                            <div className="text-[10px] text-gray-500 font-bold uppercase mb-1">
+                                                Visualização da Divisória
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-1.5 p-1 bg-gray-100 rounded-lg">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setDividerViewMode('front'); setSelectedIds([]); }}
+                                                    className={`py-1.5 px-2 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                                        dividerViewMode === 'front'
+                                                            ? 'bg-white text-indigo-700 shadow-xs font-bold'
+                                                            : 'text-gray-600 hover:text-gray-900'
+                                                    }`}
+                                                >
+                                                    <span>📑 Frente (Capa)</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setDividerViewMode('verso'); setSelectedIds(['v-quote']); }}
+                                                    className={`py-1.5 px-2 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                                        dividerViewMode === 'verso'
+                                                            ? 'bg-white text-indigo-700 shadow-xs font-bold'
+                                                            : 'text-gray-600 hover:text-gray-900'
+                                                    }`}
+                                                >
+                                                    <span>📄 Verso</span>
+                                                </button>
+                                            </div>
+                                            <div className="text-[10px] text-gray-400 mt-1">
+                                                {dividerViewMode === 'front'
+                                                    ? 'Editando a capa frontal da divisória mensal. Personalize elementos livremente.'
+                                                    : 'Editando o verso da divisória mensal. Arraste e posicione a frase ou adicione elementos.'}
+                                            </div>
+                                        </div>
 
-                                <div className="pt-2 border-t border-gray-50">
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={config.startMonthOnRightPage ?? true} 
-                                            onChange={(e) => setConfig({ ...config, startMonthOnRightPage: e.target.checked })} 
-                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
-                                        />
-                                        <span className="text-xs font-semibold text-gray-800">Sempre iniciar o primeiro dia do mês na página direita</span>
-                                    </label>
-                                    <p className="text-[10px] text-gray-500 ml-6 mt-0.5 leading-tight">
-                                        Garante que o dia 1 de cada mês comece sempre em página ímpar (direita), inserindo página complementar ao final do período anterior quando necessário.
-                                    </p>
-                                </div>
-                                
-                                {config.startMonthOnRightPage && (
-                                    <div className="space-y-2">
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Conteúdo da Página de Preenchimento</label>
-                                        <select 
-                                            value={config.fillerPageContent || 'blank'} 
-                                            onChange={(e) => setConfig({ ...config, fillerPageContent: e.target.value })} 
-                                            className="w-full text-xs p-2 border border-gray-200 rounded bg-white"
-                                        >
-                                            <option value="blank">Página em Branco</option>
-                                            <option value="notes">Anotações</option>
-                                            <option value="habit_tracker">Habit Tracker</option>
-                                            <option value="quote">Frase Motivacional</option>
-                                            {config.introPages.map(page => (
-                                                <option key={page.id} value={page.id}>Página Inicial: {page.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                {(config.includeMonthlyDividers ?? true) && (
-                                    <>
-                                        <div className="space-y-2 pt-3 border-t border-gray-100">
+                                        <div className="space-y-1.5 pt-2 border-t border-gray-100">
                                             <label className="block text-[10px] font-bold text-gray-500 uppercase">Verso das Divisórias de Meses</label>
                                             <select 
                                                 value={config.monthlyDividerVersoContent || 'blank'} 
-                                                onChange={(e) => setConfig({ ...config, monthlyDividerVersoContent: e.target.value as any })} 
+                                                onChange={(e) => {
+                                                    const val = e.target.value as any;
+                                                    setConfig(prev => ({
+                                                        ...prev,
+                                                        monthlyDividerVersoContent: val,
+                                                        monthlyDividerStyle: {
+                                                            ...(prev.monthlyDividerStyle || {}),
+                                                            versoElements: undefined
+                                                        }
+                                                    }));
+                                                    setDividerViewMode('verso');
+                                                    if (val === 'quote') {
+                                                        setSelectedIds(['v-quote']);
+                                                    } else {
+                                                        setSelectedIds([]);
+                                                    }
+                                                }} 
                                                 className="w-full text-xs p-2 border border-gray-200 rounded bg-white shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                             >
                                                 <option value="blank">Página em Branco</option>
@@ -8932,187 +12020,123 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             <p className="text-[10px] text-gray-400">Escolha o conteúdo impresso exatamente no verso (página esquerda) do divisor de cada mês.</p>
                                         </div>
 
-                                        <div className="space-y-2 pt-3 border-t border-gray-100">
-                                            <button 
-                                                type="button"
-                                                onClick={() => setShowDividerCustomizer(!showDividerCustomizer)}
-                                                className="flex items-center justify-between w-full text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider py-1 hover:text-indigo-600 transition-colors"
-                                            >
-                                                <span>Personalizar Divisória do Mês</span>
-                                                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showDividerCustomizer ? 'rotate-180' : ''}`} />
-                                            </button>
-                                            
-                                            {showDividerCustomizer && (
-                                                <div className="bg-gray-50/60 p-3 rounded-xl border border-gray-100 space-y-3 mt-1">
-                                                    {/* Layout Preset */}
-                                                    <div>
-                                                        <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1.5">Estilo Visual</label>
-                                                        <div className="grid grid-cols-2 gap-1.5">
-                                                            {[
-                                                                { id: 'classic', label: 'Clássico', desc: 'Serifado e elegante' },
-                                                                { id: 'modern', label: 'Moderno', desc: 'Contemporâneo, alinhado' },
-                                                                { id: 'minimalist', label: 'Minimalista', desc: 'Espaçoso e limpo' },
-                                                                { id: 'geometric', label: 'Geométrico', desc: 'Formas e contornos' }
-                                                            ].map((item) => {
-                                                                const isSelected = (config.monthlyDividerStyle?.layout || 'classic') === item.id;
-                                                                return (
-                                                                    <button
-                                                                        key={item.id}
-                                                                        type="button"
-                                                                        onClick={() => updateMonthlyDividerStyle({ layout: item.id as any })}
-                                                                        className={`p-2 rounded-lg border text-left transition-all ${
-                                                                            isSelected 
-                                                                                ? 'bg-indigo-50 border-indigo-500 text-indigo-950 ring-1 ring-indigo-500' 
-                                                                                : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
-                                                                        }`}
-                                                                    >
-                                                                        <div className="text-[10px] font-bold leading-tight">{item.label}</div>
-                                                                        <div className="text-[8px] text-gray-400 mt-0.5 leading-none">{item.desc}</div>
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
+                                        {config.monthlyDividerVersoContent === 'quote' && (() => {
+                                            const isEditingVersoOnCanvas = editMode === 'divider' && dividerViewMode === 'verso';
+
+                                            return (
+                                            <div className="p-2.5 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                                        <span className="text-[10px] font-bold text-indigo-950 uppercase tracking-wider">
+                                                            Frases do Verso
+                                                        </span>
                                                     </div>
-
-                                                    {/* Custom Title Text */}
-                                                    <div>
-                                                        <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Título Personalizado</label>
-                                                        <input 
-                                                            type="text"
-                                                            value={config.monthlyDividerStyle?.titleText ?? 'Planejamento Mensal'}
-                                                            onChange={(e) => updateMonthlyDividerStyle({ titleText: e.target.value })}
-                                                            placeholder="Planejamento Mensal"
-                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                                        />
-                                                    </div>
-
-                                                    {/* Colors */}
-                                                    <div className="space-y-2 bg-white p-2.5 rounded-lg border border-gray-100">
-                                                        <div className="text-[9px] font-bold text-gray-400 uppercase mb-1">Cores do Divisor</div>
-                                                        
-                                                        <div className="grid grid-cols-2 gap-2">
-                                                            <div>
-                                                                <label className="block text-[8px] font-medium text-gray-500 mb-0.5">Cor do Fundo</label>
-                                                                <div className="flex gap-1.5 items-center">
-                                                                    <input 
-                                                                        type="color"
-                                                                        value={config.monthlyDividerStyle?.backgroundColor || '#ffffff'}
-                                                                        onChange={(e) => updateMonthlyDividerStyle({ backgroundColor: e.target.value })}
-                                                                        className="w-7 h-7 rounded border border-gray-200 p-0 cursor-pointer"
-                                                                    />
-                                                                    <span className="text-[9px] font-mono text-gray-400 uppercase">{config.monthlyDividerStyle?.backgroundColor || '#ffffff'}</span>
-                                                                </div>
-                                                            </div>
-
-                                                            <div>
-                                                                <label className="block text-[8px] font-medium text-gray-500 mb-0.5">Cor do Texto</label>
-                                                                <div className="flex gap-1.5 items-center">
-                                                                    <input 
-                                                                        type="color"
-                                                                        value={config.monthlyDividerStyle?.textColor || '#312e81'}
-                                                                        onChange={(e) => updateMonthlyDividerStyle({ textColor: e.target.value })}
-                                                                        className="w-7 h-7 rounded border border-gray-200 p-0 cursor-pointer"
-                                                                    />
-                                                                    <span className="text-[9px] font-mono text-gray-400 uppercase">{config.monthlyDividerStyle?.textColor || '#312e81'}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-
-                                                        <div>
-                                                            <label className="block text-[8px] font-medium text-gray-500 mb-0.5">Cor de Destaque / Linhas</label>
-                                                            <div className="flex gap-1.5 items-center">
-                                                                <input 
-                                                                    type="color"
-                                                                    value={config.monthlyDividerStyle?.accentColor || '#6366f1'}
-                                                                    onChange={(e) => updateMonthlyDividerStyle({ accentColor: e.target.value })}
-                                                                    className="w-7 h-7 rounded border border-gray-200 p-0 cursor-pointer"
-                                                                />
-                                                                <span className="text-[9px] font-mono text-gray-400 uppercase">{config.monthlyDividerStyle?.accentColor || '#6366f1'}</span>
-                                                            </div>
-                                                            <div className="flex gap-1 mt-1.5 flex-wrap">
-                                                                {['#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#06b6d4', '#4f46e5'].map(color => (
-                                                                    <button
-                                                                        key={color}
-                                                                        type="button"
-                                                                        onClick={() => updateMonthlyDividerStyle({ accentColor: color })}
-                                                                        className="w-4 h-4 rounded-full border border-gray-100 shadow-sm"
-                                                                        style={{ backgroundColor: color }}
-                                                                    />
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Border Customization */}
-                                                    <div className="space-y-2 bg-white p-2.5 rounded-lg border border-gray-100">
-                                                        <div className="text-[9px] font-bold text-gray-400 uppercase mb-1">Contornos / Borda</div>
-                                                        
-                                                        <div className="grid grid-cols-2 gap-2">
-                                                            <div>
-                                                                <label className="block text-[8px] font-medium text-gray-500 mb-0.5">Estilo da Borda</label>
-                                                                <select
-                                                                    value={config.monthlyDividerStyle?.borderStyle || 'double'}
-                                                                    onChange={(e) => updateMonthlyDividerStyle({ borderStyle: e.target.value as any })}
-                                                                    className="w-full text-[10px] p-1 border border-gray-200 rounded bg-white"
-                                                                >
-                                                                    <option value="none">Sem Borda</option>
-                                                                    <option value="solid">Sólida</option>
-                                                                    <option value="double">Dupla (Clássica)</option>
-                                                                    <option value="dashed">Tracejada</option>
-                                                                </select>
-                                                            </div>
-
-                                                            {config.monthlyDividerStyle?.borderStyle !== 'none' && (
-                                                                <div>
-                                                                    <label className="block text-[8px] font-medium text-gray-500 mb-0.5">Cor da Borda</label>
-                                                                    <div className="flex gap-1 items-center">
-                                                                        <input 
-                                                                            type="color"
-                                                                            value={config.monthlyDividerStyle?.borderColor || '#e0e7ff'}
-                                                                            onChange={(e) => updateMonthlyDividerStyle({ borderColor: e.target.value })}
-                                                                            className="w-5 h-5 rounded border border-gray-200 p-0 cursor-pointer"
-                                                                        />
-                                                                        <span className="text-[8px] font-mono text-gray-400 uppercase">{config.monthlyDividerStyle?.borderColor || '#e0e7ff'}</span>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Elements toggles */}
-                                                    <div className="flex flex-col gap-1.5 pt-1">
-                                                        <label className="flex items-center gap-2 cursor-pointer">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                checked={config.monthlyDividerStyle?.showYear ?? true} 
-                                                                onChange={(e) => updateMonthlyDividerStyle({ showYear: e.target.checked })} 
-                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
-                                                            />
-                                                            <span className="text-[10px] text-gray-600 font-medium">Exibir ano abaixo do mês</span>
-                                                        </label>
-
-                                                        <label className="flex items-center gap-2 cursor-pointer">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                checked={config.monthlyDividerStyle?.showDividerLines ?? true} 
-                                                                onChange={(e) => updateMonthlyDividerStyle({ showDividerLines: e.target.checked })} 
-                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
-                                                            />
-                                                            <span className="text-[10px] text-gray-600 font-medium">Exibir decorações / linhas divisórias</span>
-                                                        </label>
-                                                    </div>
+                                                    {!isEditingVersoOnCanvas && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setDividerViewMode('verso');
+                                                                const versoEls = config.monthlyDividerStyle?.versoElements;
+                                                                if (versoEls && versoEls.length > 0) {
+                                                                    setSelectedIds([versoEls[0].id]);
+                                                                } else {
+                                                                    setSelectedIds(['v-quote']);
+                                                                }
+                                                            }}
+                                                            className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded border border-indigo-200 hover:bg-indigo-50 transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                                                            title="Visualizar e editar verso no canvas"
+                                                        >
+                                                            <Eye className="w-3 h-3" />
+                                                            Ver Verso
+                                                        </button>
+                                                    )}
                                                 </div>
-                                            )}
-                                        </div>
-                                    </>
+
+                                                <p className="text-[10px] text-gray-500 leading-tight">
+                                                    Personalize frases, fontes, molduras e alinhamentos diretamente no editor visual (canvas).
+                                                </p>
+
+                                                <div className="pt-0.5 flex items-center gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setQuotesModalOpen(true)}
+                                                        className="flex-1 py-1 px-2 bg-white text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 hover:bg-indigo-50 transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
+                                                    >
+                                                        <Sparkles className="w-3 h-3 text-amber-500" />
+                                                        Gerenciar Frases
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            pushHistory();
+                                                            setConfig(prev => ({
+                                                                ...prev,
+                                                                monthlyDividerStyle: {
+                                                                    ...(prev.monthlyDividerStyle || {}),
+                                                                    versoElements: undefined,
+                                                                    versoQuotePosition: { x: 10, y: 30, w: 80, h: 40 }
+                                                                }
+                                                            }));
+                                                        }}
+                                                        className="py-1 px-2 bg-white text-gray-600 text-[10px] font-medium rounded border border-gray-200 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                                        title="Restaurar posição e elementos padrão do verso"
+                                                    >
+                                                        <RotateCcw className="w-3 h-3 text-gray-400" />
+                                                        Restaurar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            );
+                                        })()}
+                                    </div>
                                 )}
                             </div>
-                        </div>
-                    )}
                 
                     <div className="p-4 border-t border-gray-100">
                         <div className="flex items-center mb-3 text-gray-400"><Layout className="w-4 h-4 mr-2" /><h3 className="text-xs font-semibold uppercase tracking-wider">Elementos</h3></div>
-                            <div className="grid grid-cols-4 gap-2">
+                        {editMode === 'divider' && dividerViewMode === 'verso' && (
+                            <div className="mb-3 p-2.5 bg-indigo-50/90 border border-indigo-200 rounded-lg text-xs text-indigo-900 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                                        <span className="font-bold">Verso da Divisória</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setQuotesModalOpen(true)}
+                                            className="px-2 py-0.5 bg-white text-indigo-700 hover:bg-indigo-50 text-[10px] font-bold rounded border border-indigo-200 flex items-center gap-1 shadow-2xs cursor-pointer"
+                                            title="Gerenciar Frases Motivacionais"
+                                        >
+                                            <Sparkles className="w-3 h-3 text-amber-500" />
+                                            Frases
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                pushHistory();
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    monthlyDividerStyle: {
+                                                        ...(prev.monthlyDividerStyle || {}),
+                                                        versoElements: undefined,
+                                                        versoQuotePosition: { x: 10, y: 30, w: 80, h: 40 }
+                                                    }
+                                                }));
+                                            }}
+                                            className="px-1.5 py-0.5 bg-white text-gray-500 hover:text-gray-700 text-[10px] rounded border border-gray-200 hover:bg-gray-50 shadow-2xs cursor-pointer flex items-center gap-1"
+                                            title="Restaurar verso padrão"
+                                        >
+                                            <RotateCcw className="w-3 h-3" />
+                                            Restaurar
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-indigo-700">Clique em qualquer elemento abaixo para adicioná-lo à página do verso.</p>
+                            </div>
+                        )}
+                        <div className="grid grid-cols-4 gap-2">
                                 {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                     <>
                                         <button onClick={() => addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Número do Dia"><span className="font-bold text-xs text-indigo-600">01</span></button>
@@ -9123,7 +12147,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <button onClick={() => addElement('text', 'Texto')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Texto"><Type className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('box', 'Caixa')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Caixa"><Square className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('circle', 'Círculo')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Círculo"><Circle className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('vector_shape', 'Formas Vetoriais')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Biblioteca de Formas Vetoriais"><Shapes className="w-4 h-4 text-indigo-600"/></button>
+                                <button onClick={() => { setShapeGalleryTargetId(null); setShapeGalleryOpen(true); }} className="h-10 flex items-center justify-center border rounded hover:bg-amber-50 hover:border-amber-300 transition-colors" title="Biblioteca de Elementos & Formas Geométricas"><Shapes className="w-4 h-4 text-amber-700"/></button>
                                 <button onClick={() => addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linhas Simples (Pautas)"><ListTodo className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('lines', 'Horários', { showTimes: true, startHour: 7, lineSpacing: 28, color: '#e5e7eb' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela de Horários (Linhas)"><Clock className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('table', 'Tabela')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela Customizável"><TableIcon className="w-4 h-4 text-indigo-600"/></button>
@@ -9133,23 +12157,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <button onClick={() => addElement('mini_calendar', 'Calendário')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Mini Calendário"><CalendarDays className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Fases da Lua"><Moon className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('habit_tracker', 'Hábitos')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Habit Tracker"><CheckSquare className="w-4 h-4 text-indigo-600"/></button>
+                                
+                                {/* Elemento Rodapé */}
+                                <button 
+                                    onClick={() => setFooterGalleryOpen(true)} 
+                                    className="h-10 flex items-center justify-center border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 hover:border-indigo-300 rounded text-indigo-700 transition-colors" 
+                                    title="Elemento Rodapé (Água, Clima, Humor, Sono, Refeições...)"
+                                >
+                                    <PanelBottom className="w-4 h-4 text-indigo-600"/>
+                                </button>
+
                                 <button onClick={() => addElement('image', 'Imagem')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Upload de Imagem"><Upload className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Versículo Bíblico"><BookOpen className="w-4 h-4 text-indigo-600"/></button>
+                                <button onClick={() => addElement('quote', 'Frase Inspiradora', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Frase Motivacional"><Sparkles className="w-4 h-4 text-indigo-600"/></button>
                                 
                                 <button onClick={() => addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linha Divisória"><Minus className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('permanent_day_header', 'Agenda Permanente', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Agenda Permanente"><List className="w-4 h-4 text-indigo-600"/></button>
         
                                 {editMode === 'intro' && (
                                     <>
-                                        <button onClick={() => addElement('full_calendar', 'Calendário Anual')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Calendário Anual">
+                                        <button onClick={() => addElement('full_calendar', 'Calendário Anual')} className="h-10 flex items-center justify-center border border-indigo-200 bg-indigo-50/60 rounded hover:bg-indigo-100 text-indigo-700 transition-colors" title="Calendário Anual (12 Meses)">
                                             <CalendarRange className="w-4 h-4 text-indigo-600" />
                                         </button>
-                                        <button onClick={() => addElement('holiday_list', 'Lista Feriados')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Lista de Feriados">
-                                            <Flag className="w-4 h-4 text-indigo-600" />
+                                        <button onClick={() => insertHolidayListWithCalendar(undefined, { autoLayout: true, createCalendarIfMissing: false, format: 'full_written', columns: 2 })} className="h-10 flex items-center justify-center border border-amber-200 bg-amber-50/60 rounded hover:bg-amber-100 text-amber-700 transition-colors" title="Inserir Feriados por Extenso (Redimensionando o Calendário)">
+                                            <Flag className="w-4 h-4 text-amber-600" />
                                         </button>
                                     </>
                                 )}
                             </div>
+                            {editMode === 'intro' && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => insertHolidayListWithCalendar(undefined, { autoLayout: true, createCalendarIfMissing: true, format: 'full_written', columns: 2, calendarHeight: 58 })}
+                                        className="w-full py-2 px-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-98"
+                                        title="Insere o Calendário Anual redimensionado + Feriados por Extenso em 2 colunas"
+                                    >
+                                        <CalendarRange className="w-3.5 h-3.5 shrink-0" />
+                                        <span>Calendário + Extenso (Redimensionar)</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
                 </div>
             </motion.aside>
@@ -9158,7 +12206,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             <main 
                 ref={workspaceRef} 
-                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' ? 'bg-slate-900' : 'bg-gray-200 p-4 md:p-8'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'md:pr-[320px]' : ''}`}
+                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-gray-200 p-4 md:p-8'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'md:pr-[320px]' : ''}`}
                 onMouseDown={(e) => {
                   if (e.button !== 0) return;
                   const targetEl = e.target as HTMLElement;
@@ -9171,10 +12219,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 }}
             >
                 {activeTab === 'opentype' && (
-                    <div className="w-full h-full min-h-0 flex flex-col p-4 md:p-6 select-text" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-full h-full min-h-0 flex flex-col p-2 md:p-4 select-text" onClick={(e) => e.stopPropagation()}>
                         <OpenTypeEditor 
                           user={user} 
                           onClose={() => setActiveTab('editor')} 
+                          systemFonts={allSystemFonts}
+                          localFonts={localFonts}
+                          customFonts={customFonts}
+                          manualFonts={manualFonts}
+                          onLoadLocalFonts={handleLoadLocalFonts}
+                          localFontsLoading={localFontsLoading}
+                          onAddManualFont={handleAddManualFont}
+                          selectedTextElement={
+                            selectedElement && (selectedElement.type === 'text' || selectedElement.type === 'verse' || selectedElement.type === 'quote') ? {
+                              id: selectedElement.id,
+                              content: selectedElement.content || '',
+                              fontFamily: selectedElement.style?.fontFamily || 'Inter',
+                              name: selectedElement.name || (selectedElement.type === 'text' ? 'Texto' : selectedElement.type === 'verse' ? 'Versículo' : 'Frase')
+                            } : null
+                          }
+                          initialFontFamily={selectedElement?.style?.fontFamily}
+                          onApplyToSelectedText={(newContent, newFontFamily) => {
+                            if (selectedElement) {
+                              updateElementContent(selectedElement.id, newContent);
+                              if (newFontFamily) {
+                                setCustomFonts(prev => prev.includes(newFontFamily) ? prev : [...prev, newFontFamily]);
+                                updateElementStyle(selectedElement.id, { fontFamily: newFontFamily });
+                              }
+                            }
+                          }}
                           onRegisterFont={(family) => {
                             setCustomFonts(prev => prev.includes(family) ? prev : [...prev, family]);
                           }}
@@ -9182,7 +12255,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             // Register the font
                             setCustomFonts(prev => prev.includes(fontFamily) ? prev : [...prev, fontFamily]);
                             // Insert a new text element on the page
-                            addElement('text', 'Texto OpenType', {
+                            addElement('text', 'Texto com Glifos', {
                               content: text,
                               fontFamily: fontFamily,
                               fontSize: 28,
@@ -9199,6 +12272,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             }, { w: 25, h: 25 });
                             setActiveTab('editor');
                           }}
+                        />
+                    </div>
+                )}
+
+                {activeTab === 'mockup' && (
+                    <div className="w-full h-full min-h-0 flex flex-col select-text" onClick={(e) => e.stopPropagation()}>
+                        <MockupStudio
+                            config={config}
+                            PAGE_WIDTH_MM={PAGE_WIDTH_MM}
+                            PAGE_HEIGHT_MM={PAGE_HEIGHT_MM}
+                            actualTotalPagesCount={actualTotalPagesCount}
+                            renderPrintLayout={renderPrintLayout}
+                            currentPageInEditor={currentPageInEditor}
+                            onClose={() => setActiveTab('editor')}
+                            generatedData={generatedData}
                         />
                     </div>
                 )}
@@ -9290,6 +12378,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
+                        {editMode === 'divider' && (
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Divisória Mensal:</span>
+                                <button 
+                                    onClick={() => { setDividerViewMode('front'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${dividerViewMode === 'front' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>📑 Frente (Capa)</span>
+                                </button>
+                                <button 
+                                    onClick={() => { setDividerViewMode('verso'); setSelectedIds(['v-quote']); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${dividerViewMode === 'verso' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>📄 Verso</span>
+                                </button>
+                                <div className="h-4 w-px bg-gray-200 mx-1"></div>
+                                <button
+                                    onClick={() => {
+                                        setPdfImportInitialDestination(dividerViewMode === 'verso' ? 'divider_verso' : 'divider');
+                                        setPdfImportModalOpen(true);
+                                    }}
+                                    className="px-2.5 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-indigo-600 hover:bg-indigo-50 border border-indigo-200 shadow-2xs"
+                                    title={`Importar layout de PDF para a ${dividerViewMode === 'verso' ? 'página do Verso' : 'Capa Frontal'} da Divisória`}
+                                >
+                                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Importar PDF</span>
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setTemplateCategory('intro');
+                                        setTemplateModal(true);
+                                    }}
+                                    className="px-2.5 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-gray-700 hover:bg-gray-100 border border-gray-200 shadow-2xs"
+                                    title="Modelos Prontos para a Divisória"
+                                >
+                                    <Layout className="w-3.5 h-3.5 text-gray-600" />
+                                    <span>Modelos</span>
+                                </button>
+                            </div>
+                        )}
+
                         {editMode === 'daily' && config.customVerso && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Editando Página do Miolo:</span>
@@ -9333,10 +12462,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
+                        {editMode === 'daily' && config.mirrorEvenPages && !config.customVerso && (
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Visualização do Miolo:</span>
+                                <button 
+                                    type="button"
+                                    onClick={() => setEditorParityToggle('odd')} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorParityToggle !== 'even' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>Frente (Ímpar)</span>
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => setEditorParityToggle('even')} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorParityToggle === 'even' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>Verso Espelhado (Par)</span>
+                                    <span className="text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-mono">
+                                        {!config.mirrorContentOnVerso ? 'Apenas Margens' : 'Margens + Conteúdo'}
+                                    </span>
+                                </button>
+                                {editorParityToggle === 'even' && (
+                                    <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded ml-2">
+                                        👁️ Modo visualização do verso
+                                    </span>
+                                )}
+                            </div>
+                        )}
+
                         {editMode === 'intro' && (<div className="mb-4 bg-indigo-100 text-indigo-800 px-3 py-1 rounded text-xs font-bold uppercase tracking-wide z-10 shadow-sm border border-indigo-200">Editando: {config.introPages.find(p => p.id === currentIntroPageId)?.name || 'Página'}</div>)}
                         {editMode === 'monthly_intro' && (<div className="mb-4 bg-indigo-100 text-indigo-800 px-3 py-1 rounded text-xs font-bold uppercase tracking-wide z-10 shadow-sm border border-indigo-200">Editando Página Mensal: {config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId)?.name || 'Página Mensal'}</div>)}
                         
                         <div id="editor-viewport-wrapper" className="relative flex-1 w-full flex min-h-0 overflow-hidden">
+                            {marqueeBox && (
+                              <div 
+                                id="canvas-marquee-selection"
+                                className="fixed border-2 border-indigo-600 bg-indigo-500/15 pointer-events-none z-[99999] rounded-xs select-none shadow-xs"
+                                style={{
+                                  left: `${Math.min(marqueeBox.startX, marqueeBox.currentX)}px`,
+                                  top: `${Math.min(marqueeBox.startY, marqueeBox.currentY)}px`,
+                                  width: `${Math.abs(marqueeBox.currentX - marqueeBox.startX)}px`,
+                                  height: `${Math.abs(marqueeBox.currentY - marqueeBox.startY)}px`,
+                                }}
+                              >
+                                <div className="w-full h-full border border-dashed border-white/80" />
+                                {selectedIds.length > 0 && Math.abs(marqueeBox.currentX - marqueeBox.startX) > 40 && (
+                                  <div className="absolute -bottom-6 right-0 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md whitespace-nowrap flex items-center gap-1">
+                                    <span>{selectedIds.length}</span>
+                                    <span className="opacity-90">{selectedIds.length === 1 ? 'objeto' : 'objetos'}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div 
                               id="editor-scroll-container"
                               ref={editorContainerRef} 
@@ -9885,16 +13062,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                             onChange={(e) => setTableScheduleInterval(parseInt(e.target.value))}
                                                                             className="text-xs p-1 border border-gray-200 rounded bg-white w-28"
                                                                         >
-                                                                            <option value={60}>1 Hora</option>
+                                                                            <option value={15}>15 Minutos</option>
                                                                             <option value={30}>30 Minutos</option>
+                                                                            <option value={45}>45 Minutos</option>
+                                                                            <option value={60}>1 Hora</option>
+                                                                            <option value={120}>2 Horas</option>
                                                                         </select>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[9px] font-bold text-gray-500 uppercase">Pular Linha (Sem Horário)</label>
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={tableScheduleSkipLine} 
+                                                                            onChange={(e) => setTableScheduleSkipLine(e.target.checked)} 
+                                                                            className="rounded text-indigo-600 w-3.5 h-3.5 cursor-pointer" 
+                                                                        />
                                                                     </div>
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => applyScheduleToTable(selectedElement.id, tableScheduleStart, tableScheduleEnd, tableScheduleInterval)}
-                                                                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded text-[10px] font-bold uppercase tracking-wider transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
+                                                                        onClick={() => applyScheduleToTable(selectedElement.id, tableScheduleStart, tableScheduleEnd, tableScheduleInterval, tableScheduleSkipLine)}
+                                                                        className={`w-full py-1.5 ${scheduleAppliedFeedback ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'} active:scale-[0.98] rounded text-[10px] font-bold uppercase tracking-wider transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer`}
                                                                     >
-                                                                        <Clock className="w-3 h-3" /> Preencher Coluna de Horários
+                                                                        {scheduleAppliedFeedback ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-100" /> : <Clock className="w-3.5 h-3.5" />}
+                                                                        {scheduleAppliedFeedback ? 'Horários Preenchidos!' : 'Preencher Coluna de Horários'}
                                                                     </button>
                                                                 </div>
                                                                 
@@ -9912,7 +13102,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 </div>
 
                                                                 <div className="pt-3 border-t border-gray-100">
-                                                                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Estilo de Texto Geral</h4>
+                                                                    <div className="flex items-center justify-between mb-2">
+                                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Estilo de Texto Geral</h4>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const currentTextStyle = selectedElement.style.table?.textStyle || {
+                                                                                    fontFamily: 'Inter',
+                                                                                    fontSize: 10,
+                                                                                    fontWeight: 'normal',
+                                                                                    color: '#4b5563',
+                                                                                    textAlign: 'left',
+                                                                                    verticalAlign: 'top',
+                                                                                    textTransform: 'none',
+                                                                                    letterSpacing: 0,
+                                                                                    backgroundColor: 'transparent'
+                                                                                };
+                                                                                updateTableConfig(selectedElement.id, {
+                                                                                    textStyle: { ...currentTextStyle },
+                                                                                    colStyles: {},
+                                                                                    rowStyles: {},
+                                                                                    cellStyles: {}
+                                                                                });
+                                                                            }}
+                                                                            title="Remove formatações individuais e aplica a formatação geral em todas as células"
+                                                                            className="text-[9px] text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                                                                        >
+                                                                            Redefinir células
+                                                                        </button>
+                                                                    </div>
                                                                     {renderTypographyControls(selectedElement.style.table.textStyle || { fontFamily: 'Inter', fontSize: 10, fontWeight: 'normal', color: '#666', textAlign: 'left', verticalAlign: 'top', textTransform: 'none', letterSpacing: 0, backgroundColor: 'transparent' }, (updates) => updateTableConfig(selectedElement.id, { textStyle: { ...selectedElement.style.table?.textStyle, ...updates } }))}
                                                                 </div>
                                                             </>
@@ -10798,6 +14016,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" 
                                                                     />
                                                                 </div>
+                                                                <div className="flex items-center justify-between pt-1">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Pular Linha (Sem Horário)</label>
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        checked={selectedElement.style.plannerDayBox?.skipBlankLine || false} 
+                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, skipBlankLine: e.target.checked } 
+                                                                        })} 
+                                                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" 
+                                                                    />
+                                                                </div>
                                                                 <div className="pt-2 border-t border-gray-100/50">
                                                                     <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte dos Horários</label>
                                                                     {renderTypographyControls({
@@ -11033,8 +14262,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                     <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
                                                                                 ))}
                                                                             </optgroup>
-                                                                            <optgroup label="Fontes do PC (Instaladas)">
-                                                                                {SYSTEM_FONTS.map(font => (
+                                                                            <optgroup label={`Fontes do Computador (${allSystemFonts.length})`}>
+                                                                                {allSystemFonts.map(font => (
                                                                                     <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
                                                                                 ))}
                                                                             </optgroup>
@@ -11329,6 +14558,475 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 </div>
                                             )}
 
+                                            {selectedElement.type === 'footer_tracker' && (() => {
+                                                const ft: FooterTrackerConfig = selectedElement.style.footerTracker || {
+                                                    mode: 'single',
+                                                    trackerType: 'water',
+                                                    iconVariant: 'glass',
+                                                    itemCount: 8,
+                                                    itemSize: 20,
+                                                    spacing: 5,
+                                                    strokeColor: selectedElement.style.color || '#2563eb',
+                                                    fillColor: 'transparent',
+                                                    strokeWidth: 1.2,
+                                                    showLabel: true,
+                                                    label: 'Água',
+                                                    labelPosition: 'left',
+                                                    showBox: false
+                                                };
+
+                                                const currentType: FooterTrackerType = ft.trackerType || 'water';
+
+                                                const TRACKER_TYPES: { id: FooterTrackerType; label: string; icon: string; defaultVariant: string; defaultCount: number; defaultName: string; defaultColor: string }[] = [
+                                                    { id: 'water', label: 'Água', icon: '💧', defaultVariant: 'glass', defaultCount: 8, defaultName: 'Água', defaultColor: '#2563eb' },
+                                                    { id: 'weather', label: 'Clima', icon: '☀️', defaultVariant: 'weather_5', defaultCount: 5, defaultName: 'Clima', defaultColor: '#f59e0b' },
+                                                    { id: 'mood', label: 'Humor', icon: '😊', defaultVariant: 'faces_clean', defaultCount: 5, defaultName: 'Humor', defaultColor: '#e11d48' },
+                                                    { id: 'sleep', label: 'Sono', icon: '🌙', defaultVariant: 'sleep_hours', defaultCount: 5, defaultName: 'Sono', defaultColor: '#4f46e5' },
+                                                    { id: 'meals', label: 'Refeições', icon: '🍽️', defaultVariant: 'meals_4', defaultCount: 4, defaultName: 'Refeições', defaultColor: '#059669' },
+                                                    { id: 'meds', label: 'Vitaminas', icon: '💊', defaultVariant: 'pills', defaultCount: 4, defaultName: 'Vitaminas', defaultColor: '#7c3aed' },
+                                                    { id: 'gratitude', label: 'Gratidão', icon: '💖', defaultVariant: 'gratitude_line', defaultCount: 1, defaultName: 'Hoje sou grata por:', defaultColor: '#6b7280' },
+                                                    { id: 'fitness', label: 'Treino', icon: '🏃', defaultVariant: 'fitness_4', defaultCount: 4, defaultName: 'Treino', defaultColor: '#ea580c' }
+                                                ];
+
+                                                const currentTypeInfo = TRACKER_TYPES.find(t => t.id === currentType) || TRACKER_TYPES[0];
+
+                                                const updateTracker = (updates: Partial<FooterTrackerConfig>) => {
+                                                    const updatedFt = { ...ft, mode: 'single' as const, ...updates };
+                                                    updateElementStyle(selectedElement.id, {
+                                                        footerTracker: updatedFt,
+                                                        ...(updates.strokeColor ? { color: updates.strokeColor } : {}),
+                                                        ...(updates.strokeWidth !== undefined ? { borderWidth: updates.strokeWidth } : {})
+                                                    });
+                                                };
+
+                                                const switchTrackerType = (typeId: FooterTrackerType) => {
+                                                    const info = TRACKER_TYPES.find(t => t.id === typeId);
+                                                    if (!info) return;
+
+                                                    let suggestedW = 46;
+                                                    if (typeId === 'gratitude') suggestedW = 75;
+                                                    else if (typeId === 'weather') suggestedW = 44;
+                                                    else if (typeId === 'meals') suggestedW = 46;
+                                                    else if (typeId === 'sleep') suggestedW = 46;
+
+                                                    updateTracker({
+                                                        mode: 'single',
+                                                        trackerType: typeId,
+                                                        iconVariant: info.defaultVariant,
+                                                        itemCount: info.defaultCount,
+                                                        label: info.defaultName,
+                                                        strokeColor: info.defaultColor
+                                                    });
+
+                                                    const activeList = getActiveElements();
+                                                    updateActiveElements(activeList.map(el => el.id === selectedElement.id ? { 
+                                                        ...el, 
+                                                        name: `Rodapé - ${info.label}`,
+                                                        w: suggestedW, 
+                                                        x: Math.max(0, (100 - suggestedW) / 2) 
+                                                    } : el));
+                                                };
+
+                                                const alignToFooter = () => {
+                                                    const activeList = getActiveElements();
+                                                    updateActiveElements(activeList.map(el => {
+                                                        if (el.id !== selectedElement.id) return el;
+                                                        return {
+                                                            ...el,
+                                                            x: Math.max(0, (100 - el.w) / 2),
+                                                            y: 89
+                                                        };
+                                                    }));
+                                                    setToastMessage('Elemento alinhado à base do rodapé!');
+                                                };
+
+                                                return (
+                                                    <div className="pt-3 border-t border-gray-100">
+                                                        {/* Header com Ações */}
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <div>
+                                                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Elemento Rodapé</h4>
+                                                                <div className="text-[10px] text-indigo-600 font-bold flex items-center gap-1">
+                                                                    <span>{currentTypeInfo.icon}</span>
+                                                                    <span>{currentTypeInfo.label}</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={alignToFooter}
+                                                                    className="px-2 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] font-bold rounded border border-blue-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                                                    title="Centralizar e posicionar na base da página"
+                                                                >
+                                                                    <ArrowDownToLine className="w-3 h-3" />
+                                                                    Fixar Base
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setFooterGalleryOpen(true)}
+                                                                    className="px-2 py-0.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-[10px] font-bold rounded border border-indigo-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                                                    title="Abrir Galeria com modelos prontos"
+                                                                >
+                                                                    <Sparkles className="w-3 h-3 text-amber-500" />
+                                                                    Modelos
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-4">
+                                                            {/* Opções de Rodapé (Água, Clima, Humor, Sono, etc. individuais) */}
+                                                            <div className="space-y-1.5">
+                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase">
+                                                                    Opção de Rodapé
+                                                                </label>
+                                                                <div className="grid grid-cols-4 gap-1.5">
+                                                                    {TRACKER_TYPES.map(t => {
+                                                                        const isSelected = currentType === t.id;
+                                                                        return (
+                                                                            <button
+                                                                                key={t.id}
+                                                                                type="button"
+                                                                                onClick={() => switchTrackerType(t.id)}
+                                                                                className={`py-1.5 px-1 rounded-lg border text-center flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer relative ${
+                                                                                    isSelected
+                                                                                        ? 'bg-indigo-50 border-indigo-500 text-indigo-900 font-bold shadow-2xs ring-1 ring-indigo-400'
+                                                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300'
+                                                                                }`}
+                                                                                title={`Mudar rodapé para ${t.label}`}
+                                                                            >
+                                                                                {isSelected && (
+                                                                                    <div className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[7px] leading-none">
+                                                                                        ✓
+                                                                                    </div>
+                                                                                )}
+                                                                                <span className="text-sm leading-none">{t.icon}</span>
+                                                                                <span className="text-[9px] truncate w-full">{t.label}</span>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Variantes específicas para o tipo selecionado */}
+                                                            {currentType === 'water' && (
+                                                                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo dos Copos de Água</label>
+                                                                    <div className="grid grid-cols-4 gap-1.5">
+                                                                        {[
+                                                                            { id: 'glass', label: 'Copos' },
+                                                                            { id: 'bottle', label: 'Garrafas' },
+                                                                            { id: 'drop', label: 'Gotas' },
+                                                                            { id: 'mug', label: 'Canecas' }
+                                                                        ].map(v => (
+                                                                            <button
+                                                                                key={v.id}
+                                                                                type="button"
+                                                                                onClick={() => updateTracker({ iconVariant: v.id })}
+                                                                                className={`py-1 px-1 text-[10px] rounded border text-center truncate transition-colors ${
+                                                                                    (ft.iconVariant || 'glass') === v.id
+                                                                                        ? 'bg-blue-50 border-blue-400 text-blue-800 font-bold shadow-2xs'
+                                                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                                                }`}
+                                                                            >
+                                                                                {v.label}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {currentType === 'weather' && (
+                                                                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo de Clima</label>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        {[
+                                                                            { id: 'weather_5', count: 5, label: '☀️ 5 Ícones (Sol, Chuva...)' },
+                                                                            { id: 'weather_5', count: 3, label: '☀️ 3 Ícones (Sol & Chuva)' }
+                                                                        ].map((v, i) => (
+                                                                            <button
+                                                                                key={i}
+                                                                                type="button"
+                                                                                onClick={() => updateTracker({ iconVariant: v.id, itemCount: v.count })}
+                                                                                className={`py-1.5 px-2 text-[10px] rounded border text-center transition-colors ${
+                                                                                    (ft.itemCount || 5) === v.count
+                                                                                        ? 'bg-amber-50 border-amber-400 text-amber-800 font-bold shadow-2xs'
+                                                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                                                }`}
+                                                                            >
+                                                                                {v.label}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {currentType === 'mood' && (
+                                                                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo de Humor</label>
+                                                                    <div className="grid grid-cols-4 gap-1.5">
+                                                                        {[
+                                                                            { id: 'faces_clean', label: 'Carinhas' },
+                                                                            { id: 'faces_cute', label: 'Kawaii' },
+                                                                            { id: 'stars', label: 'Estrelas' },
+                                                                            { id: 'hearts', label: 'Corações' }
+                                                                        ].map(v => (
+                                                                            <button
+                                                                                key={v.id}
+                                                                                type="button"
+                                                                                onClick={() => updateTracker({ iconVariant: v.id })}
+                                                                                className={`py-1 px-1 text-[10px] rounded border text-center truncate transition-colors ${
+                                                                                    (ft.iconVariant || 'faces_clean') === v.id
+                                                                                        ? 'bg-pink-50 border-pink-400 text-pink-800 font-bold shadow-2xs'
+                                                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                                                }`}
+                                                                            >
+                                                                                {v.label}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {currentType === 'sleep' && (
+                                                                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo de Sono</label>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        {[
+                                                                            { id: 'sleep_hours', label: '🌙 Horas de Sono (5h-9h+)' },
+                                                                            { id: 'battery', label: '🔋 Nível de Bateria' }
+                                                                        ].map(v => (
+                                                                            <button
+                                                                                key={v.id}
+                                                                                type="button"
+                                                                                onClick={() => updateTracker({ iconVariant: v.id })}
+                                                                                className={`py-1.5 px-2 text-[10px] rounded border text-center transition-colors ${
+                                                                                    (ft.iconVariant || 'sleep_hours') === v.id
+                                                                                        ? 'bg-indigo-50 border-indigo-400 text-indigo-800 font-bold shadow-2xs'
+                                                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                                                }`}
+                                                                            >
+                                                                                {v.label}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Quantidade de Itens (se não for gratitude) */}
+                                                            {currentType !== 'gratitude' && (
+                                                                <div className="pt-2 border-t border-gray-100">
+                                                                    <div className="flex items-center justify-between mb-1">
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Quantidade de Itens</label>
+                                                                        <span className="text-xs font-bold text-indigo-600">{ft.itemCount || 5}</span>
+                                                                    </div>
+                                                                    <input
+                                                                        type="range"
+                                                                        min="2"
+                                                                        max="12"
+                                                                        value={ft.itemCount || 5}
+                                                                        onChange={(e) => updateTracker({ itemCount: parseInt(e.target.value) || 5 })}
+                                                                        className="w-full accent-indigo-600 cursor-pointer"
+                                                                    />
+                                                                </div>
+                                                            )}
+
+                                                            {/* Tamanho e Espaçamento dos Ícones */}
+                                                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100">
+                                                                <div>
+                                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Tamanho (px)</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="10"
+                                                                        max="45"
+                                                                        value={ft.itemSize || 20}
+                                                                        onChange={(e) => updateTracker({ itemSize: parseInt(e.target.value) || 20 })}
+                                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Espaço (px)</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="30"
+                                                                        value={ft.spacing !== undefined ? ft.spacing : 5}
+                                                                        onChange={(e) => updateTracker({ spacing: parseInt(e.target.value) || 0 })}
+                                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Traço (px)</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0.5"
+                                                                        max="4"
+                                                                        step="0.2"
+                                                                        value={ft.strokeWidth || 1.2}
+                                                                        onChange={(e) => updateTracker({ strokeWidth: parseFloat(e.target.value) || 1.2 })}
+                                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded"
+                                                                    />
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Título / Rótulo do Rodapé */}
+                                                            <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Rótulo / Texto</label>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => updateTracker({ showLabel: !(ft.showLabel !== false) })}
+                                                                        className={`text-[10px] font-semibold flex items-center gap-1 px-1.5 py-0.5 rounded border ${
+                                                                            ft.showLabel !== false
+                                                                                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                                                                                : 'bg-gray-100 border-gray-200 text-gray-400'
+                                                                        }`}
+                                                                    >
+                                                                        <Eye className="w-3 h-3" />
+                                                                        {ft.showLabel !== false ? 'Visível' : 'Oculto'}
+                                                                    </button>
+                                                                </div>
+
+                                                                {ft.showLabel !== false && (
+                                                                    <div className="space-y-2">
+                                                                        <div>
+                                                                            <label className="block text-[9px] font-bold text-gray-400 mb-0.5 uppercase">Texto do Rótulo</label>
+                                                                            <input
+                                                                                type="text"
+                                                                                value={ft.label !== undefined ? ft.label : currentTypeInfo.defaultName}
+                                                                                onChange={(e) => updateTracker({ label: e.target.value })}
+                                                                                className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"
+                                                                                placeholder="Ex: Água, Clima, Meu Dia..."
+                                                                            />
+                                                                        </div>
+
+                                                                        <div className="flex border border-gray-200 rounded overflow-hidden">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => updateTracker({ labelPosition: 'left' })}
+                                                                                className={`flex-1 py-1 text-[10px] font-semibold transition-colors ${
+                                                                                    ft.labelPosition !== 'top' ? 'bg-blue-50 text-blue-700 font-bold' : 'bg-white text-gray-500 hover:bg-gray-50'
+                                                                                }`}
+                                                                            >
+                                                                                Ao Lado
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => updateTracker({ labelPosition: 'top' })}
+                                                                                className={`flex-1 py-1 text-[10px] font-semibold transition-colors ${
+                                                                                    ft.labelPosition === 'top' ? 'bg-blue-50 text-blue-700 font-bold' : 'bg-white text-gray-500 hover:bg-gray-50'
+                                                                                }`}
+                                                                            >
+                                                                                Acima
+                                                                            </button>
+                                                                        </div>
+
+                                                                        {renderTypographyControls(
+                                                                            {
+                                                                                fontFamily: selectedElement.style.fontFamily || 'Inter',
+                                                                                fontSize: selectedElement.style.fontSize || 10,
+                                                                                fontWeight: (selectedElement.style.fontWeight as any) || '600',
+                                                                                color: selectedElement.style.color || ft.strokeColor || '#374151',
+                                                                                textAlign: (selectedElement.style.textAlign as any) || 'left',
+                                                                                verticalAlign: (selectedElement.style.verticalAlign as any) || 'middle',
+                                                                                textTransform: (selectedElement.style.textTransform as any) || 'none',
+                                                                                letterSpacing: selectedElement.style.letterSpacing || 0,
+                                                                                backgroundColor: 'transparent'
+                                                                            },
+                                                                            (updates) => updateElementStyle(selectedElement.id, updates)
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Cores e Traço */}
+                                                            <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight">Cores</label>
+                                                                <div className="grid grid-cols-2 gap-2">
+                                                                    <div>
+                                                                        <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Contorno</label>
+                                                                        <div className="flex h-8 border border-gray-200 rounded overflow-hidden">
+                                                                            <input
+                                                                                type="color"
+                                                                                value={ft.strokeColor || selectedElement.style.color || currentTypeInfo.defaultColor}
+                                                                                onChange={(e) => updateTracker({ strokeColor: e.target.value })}
+                                                                                className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Preenchimento</label>
+                                                                        <div className="flex h-8 border border-gray-200 rounded overflow-hidden">
+                                                                            <input
+                                                                                type="color"
+                                                                                value={ft.fillColor && ft.fillColor !== 'transparent' ? ft.fillColor : '#ffffff'}
+                                                                                onChange={(e) => updateTracker({ fillColor: e.target.value })}
+                                                                                className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Caixinha Decorativa de Fundo */}
+                                                            <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Caixa de Fundo</label>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => updateTracker({ showBox: !ft.showBox })}
+                                                                        className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition-colors ${
+                                                                            ft.showBox
+                                                                                ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
+                                                                                : 'bg-white border-gray-200 text-gray-500'
+                                                                        }`}
+                                                                    >
+                                                                        {ft.showBox ? 'Ativada' : 'Desativada'}
+                                                                    </button>
+                                                                </div>
+
+                                                                {ft.showBox && (
+                                                                    <div className="grid grid-cols-3 gap-2">
+                                                                        <div>
+                                                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Fundo</label>
+                                                                            <div className="flex h-7 border border-gray-200 rounded overflow-hidden">
+                                                                                <input
+                                                                                    type="color"
+                                                                                    value={ft.boxBackgroundColor || '#f8fafc'}
+                                                                                    onChange={(e) => updateTracker({ boxBackgroundColor: e.target.value })}
+                                                                                    className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                                />
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Borda</label>
+                                                                            <div className="flex h-7 border border-gray-200 rounded overflow-hidden">
+                                                                                <input
+                                                                                    type="color"
+                                                                                    value={ft.boxBorderColor || '#e2e8f0'}
+                                                                                    onChange={(e) => updateTracker({ boxBorderColor: e.target.value })}
+                                                                                    className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                                />
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Raio (px)</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                max="20"
+                                                                                value={ft.boxBorderRadius !== undefined ? ft.boxBorderRadius : 6}
+                                                                                onChange={(e) => updateTracker({ boxBorderRadius: parseInt(e.target.value) || 0 })}
+                                                                                className="w-full text-xs p-1 border border-gray-200 rounded"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
                                             {(selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar') && selectedElement.style.fullCalendar && (
                                                 <div className="pt-3 border-t border-gray-100">
                                                     <div className="space-y-3 mb-3">
@@ -11418,33 +15116,103 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 </div>
                                                             </div>
                                                         </div>
+
+                                                        <div className="pb-3 border-b border-gray-100">
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Espaçamento das Linhas de Dias</label>
+                                                                <span className="text-[10px] font-bold text-indigo-600">
+                                                                    {(() => {
+                                                                        const currentVal = selectedElement.style.fullCalendar?.dayRowHeight ?? (selectedElement.style.useGlobalStyle ? (getGlobalCalendarStyle() as any)?.dayRowHeight : undefined);
+                                                                        return currentVal !== undefined ? `${currentVal}px` : 'Auto';
+                                                                    })()}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="range" 
+                                                                    min="6" 
+                                                                    max="40" 
+                                                                    value={(() => {
+                                                                        const currentVal = selectedElement.style.fullCalendar?.dayRowHeight ?? (selectedElement.style.useGlobalStyle ? (getGlobalCalendarStyle() as any)?.dayRowHeight : undefined);
+                                                                        return currentVal ?? 11;
+                                                                    })()} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseInt(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, {
+                                                                            fullCalendar: {
+                                                                                ...selectedElement.style.fullCalendar,
+                                                                                dayRowHeight: val
+                                                                            }
+                                                                        });
+                                                                    }} 
+                                                                    className="flex-1 accent-indigo-600 h-2 bg-gray-200 rounded cursor-pointer"
+                                                                />
+                                                                <div className="flex items-center gap-1 w-20">
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="6" 
+                                                                        max="60" 
+                                                                        placeholder="Auto"
+                                                                        value={(() => {
+                                                                            const currentVal = selectedElement.style.fullCalendar?.dayRowHeight ?? (selectedElement.style.useGlobalStyle ? (getGlobalCalendarStyle() as any)?.dayRowHeight : undefined);
+                                                                            return currentVal !== undefined ? currentVal : '';
+                                                                        })()} 
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value === '' ? undefined : parseInt(e.target.value);
+                                                                            updateElementStyle(selectedElement.id, {
+                                                                                fullCalendar: {
+                                                                                    ...selectedElement.style.fullCalendar,
+                                                                                    dayRowHeight: val
+                                                                                }
+                                                                            });
+                                                                        }} 
+                                                                        className="w-full text-xs p-1 border border-gray-200 rounded text-center bg-white font-medium"
+                                                                    />
+                                                                    <span className="text-[10px] text-gray-500">px</span>
+                                                                </div>
+                                                            </div>
+                                                            <p className="text-[8px] text-gray-400 mt-1">Controla a altura e o espaçamento vertical entre as linhas de dias do calendário.</p>
+                                                        </div>
                                                         
                                                         {selectedElement.type === 'mini_calendar' && (
                                                             <div className="space-y-3">
-                                                                <button 
-                                                                    onClick={() => {
-                                                                        const fullCalStyle = getGlobalCalendarStyle();
-                                                                        if (fullCalStyle) {
-                                                                            updateElementStyle(selectedElement.id, { fullCalendar: JSON.parse(JSON.stringify(fullCalStyle)) });
-                                                                            alert('Estilo copiado do Calendário Anual!');
-                                                                        } else {
-                                                                            alert('Calendário Anual não encontrado para copiar o estilo.');
-                                                                        }
-                                                                    }}
-                                                                    className="w-full py-2 px-3 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-[10px] font-bold uppercase hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 mb-1"
-                                                                >
-                                                                    <Layers className="w-3 h-3" /> Copiar Estilo do Calendário Anual
-                                                                </button>
-                                                                
-                                                                <label className="flex items-center gap-2 cursor-pointer pb-2 border-b border-gray-100">
-                                                                    <input 
-                                                                        type="checkbox" 
-                                                                        checked={selectedElement.style.useGlobalStyle || false}
-                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { useGlobalStyle: e.target.checked })} 
-                                                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" 
-                                                                    />
-                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase">Sincronizar com Global</span>
-                                                                </label>
+                                                                <div className="space-y-2 p-2.5 bg-gradient-to-r from-emerald-50/80 to-teal-50/80 rounded-xl border border-emerald-200/80 mb-2">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
+                                                                            <RefreshCw className="w-3.5 h-3.5 text-emerald-600" /> Sincronização de Aparência
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[9px] text-emerald-800 leading-tight">
+                                                                        Personalizou este mini calendário antes do anual? Sincronize para que o Calendário Anual tenha a mesma aparência (fontes, cores, grid e cabeçalhos).
+                                                                    </p>
+                                                                    <div className="flex flex-col gap-1.5 pt-1">
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => syncMiniCalendarToAnnual(selectedElement)}
+                                                                            className="w-full py-2 px-3 bg-emerald-600 text-white rounded-lg text-[10px] font-bold uppercase hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
+                                                                            title="Aplica a aparência deste Mini Calendário ao Calendário Anual"
+                                                                        >
+                                                                            <RefreshCw className="w-3.5 h-3.5" /> Sincronizar Calendário Anual com este Mini
+                                                                        </button>
+
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const fullCalStyle = getGlobalCalendarStyle();
+                                                                                if (fullCalStyle) {
+                                                                                    updateElementStyle(selectedElement.id, { fullCalendar: JSON.parse(JSON.stringify(fullCalStyle)) });
+                                                                                    alert('Aparência copiada do Calendário Anual com sucesso!');
+                                                                                } else {
+                                                                                    alert('Calendário Anual não encontrado para copiar a aparência.');
+                                                                                }
+                                                                            }}
+                                                                            className="w-full py-1.5 px-3 bg-white border border-emerald-300 text-emerald-800 rounded-lg text-[9px] font-bold uppercase hover:bg-emerald-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                                                                            title="Copia a aparência do Calendário Anual para este Mini Calendário"
+                                                                        >
+                                                                            <Layers className="w-3 h-3 text-emerald-600" /> Copiar Aparência do Calendário Anual
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
 
                                                                 <div className="space-y-2 pb-2 border-b border-gray-100">
                                                                     <div className="flex items-center justify-between">
@@ -11644,11 +15412,356 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         </div>
                                                                     )}
                                                                 </div>
+
+                                                                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Abreviação do Mês</label>
+                                                                        <span className="text-[9px] text-gray-400 font-medium">Nome do mês</span>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-4 gap-1">
+                                                                        {[
+                                                                            { id: 'full', label: 'Completo', sub: 'Janeiro' },
+                                                                            { id: 'short', label: '3 Letras', sub: 'Jan' },
+                                                                            { id: 'two_letters', label: '2 Letras', sub: 'Ja' },
+                                                                            { id: 'initial', label: '1 Letra', sub: 'J' }
+                                                                        ].map((fmt) => {
+                                                                            const currentFmt = selectedElement.style.fullCalendar?.monthFormat || selectedElement.style.nameFormat || (selectedElement.style.useGlobalStyle ? (getGlobalCalendarStyle() as any)?.monthFormat : null) || 'full';
+                                                                            const isSelected = currentFmt === fmt.id;
+                                                                            return (
+                                                                                <button
+                                                                                    key={fmt.id}
+                                                                                    type="button"
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                        nameFormat: fmt.id,
+                                                                                        fullCalendar: {
+                                                                                            ...selectedElement.style.fullCalendar,
+                                                                                            monthFormat: fmt.id
+                                                                                        }
+                                                                                    })}
+                                                                                    className={`p-1.5 text-center rounded border transition-all ${
+                                                                                        isSelected 
+                                                                                            ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs' 
+                                                                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 text-[10px]'
+                                                                                    }`}
+                                                                                >
+                                                                                    <div className="text-[10px] leading-tight font-medium">{fmt.label}</div>
+                                                                                    <div className={`text-[8px] opacity-75 ${isSelected ? 'text-indigo-100' : 'text-gray-400'}`}>({fmt.sub})</div>
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         )}
 
                                                         {selectedElement.type === 'full_calendar' && (
                                                             <div className="space-y-4">
+                                                                {/* SEÇÃO PRINCIPAL: LISTA DE FERIADOS POR EXTENSO JUNTO AO CALENDÁRIO */}
+                                                                {(() => {
+                                                                    const pageElements = getActiveElements();
+                                                                    const existingHoliday = pageElements.find(el => el.type === 'holiday_list');
+                                                                    const calYear = config.year + (selectedElement.style.yearOffset || 0);
+
+                                                                    return (
+                                                                        <div className="p-3.5 bg-gradient-to-br from-indigo-50 via-purple-50/40 to-pink-50/30 rounded-2xl border-2 border-indigo-300/80 shadow-xs space-y-3">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className="text-[11px] font-extrabold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                                                                                    <Flag className="w-4 h-4 text-indigo-600" /> Feriados por Extenso (Editável)
+                                                                                </span>
+                                                                                <span className="text-[9px] font-bold text-indigo-700 bg-white px-2.5 py-0.5 rounded-full border border-indigo-200 shadow-2xs">
+                                                                                    Ano {calYear}
+                                                                                </span>
+                                                                            </div>
+
+                                                                            <p className="text-[9.5px] text-gray-650 leading-relaxed">
+                                                                                Insira uma lista com as datas e os nomes dos feriados por extenso em formato de texto editável junto a este calendário anual.
+                                                                            </p>
+
+                                                                            {existingHoliday ? (
+                                                                                <div className="space-y-2">
+                                                                                    <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-300 flex items-center justify-between gap-2 shadow-2xs">
+                                                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                                                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 animate-pulse"></span>
+                                                                                            <div>
+                                                                                                <span className="text-[10px] font-bold text-emerald-900 block truncate">Lista presente na página</span>
+                                                                                                <span className="text-[8px] text-emerald-700 block">Texto 100% editável e formatável</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => setSelectedIds([existingHoliday.id])}
+                                                                                            className="text-[9px] font-bold text-indigo-700 hover:text-indigo-900 bg-white px-2 py-1 rounded-md border border-indigo-200 shadow-2xs hover:bg-indigo-50 transition-colors shrink-0 cursor-pointer flex items-center gap-1"
+                                                                                        >
+                                                                                            <PenTool className="w-2.5 h-2.5 text-indigo-600" /> Editar Texto
+                                                                                        </button>
+                                                                                    </div>
+
+                                                                                    {/* OPÇÃO DE COLUNAS DOS FERIADOS POR EXTENSO */}
+                                                                                    <div className="p-2 bg-white/95 rounded-xl border border-indigo-200/90 space-y-2 shadow-2xs">
+                                                                                        <div className="flex items-center justify-between">
+                                                                                            <span className="text-[10px] font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
+                                                                                                <Columns className="w-3.5 h-3.5 text-indigo-600" /> Distribuição em Colunas:
+                                                                                            </span>
+                                                                                            <span className="text-[9px] font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                                                                                                {(existingHoliday.style.columnCount || 2) === 1 ? '1 Coluna' : `${existingHoliday.style.columnCount || 2} Colunas`}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="grid grid-cols-2 gap-1.5">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => updateElementStyle(existingHoliday.id, { columnCount: 1 })}
+                                                                                                className={`py-1.5 px-2 text-center rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                                                                                                    (existingHoliday.style.columnCount || 2) === 1
+                                                                                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                                                                                                        : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                                                                                }`}
+                                                                                            >
+                                                                                                1 Coluna (Lista Única)
+                                                                                            </button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => updateElementStyle(existingHoliday.id, { columnCount: 2 })}
+                                                                                                className={`py-1.5 px-2 text-center rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                                                                                                    (existingHoliday.style.columnCount || 2) === 2
+                                                                                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                                                                                                        : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                                                                                }`}
+                                                                                            >
+                                                                                                2 Colunas (Lado a Lado) ✨
+                                                                                            </button>
+                                                                                        </div>
+
+                                                                                        {/* CONTROLE DE ESPAÇAMENTO ENTRE COLUNAS (GAP) */}
+                                                                                        {(existingHoliday.style.columnCount || 2) > 1 && (
+                                                                                            <div className="pt-2 border-t border-indigo-100 space-y-1.5">
+                                                                                                <div className="flex items-center justify-between">
+                                                                                                    <span className="text-[9.5px] font-bold text-indigo-950 uppercase tracking-tight flex items-center gap-1">
+                                                                                                        <Columns className="w-3 h-3 text-indigo-600" /> Espaço entre as 2 Colunas:
+                                                                                                    </span>
+                                                                                                    <span className="text-[10px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
+                                                                                                        {existingHoliday.style.columnGap ?? 24}px ({(((existingHoliday.style.columnGap ?? 24) * 0.264583)).toFixed(1)} mm)
+                                                                                                    </span>
+                                                                                                </div>
+                                                                                                <div className="flex items-center gap-2">
+                                                                                                    <input 
+                                                                                                        type="range" 
+                                                                                                        min="4" 
+                                                                                                        max="80" 
+                                                                                                        step="2"
+                                                                                                        value={existingHoliday.style.columnGap ?? 24} 
+                                                                                                        onChange={(e) => updateElementStyle(existingHoliday.id, { columnGap: parseInt(e.target.value) })}
+                                                                                                        className="flex-1 accent-indigo-600 h-1.5 bg-indigo-200 rounded-lg cursor-pointer" 
+                                                                                                    />
+                                                                                                    <div className="flex items-center gap-1 shrink-0">
+                                                                                                        <input 
+                                                                                                            type="number" 
+                                                                                                            min="2" 
+                                                                                                            max="120"
+                                                                                                            value={existingHoliday.style.columnGap ?? 24} 
+                                                                                                            onChange={(e) => {
+                                                                                                                const val = parseInt(e.target.value);
+                                                                                                                if (!isNaN(val)) updateElementStyle(existingHoliday.id, { columnGap: val });
+                                                                                                            }}
+                                                                                                            className="w-12 text-xs font-bold text-center p-0.5 border border-indigo-200 rounded bg-white" 
+                                                                                                        />
+                                                                                                        <span className="text-[9px] font-bold text-indigo-700">px</span>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <div className="flex items-center gap-1 pt-0.5">
+                                                                                                    {[12, 18, 24, 32, 40].map(gap => (
+                                                                                                        <button
+                                                                                                            key={gap}
+                                                                                                            type="button"
+                                                                                                            onClick={() => updateElementStyle(existingHoliday.id, { columnGap: gap })}
+                                                                                                            className={`flex-1 py-0.5 text-[8.5px] rounded border font-medium cursor-pointer transition-colors ${
+                                                                                                                (existingHoliday.style.columnGap ?? 24) === gap
+                                                                                                                    ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                                                                                                                    : 'bg-white text-gray-700 border-gray-200 hover:bg-indigo-50'
+                                                                                                            }`}
+                                                                                                        >
+                                                                                                            {gap}px
+                                                                                                        </button>
+                                                                                                    ))}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                     {/* CONTROLE DE REDIMENSIONAMENTO DO CALENDÁRIO + EXTENSO */}
+                                                                                    <div className="p-2.5 bg-white/95 rounded-xl border border-indigo-200/90 space-y-2 shadow-2xs">
+                                                                                        <div className="flex items-center justify-between">
+                                                                                            <span className="text-[9.5px] font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1">
+                                                                                                <Maximize2 className="w-3 h-3 text-indigo-600" /> Redimensionar Calendário:
+                                                                                            </span>
+                                                                                            <span className="text-[9px] font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                                                                                                Altura: {Math.round(selectedElement.h)}%
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="grid grid-cols-3 gap-1">
+                                                                                            {[
+                                                                                                { h: 50, label: 'Compacto', sub: '50% / +Espaço' },
+                                                                                                { h: 58, label: 'Equilibrado', sub: '58% (Ideal)' },
+                                                                                                { h: 64, label: 'Amplo', sub: '64% / Maior' }
+                                                                                            ].map(preset => (
+                                                                                                <button
+                                                                                                    key={preset.h}
+                                                                                                    type="button"
+                                                                                                    onClick={() => resizeCalendarAndHolidayLayout(preset.h, selectedElement.id)}
+                                                                                                    className={`py-1 px-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                                                                                                        Math.abs(Math.round(selectedElement.h) - preset.h) <= 2
+                                                                                                            ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                                                                                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-indigo-50'
+                                                                                                    }`}
+                                                                                                >
+                                                                                                    <div className="text-[9px] font-bold leading-tight">{preset.label}</div>
+                                                                                                    <div className={`text-[7.5px] ${Math.abs(Math.round(selectedElement.h) - preset.h) <= 2 ? 'text-indigo-100' : 'text-gray-400'}`}>{preset.sub}</div>
+                                                                                                </button>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-2 pt-0.5">
+                                                                                            <span className="text-[8.5px] font-bold text-gray-500 shrink-0">Ajuste:</span>
+                                                                                            <input
+                                                                                                type="range"
+                                                                                                min="40"
+                                                                                                max="74"
+                                                                                                step="1"
+                                                                                                value={Math.round(selectedElement.h)}
+                                                                                                onChange={(e) => resizeCalendarAndHolidayLayout(parseInt(e.target.value), selectedElement.id)}
+                                                                                                className="flex-1 accent-indigo-600 h-1.5 bg-indigo-200 rounded-lg cursor-pointer"
+                                                                                            />
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, preserveContent: true, columns: existingHoliday.style.columnCount || 2, calendarHeight: 58 })}
+                                                                                            className="w-full py-2 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[9px] font-bold uppercase transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
+                                                                                            title="Redimensiona o calendário e re-diagrama a lista por extenso abaixo dele"
+                                                                                        >
+                                                                                            <Columns className="w-3 h-3" /> Redimensionar & Ajustar
+                                                                                        </button>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => removeHolidayListAndRestoreCalendar(existingHoliday.id)}
+                                                                                            className="w-full py-2 px-2 bg-white border border-rose-300 text-rose-700 hover:bg-rose-50 rounded-lg text-[9px] font-bold uppercase transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                                                                                            title="Remove a lista de feriados desta página e restaura o calendário"
+                                                                                        >
+                                                                                            <Trash2 className="w-3 h-3 text-rose-600" /> Remover
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <div className="space-y-2 pt-0.5">
+                                                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, format: 'full_written', columns: 2 })}
+                                                                                            className="w-full py-2.5 px-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-[9.5px] font-bold uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-0.5 shadow-sm cursor-pointer active:scale-98"
+                                                                                            title="Ajusta o tamanho do calendário e insere a lista de feriados por extenso em 2 colunas logo abaixo"
+                                                                                        >
+                                                                                            <div className="flex items-center gap-1">
+                                                                                                <Columns className="w-3.5 h-3.5" />
+                                                                                                <span>2 Colunas</span>
+                                                                                            </div>
+                                                                                            <span className="text-[7.5px] opacity-90 font-normal">Recomendado</span>
+                                                                                        </button>
+
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, format: 'full_written', columns: 1 })}
+                                                                                            className="w-full py-2.5 px-2 bg-white border border-indigo-300 text-indigo-900 hover:bg-indigo-50 rounded-xl text-[9.5px] font-bold uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-0.5 shadow-2xs cursor-pointer active:scale-98"
+                                                                                            title="Ajusta o tamanho do calendário e insere a lista de feriados em 1 coluna vertical contínua"
+                                                                                        >
+                                                                                            <div className="flex items-center gap-1">
+                                                                                                <List className="w-3.5 h-3.5 text-indigo-600" />
+                                                                                                <span>1 Coluna</span>
+                                                                                            </div>
+                                                                                            <span className="text-[7.5px] text-gray-500 font-normal">Lista Contínua</span>
+                                                                                        </button>
+                                                                                    </div>
+
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: false, format: 'full_written', columns: 2 })}
+                                                                                        className="w-full py-2 px-3 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl text-[9px] font-bold uppercase transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                                                                                        title="Insere um elemento de texto com os feriados na página sem redimensionar o calendário"
+                                                                                    >
+                                                                                        <Plus className="w-3 h-3 text-indigo-600" /> Inserir s/ Redimensionar Calendário
+                                                                                    </button>
+
+                                                                                    <div className="pt-1 border-t border-indigo-200/60">
+                                                                                        <span className="block text-[8px] font-bold text-gray-500 uppercase tracking-wider mb-1">Opções Rápidas por Formato e Colunas:</span>
+                                                                                        <div className="grid grid-cols-2 gap-1 text-[8px]">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, format: 'full_written', columns: 2 })}
+                                                                                                className="py-1 px-1.5 bg-white/90 hover:bg-white border border-indigo-100 rounded text-left text-gray-700 hover:text-indigo-900 transition-colors"
+                                                                                            >
+                                                                                                <span className="font-bold text-indigo-700 block">Extenso (2 colunas)</span>
+                                                                                                <span className="text-[7.5px] text-gray-400">01 de Janeiro - Confrat.</span>
+                                                                                            </button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, format: 'full_with_weekday', columns: 2 })}
+                                                                                                className="py-1 px-1.5 bg-white/90 hover:bg-white border border-indigo-100 rounded text-left text-gray-700 hover:text-indigo-900 transition-colors"
+                                                                                            >
+                                                                                                <span className="font-bold text-indigo-700 block">Extenso + Dia (2 colunas)</span>
+                                                                                                <span className="text-[7.5px] text-gray-400">01 de Janeiro (Qui) - Confrat.</span>
+                                                                                            </button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, format: 'full_written', columns: 1 })}
+                                                                                                className="py-1 px-1.5 bg-white/90 hover:bg-white border border-indigo-100 rounded text-left text-gray-700 hover:text-indigo-900 transition-colors"
+                                                                                            >
+                                                                                                <span className="font-bold text-gray-700 block">Extenso (1 coluna)</span>
+                                                                                                <span className="text-[7.5px] text-gray-400">Lista única contínua</span>
+                                                                                            </button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => insertHolidayListWithCalendar(selectedElement.id, { autoLayout: true, format: 'full_with_weekday', columns: 1 })}
+                                                                                                className="py-1 px-1.5 bg-white/90 hover:bg-white border border-indigo-100 rounded text-left text-gray-700 hover:text-indigo-900 transition-colors"
+                                                                                            >
+                                                                                                <span className="font-bold text-gray-700 block">Extenso + Dia (1 col)</span>
+                                                                                                <span className="text-[7.5px] text-gray-400">Lista única contínua</span>
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })()}
+
+                                                                <div className="p-2.5 bg-gradient-to-r from-indigo-50/90 to-purple-50/90 rounded-xl border border-indigo-200/80 space-y-2 mb-2">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                                                                            <RefreshCw className="w-3.5 h-3.5 text-indigo-600" /> Sincronização de Aparência
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[9px] text-indigo-800 leading-tight">
+                                                                        Personalizou o Mini Calendário antes do anual? Sincronize e puxe a mesma aparência (fontes, cores, grid e cabeçalhos) para cá com um clique.
+                                                                    </p>
+                                                                    <div className="flex flex-col gap-1.5 pt-1">
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => copyStyleFromMiniCalendarToFull(selectedElement.id)}
+                                                                            className="w-full py-2 px-3 bg-indigo-600 text-white rounded-lg text-[10px] font-bold uppercase hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
+                                                                            title="Puxa fontes, cores, bordas e formatações do Mini Calendário para este Calendário Anual"
+                                                                        >
+                                                                            <ArrowLeftRight className="w-3.5 h-3.5" /> Sincronizar com Mini Calendário (Puxar Aparência)
+                                                                        </button>
+
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => applyFullCalendarStyleToAllMini(selectedElement)}
+                                                                            className="w-full py-1.5 px-3 bg-white border border-indigo-300 text-indigo-800 rounded-lg text-[9px] font-bold uppercase hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                                                                            title="Aplica a aparência deste Calendário Anual a todos os Mini Calendários do projeto"
+                                                                        >
+                                                                            <Layers className="w-3 h-3 text-indigo-600" /> Aplicar Aparência a Todos os Mini Calendários
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
                                                                 <div>
                                                                     <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wider">Layout / Meses por Linha</label>
                                                                     <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -11730,6 +15843,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Mostrar Ano no Título</span>
                                                                     </label>
 
+                                                                    <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Abreviação do Mês</label>
+                                                                            <span className="text-[9px] text-gray-400 font-medium">Nome dos meses</span>
+                                                                        </div>
+                                                                        <div className="grid grid-cols-4 gap-1">
+                                                                            {[
+                                                                                { id: 'full', label: 'Completo', sub: 'Janeiro' },
+                                                                                { id: 'short', label: '3 Letras', sub: 'Jan' },
+                                                                                { id: 'two_letters', label: '2 Letras', sub: 'Ja' },
+                                                                                { id: 'initial', label: '1 Letra', sub: 'J' }
+                                                                            ].map((fmt) => {
+                                                                                const currentFmt = selectedElement.style.fullCalendar?.monthFormat || selectedElement.style.nameFormat || (selectedElement.style.useGlobalStyle ? (getGlobalCalendarStyle() as any)?.monthFormat : null) || 'full';
+                                                                                const isSelected = currentFmt === fmt.id;
+                                                                                return (
+                                                                                    <button
+                                                                                        key={fmt.id}
+                                                                                        type="button"
+                                                                                        onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                            nameFormat: fmt.id,
+                                                                                            fullCalendar: {
+                                                                                                ...selectedElement.style.fullCalendar,
+                                                                                                monthFormat: fmt.id
+                                                                                            }
+                                                                                        })}
+                                                                                        className={`p-1.5 text-center rounded border transition-all ${
+                                                                                            isSelected 
+                                                                                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs' 
+                                                                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 text-[10px]'
+                                                                                        }`}
+                                                                                    >
+                                                                                        <div className="text-[10px] leading-tight font-medium">{fmt.label}</div>
+                                                                                        <div className={`text-[8px] opacity-75 ${isSelected ? 'text-indigo-100' : 'text-gray-400'}`}>({fmt.sub})</div>
+                                                                                    </button>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+
                                                                     <div className="pt-2 border-t border-gray-100 space-y-2">
                                                                         <div className="flex items-center justify-between">
                                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Destacar Dia Atual</label>
@@ -11771,106 +15923,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 </div>
                                                             </div>
                                                         )}
-                                                        {selectedElement.type === 'mini_calendar' && (
-                                                            <div className="space-y-2 p-2.5 bg-gray-50/80 rounded-lg border border-gray-200/80">
-                                                                <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wider">Definição do Mês Exibido</label>
-                                                                <select
-                                                                    value={selectedElement.style.calendarMonthMode || 'sequence'}
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { calendarMonthMode: e.target.value as any })}
-                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white shadow-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-                                                                >
-                                                                    <option value="relative">Mês Relativo (Mês da Página)</option>
-                                                                    <option value="sequence">Sequencial Automático na Página (+1 Mês)</option>
-                                                                    <option value="fixed">Mês Fixo (Específico)</option>
-                                                                </select>
-
-                                                                {selectedElement.style.calendarMonthMode === 'relative' && (
-                                                                    <div className="space-y-2 pt-1">
-                                                                        <div className="flex rounded border border-gray-200 overflow-hidden bg-white shadow-sm">
-                                                                            <button 
-                                                                                onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: -1 })} 
-                                                                                className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === -1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
-                                                                            >
-                                                                                Anterior
-                                                                            </button>
-                                                                            <div className="w-px bg-gray-200"></div>
-                                                                            <button 
-                                                                                onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 0 })} 
-                                                                                className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === 0 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
-                                                                            >
-                                                                                Atual
-                                                                            </button>
-                                                                            <div className="w-px bg-gray-200"></div>
-                                                                            <button 
-                                                                                onClick={() => updateElementStyle(selectedElement.id, { calendarOffset: 1 })} 
-                                                                                className={`flex-1 py-1 text-[10px] transition-colors ${(selectedElement.style.calendarOffset ?? 0) === 1 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
-                                                                            >
-                                                                                Próximo
-                                                                            </button>
-                                                                        </div>
-
-                                                                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-200/60">
-                                                                            <span className="text-[10px] font-medium text-gray-500">Deslocamento:</span>
-                                                                            <div className="flex items-center gap-1">
-                                                                                <input 
-                                                                                    type="number" 
-                                                                                    value={selectedElement.style.calendarOffset ?? 0}
-                                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { calendarOffset: parseInt(e.target.value) || 0 })}
-                                                                                    className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-bold text-gray-700 bg-white shadow-sm"
-                                                                                />
-                                                                                <span className="text-[10px] text-gray-400">meses</span>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-
-                                                                {(!selectedElement.style.calendarMonthMode || selectedElement.style.calendarMonthMode === 'sequence') && (
-                                                                    <div className="space-y-2 pt-1">
-                                                                        <div className="p-2 bg-indigo-50/70 rounded border border-indigo-100">
-                                                                            <p className="text-[10px] text-indigo-800 leading-tight">
-                                                                                <strong>Sequência Automática:</strong> Se houver múltiplos calendários na página, o 1º exibe o mês base, o 2º o mês + 1, o 3º o mês + 2, e assim sucessivamente.
-                                                                            </p>
-                                                                        </div>
-                                                                        <div className="flex items-center justify-between gap-2 pt-1">
-                                                                            <span className="text-[10px] font-medium text-gray-600">Ajuste de Início:</span>
-                                                                            <div className="flex items-center gap-1">
-                                                                                <input 
-                                                                                    type="number" 
-                                                                                    value={selectedElement.style.calendarOffset ?? 0}
-                                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { calendarOffset: parseInt(e.target.value) || 0 })}
-                                                                                    className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-bold text-gray-700 bg-white shadow-sm"
-                                                                                />
-                                                                                <span className="text-[10px] text-gray-400">meses</span>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-
-                                                                {selectedElement.style.calendarMonthMode === 'fixed' && (
-                                                                    <div className="space-y-1.5 pt-1">
-                                                                        <label className="block text-[10px] font-medium text-gray-500">Mês Específico</label>
-                                                                        <select
-                                                                            value={selectedElement.style.calendarFixedMonth ?? 0}
-                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { calendarFixedMonth: parseInt(e.target.value) })}
-                                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded font-medium text-gray-700 bg-white shadow-sm"
-                                                                        >
-                                                                            <option value={0}>Janeiro</option>
-                                                                            <option value={1}>Fevereiro</option>
-                                                                            <option value={2}>Março</option>
-                                                                            <option value={3}>Abril</option>
-                                                                            <option value={4}>Maio</option>
-                                                                            <option value={5}>Junho</option>
-                                                                            <option value={6}>Julho</option>
-                                                                            <option value={7}>Agosto</option>
-                                                                            <option value={8}>Setembro</option>
-                                                                            <option value={9}>Outubro</option>
-                                                                            <option value={10}>Novembro</option>
-                                                                            <option value={11}>Dezembro</option>
-                                                                        </select>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
                                                     </div>
                                                          <div className="space-y-2 pt-2 border-t border-gray-100 pb-3 mb-2">
                                                              <div className="flex flex-col">
@@ -11889,7 +15941,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                      { v: 'bottom', h: 'center', label: '↓', title: 'Inferior Centro' },
                                                                      { v: 'bottom', h: 'right', label: '↘', title: 'Inferior Direito' }
                                                                  ].map((pos) => {
-                                                                     const daysStyle = selectedElement.style.fullCalendar?.days || {};
+                                                                     const daysStyle = selectedElement.style.fullCalendar?.days || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.days : null) || {};
                                                                      const isSelected = (daysStyle.verticalAlign || 'middle') === pos.v && (daysStyle.textAlign || 'center') === pos.h;
                                                                      return (
                                                                          <button
@@ -12115,6 +16167,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         {renderTypographyControls(
                                                                             selectedElement.style.fullCalendar?.weekDays || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.weekDays : null) || (defaultCalendarStyle as any).weekDays,
                                                                             (updates) => updateFullCalendarStyle(selectedElement.id, 'weekDays', updates)
+                                                                        )}
+                                                                    </div>
+                                                                ) : fontControlTab === 'title' ? (
+                                                                    <div className="space-y-3">
+                                                                        <div className="space-y-1.5 pb-2 border-b border-gray-100">
+                                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Formato do Nome do Mês</label>
+                                                                            <div className="grid grid-cols-4 gap-1">
+                                                                                {[
+                                                                                    { id: 'full', label: 'Completo', sub: 'Janeiro' },
+                                                                                    { id: 'short', label: '3 Letras', sub: 'Jan' },
+                                                                                    { id: 'two_letters', label: '2 Letras', sub: 'Ja' },
+                                                                                    { id: 'initial', label: '1 Letra', sub: 'J' }
+                                                                                ].map((fmt) => {
+                                                                                    const currentFmt = selectedElement.style.fullCalendar?.monthFormat || selectedElement.style.nameFormat || (selectedElement.style.useGlobalStyle ? (getGlobalCalendarStyle() as any)?.monthFormat : null) || 'full';
+                                                                                    const isSelected = currentFmt === fmt.id;
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={fmt.id}
+                                                                                            type="button"
+                                                                                            onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                                nameFormat: fmt.id,
+                                                                                                fullCalendar: {
+                                                                                                    ...selectedElement.style.fullCalendar,
+                                                                                                    monthFormat: fmt.id
+                                                                                                }
+                                                                                            })}
+                                                                                            className={`p-1 text-center rounded border transition-all ${isSelected ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 text-[10px]'}`}
+                                                                                        >
+                                                                                            <div className="text-[10px] leading-tight">{fmt.label}</div>
+                                                                                            <div className={`text-[8px] opacity-75 ${isSelected ? 'text-indigo-100' : 'text-gray-400'}`}>({fmt.sub})</div>
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+                                                                        {renderTypographyControls(
+                                                                            selectedElement.style.fullCalendar?.title || (selectedElement.style.useGlobalStyle ? getGlobalCalendarStyle()?.title : null) || (defaultCalendarStyle as any).title,
+                                                                            (updates) => updateFullCalendarStyle(selectedElement.id, 'title', updates)
                                                                         )}
                                                                     </div>
                                                                 ) : (
@@ -12385,6 +16475,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                          {selectedElement.style.simulateMaxSpace ? 'Simulando' : 'Testar Agora'}
                                                                      </button>
                                                                  </div>
+                                                                 <p className="text-[9px] text-indigo-600 font-medium">
+                                                                     * Ao visualizar ou imprimir, os elementos variam normalmente de página em página.
+                                                                 </p>
                                                              </div>
                                                          );
                                                      })()}
@@ -12411,11 +16504,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     {((selectedElement.type === 'day_name' || selectedElement.type === 'month_name') || 
                                                       (selectedElement.type === 'date_placeholder' && ['day_name', 'month_name'].includes(selectedElement.style.variant || '')) ||
                                                       selectedElement.type === 'permanent_day_header' ||
-                                                      selectedElement.type === 'planner_day_box') && (
+                                                      selectedElement.type === 'planner_day_box' ||
+                                                      selectedElement.type === 'full_calendar' ||
+                                                      selectedElement.type === 'mini_calendar') && (
                                                         <div className="space-y-1 mb-2 pt-2 border-t border-gray-100">
-                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Formato / Abreviação</label>
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                                                                {selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar' ? 'Abreviação do Nome dos Meses' : 'Formato / Abreviação'}
+                                                            </label>
                                                             <select 
-                                                                value={selectedElement.style.nameFormat || 'full'} 
+                                                                value={selectedElement.style.fullCalendar?.monthFormat || selectedElement.style.nameFormat || 'full'} 
                                                                 onChange={(e) => {
                                                                     const val = e.target.value;
                                                                     if (selectedElement.type === 'planner_day_box') {
@@ -12423,19 +16520,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                             nameFormat: val,
                                                                             plannerDayBox: { ...selectedElement.style.plannerDayBox, nameFormat: val }
                                                                         });
+                                                                    } else if (selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar') {
+                                                                        updateElementStyle(selectedElement.id, {
+                                                                            nameFormat: val,
+                                                                            fullCalendar: {
+                                                                                ...selectedElement.style.fullCalendar,
+                                                                                monthFormat: val
+                                                                            }
+                                                                        });
                                                                     } else {
                                                                         updateElementStyle(selectedElement.id, { nameFormat: val });
                                                                     }
                                                                 }} 
                                                                 className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white shadow-sm font-medium text-gray-700"
                                                             >
-                                                                <option value="full">Nome Completo (ex: Terça-feira / Janeiro)</option>
-                                                                <option value="no_feira">Sem "-feira" (ex: Terça / Segunda)</option>
-                                                                <option value="short">Abreviação 3 Letras (ex: Ter / Jan)</option>
-                                                                <option value="two_letters">Abreviação 2 Letras (ex: Te / Ja)</option>
-                                                                <option value="initial">Abreviação 1 Letra (ex: T / J)</option>
-                                                                <option value="ordinal_full">Ordinal Completo (ex: 3ª-feira)</option>
-                                                                <option value="ordinal_short">Ordinal Curto (ex: 3ª / 2ª)</option>
+                                                                <option value="full">Nome Completo (ex: {selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar' ? 'Janeiro' : 'Terça-feira / Janeiro'})</option>
+                                                                {selectedElement.type !== 'full_calendar' && selectedElement.type !== 'mini_calendar' && (
+                                                                    <option value="no_feira">Sem "-feira" (ex: Terça / Segunda)</option>
+                                                                )}
+                                                                <option value="short">Abreviação 3 Letras (ex: {selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar' ? 'Jan' : 'Ter / Jan'})</option>
+                                                                <option value="two_letters">Abreviação 2 Letras (ex: {selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar' ? 'Ja' : 'Te / Ja'})</option>
+                                                                <option value="initial">Abreviação 1 Letra (ex: {selectedElement.type === 'full_calendar' || selectedElement.type === 'mini_calendar' ? 'J' : 'T / J'})</option>
+                                                                {selectedElement.type !== 'full_calendar' && selectedElement.type !== 'mini_calendar' && (
+                                                                    <>
+                                                                        <option value="ordinal_full">Ordinal Completo (ex: 3ª-feira)</option>
+                                                                        <option value="ordinal_short">Ordinal Curto (ex: 3ª / 2ª)</option>
+                                                                    </>
+                                                                )}
                                                             </select>
                                                         </div>
                                                     )}
@@ -12485,11 +16596,375 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </div>
                                                         </div>
                                                     )}
-                                                    {selectedElement.type === 'holiday_list' && (
-                                                        <div><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Colunas ({selectedElement.style.columnCount || 1})</label><input type="range" min="1" max="4" value={selectedElement.style.columnCount || 1} onChange={(e) => updateElementStyle(selectedElement.id, { columnCount: parseInt(e.target.value) })} className="w-full" /></div>
+                                                    {selectedElement.type === 'holiday_list' && (() => {
+                                                        const currentCal = getActiveElements().find(el => el.type === 'full_calendar');
+                                                        const targetYear = currentCal?.style?.yearOffset ? (config.year + (currentCal.style.yearOffset || 0)) : (config.year || new Date().getFullYear());
+                                                        const currentFormat: HolidayDateFormat = (selectedElement.style.holidayFormat as HolidayDateFormat) || 'full_written';
+                                                        const currentCols = selectedElement.style.columnCount || 2;
+                                                        const includeOptional = selectedElement.style.includeOptional !== false;
+                                                        const includeEaster = selectedElement.style.includeEaster !== false;
+                                                        const includeMunicipal = selectedElement.style.includeMunicipal !== false;
+
+                                                        const handleApplyFormat = (fmt: HolidayDateFormat) => {
+                                                            const newText = generateHolidayListText(targetYear, fmt, {
+                                                                includeOptional,
+                                                                includeEaster,
+                                                                includeMunicipal
+                                                            });
+                                                            updateElementStyle(selectedElement.id, {
+                                                                holidayFormat: fmt,
+                                                                includeOptional,
+                                                                includeEaster,
+                                                                includeMunicipal
+                                                            });
+                                                            updateActiveElements(prev => prev.map(el => el.id === selectedElement.id ? { ...el, content: newText, style: { ...el.style, holidayFormat: fmt } } : el));
+                                                        };
+
+                                                        const handleToggleOption = (key: 'includeOptional' | 'includeEaster' | 'includeMunicipal', val: boolean) => {
+                                                            const nextOpts = {
+                                                                includeOptional: key === 'includeOptional' ? val : includeOptional,
+                                                                includeEaster: key === 'includeEaster' ? val : includeEaster,
+                                                                includeMunicipal: key === 'includeMunicipal' ? val : includeMunicipal,
+                                                            };
+                                                            const newText = generateHolidayListText(targetYear, currentFormat, nextOpts);
+                                                            updateElementStyle(selectedElement.id, nextOpts);
+                                                            updateActiveElements(prev => prev.map(el => el.id === selectedElement.id ? { ...el, content: newText, style: { ...el.style, ...nextOpts } } : el));
+                                                        };
+
+                                                        return (
+                                                            <div className="space-y-3.5 mb-3">
+                                                                <div className="p-3 bg-gradient-to-br from-indigo-50/90 via-purple-50/50 to-pink-50/40 rounded-xl border border-indigo-200/90 space-y-2">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                                                                            <Flag className="w-3.5 h-3.5 text-indigo-600" /> Lista de Feriados (Texto Editável)
+                                                                        </span>
+                                                                        <span className="text-[9px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200 shadow-2xs">
+                                                                            {targetYear}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[9px] text-gray-650 leading-relaxed">
+                                                                        Este bloco é 100% editável em formato de texto. Você pode alterar datas, nomes ou acrescentar feriados locais diretamente no texto abaixo ou dando duplo clique no canvas.
+                                                                    </p>
+                                                                </div>
+
+                                                                {/* SELETOR DE FORMATO */}
+                                                                <div className="space-y-1.5">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Formato das Datas</label>
+                                                                        <span className="text-[9px] text-indigo-600 font-bold">Por Extenso</span>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                                        {[
+                                                                            { id: 'full_written', label: 'Por Extenso', example: '01 de Janeiro - Confraternização' },
+                                                                            { id: 'full_with_weekday', label: 'Extenso + Dia', example: '01 de Janeiro (Qui) - Natal' },
+                                                                            { id: 'short_written', label: 'Mês Curto', example: '01 Jan - Natal' },
+                                                                            { id: 'numeric', label: 'Numérico', example: '01/01 - Natal' }
+                                                                        ].map(f => (
+                                                                            <button
+                                                                                key={f.id}
+                                                                                type="button"
+                                                                                onClick={() => handleApplyFormat(f.id as HolidayDateFormat)}
+                                                                                className={`p-2 rounded-lg border text-left transition-all ${
+                                                                                    currentFormat === f.id
+                                                                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                                                                        : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                                                                }`}
+                                                                            >
+                                                                                <div className="text-[10px] font-bold leading-tight">{f.label}</div>
+                                                                                <div className={`text-[8px] truncate mt-0.5 ${currentFormat === f.id ? 'text-indigo-100' : 'text-gray-400'}`}>{f.example}</div>
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* SELETOR DE COLUNAS */}
+                                                                <div className="space-y-2">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                                                                            <Columns className="w-3.5 h-3.5 text-indigo-600" /> Distribuição em Colunas
+                                                                        </label>
+                                                                        <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                                                                            {currentCols === 2 ? '2 Colunas (Ativo)' : `${currentCols} Coluna${currentCols > 1 ? 's' : ''}`}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateElementStyle(selectedElement.id, { columnCount: 2 })}
+                                                                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                                                                                currentCols === 2
+                                                                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-300'
+                                                                                    : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                                                            }`}
+                                                                        >
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className="text-[11px] font-bold">2 Colunas</span>
+                                                                                <span className={`text-[8px] px-1.5 py-0.5 rounded font-extrabold ${currentCols === 2 ? 'bg-indigo-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                                                                                    Ideal
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className={`text-[8.5px] mt-1 leading-tight ${currentCols === 2 ? 'text-indigo-100' : 'text-gray-500'}`}>
+                                                                                Divide os feriados lado a lado (perfeito abaixo do calendário)
+                                                                            </div>
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateElementStyle(selectedElement.id, { columnCount: 1 })}
+                                                                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                                                                                currentCols === 1
+                                                                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-300'
+                                                                                    : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                                                            }`}
+                                                                        >
+                                                                            <div className="text-[11px] font-bold">1 Coluna</div>
+                                                                            <div className={`text-[8.5px] mt-1 leading-tight ${currentCols === 1 ? 'text-indigo-100' : 'text-gray-500'}`}>
+                                                                                Lista vertical única contínua de cima para baixo
+                                                                            </div>
+                                                                        </button>
+                                                                    </div>
+
+                                                                    <div className="flex items-center justify-between pt-0.5">
+                                                                        <span className="text-[9px] text-gray-400 font-medium">Outras opções:</span>
+                                                                        <div className="flex items-center gap-1">
+                                                                            {[3, 4].map(cols => (
+                                                                                <button
+                                                                                    key={cols}
+                                                                                    type="button"
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, { columnCount: cols })}
+                                                                                    className={`py-1 px-2.5 rounded-lg border text-[9px] font-bold transition-all cursor-pointer ${
+                                                                                        currentCols === cols
+                                                                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                                                                            : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-600'
+                                                                                    }`}
+                                                                                >
+                                                                                    {cols} Colunas
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {currentCols > 1 && (
+                                                                        <div className="bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-150 space-y-2">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <div>
+                                                                                    <label className="block text-[10px] font-bold text-indigo-950 uppercase tracking-tight">Espaçamento entre Colunas</label>
+                                                                                    <span className="text-[9px] text-indigo-700/80">Distância horizontal entre as colunas</span>
+                                                                                </div>
+                                                                                <span className="text-xs font-bold text-indigo-600 px-2 py-0.5 bg-white rounded border border-indigo-200">
+                                                                                    {selectedElement.style.columnGap ?? 24}px ({(((selectedElement.style.columnGap ?? 24) * 0.264583)).toFixed(1)} mm)
+                                                                                </span>
+                                                                            </div>
+
+                                                                            <div className="flex items-center gap-2">
+                                                                                <input 
+                                                                                    type="range" 
+                                                                                    min="4" 
+                                                                                    max="80" 
+                                                                                    step="2"
+                                                                                    value={selectedElement.style.columnGap ?? 24} 
+                                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { columnGap: parseInt(e.target.value) })}
+                                                                                    className="flex-1 accent-indigo-600 h-1.5 bg-indigo-200 rounded-lg cursor-pointer" 
+                                                                                />
+                                                                                <div className="flex items-center gap-1 shrink-0">
+                                                                                    <input 
+                                                                                        type="number" 
+                                                                                        min="2" 
+                                                                                        max="120"
+                                                                                        value={selectedElement.style.columnGap ?? 24} 
+                                                                                        onChange={(e) => {
+                                                                                            const val = parseInt(e.target.value);
+                                                                                            if (!isNaN(val)) updateElementStyle(selectedElement.id, { columnGap: val });
+                                                                                        }}
+                                                                                        className="w-14 text-xs font-bold text-center p-1 border border-indigo-200 rounded bg-white" 
+                                                                                    />
+                                                                                    <span className="text-[10px] font-bold text-indigo-700">px</span>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            <div className="flex items-center gap-1 pt-0.5">
+                                                                                <span className="text-[8.5px] text-gray-500 font-medium mr-1">Rápido:</span>
+                                                                                {[8, 16, 24, 32, 40, 48].map(gap => (
+                                                                                    <button
+                                                                                        key={gap}
+                                                                                        type="button"
+                                                                                        onClick={() => updateElementStyle(selectedElement.id, { columnGap: gap })}
+                                                                                        className={`flex-1 py-0.5 text-[8.5px] rounded border font-medium cursor-pointer transition-colors ${
+                                                                                            (selectedElement.style.columnGap ?? 24) === gap
+                                                                                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                                                                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-indigo-50'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {gap}
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* OPÇÕES DE INCLUSÃO */}
+                                                                <div className="bg-gray-50/80 p-2.5 rounded-xl border border-gray-200/80 space-y-2">
+                                                                    <span className="block text-[9px] font-bold text-gray-500 uppercase tracking-wider">Filtros de Feriados</span>
+                                                                    
+                                                                    <label className="flex items-center justify-between text-[10px] text-gray-700 cursor-pointer">
+                                                                        <span>Pontos Facultativos (Carnaval, Corpus Christi)</span>
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={includeOptional} 
+                                                                            onChange={(e) => handleToggleOption('includeOptional', e.target.checked)} 
+                                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
+                                                                        />
+                                                                    </label>
+
+                                                                    <label className="flex items-center justify-between text-[10px] text-gray-700 cursor-pointer">
+                                                                        <span>Domingo de Páscoa</span>
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={includeEaster} 
+                                                                            onChange={(e) => handleToggleOption('includeEaster', e.target.checked)} 
+                                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
+                                                                        />
+                                                                    </label>
+
+                                                                    <label className="flex items-center justify-between text-[10px] text-gray-700 cursor-pointer">
+                                                                        <span>Feriados Municipais / Personalizados</span>
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={includeMunicipal} 
+                                                                            onChange={(e) => handleToggleOption('includeMunicipal', e.target.checked)} 
+                                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" 
+                                                                        />
+                                                                    </label>
+                                                                </div>
+
+                                                                {/* EDITOR DE TEXTO DIRETO NO PAINEL */}
+                                                                <div className="space-y-1">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Texto Editável dos Feriados</label>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleApplyFormat(currentFormat)}
+                                                                            className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                                                                            title="Restaura a lista padrão deste ano"
+                                                                        >
+                                                                            <RotateCcw className="w-3 h-3" /> Restaurar
+                                                                        </button>
+                                                                    </div>
+                                                                    <textarea
+                                                                        value={selectedElement.content || ''}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            updateActiveElements(prev => prev.map(el => el.id === selectedElement.id ? { ...el, content: val } : el));
+                                                                        }}
+                                                                        rows={6}
+                                                                        className="w-full text-[10px] p-2 font-mono bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 leading-relaxed resize-y"
+                                                                        placeholder="Digite os feriados aqui..."
+                                                                    />
+                                                                </div>
+
+                                                                {/* AÇÕES DE DIAGRAMAÇÃO COM CALENDÁRIO ANUAL */}
+                                                                {currentCal && (
+                                                                    <div className="p-2.5 bg-indigo-50/70 rounded-xl border border-indigo-200 space-y-2">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <span className="text-[9.5px] font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1">
+                                                                                <Maximize2 className="w-3 h-3 text-indigo-600" /> Redimensionar Calendário Acima:
+                                                                            </span>
+                                                                            <span className="text-[9px] font-extrabold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+                                                                                {Math.round(currentCal.h)}%
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="grid grid-cols-3 gap-1">
+                                                                            {[
+                                                                                { h: 50, label: 'Compacto (50%)' },
+                                                                                { h: 58, label: 'Ideal (58%)' },
+                                                                                { h: 64, label: 'Amplo (64%)' }
+                                                                            ].map(preset => (
+                                                                                <button
+                                                                                    key={preset.h}
+                                                                                    type="button"
+                                                                                    onClick={() => resizeCalendarAndHolidayLayout(preset.h, currentCal.id)}
+                                                                                    className={`py-1 px-1.5 rounded-lg border text-[8.5px] font-bold transition-all cursor-pointer ${
+                                                                                        Math.abs(Math.round(currentCal.h) - preset.h) <= 2
+                                                                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                                                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-white'
+                                                                                    }`}
+                                                                                >
+                                                                                    {preset.label}
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="40"
+                                                                            max="74"
+                                                                            step="1"
+                                                                            value={Math.round(currentCal.h)}
+                                                                            onChange={(e) => resizeCalendarAndHolidayLayout(parseInt(e.target.value), currentCal.id)}
+                                                                            className="w-full accent-indigo-600 h-1.5 bg-indigo-200 rounded-lg cursor-pointer"
+                                                                        />
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => insertHolidayListWithCalendar(currentCal.id, { autoLayout: true, preserveContent: true, format: currentFormat, columns: currentCols, calendarHeight: 58 })}
+                                                                            className="w-full py-2 px-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg text-[9px] font-bold uppercase transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                                                                        >
+                                                                            <Columns className="w-3.5 h-3.5" /> Redimensionar Calendário & Ajustar Extenso
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        updateActiveElements(prev => prev.map(el => el.id === selectedElement.id ? { ...el, type: 'text', name: 'Texto - Feriados' } : el));
+                                                                    }}
+                                                                    className="w-full py-1.5 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[9px] font-bold uppercase transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+                                                                    title="Converte este bloco para elemento de Texto Livre comum mantendo o conteúdo"
+                                                                >
+                                                                    <Type className="w-3.5 h-3.5 text-gray-600" /> Converter para Caixa de Texto Livre
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                    {(selectedElement.type === 'text' || selectedElement.type === 'verse' || selectedElement.type === 'quote' || selectedElement.type === 'holiday_list') && (
+                                                        <div className="space-y-1.5 mb-2">
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setActiveTab('opentype')} 
+                                                                className="w-full py-2 px-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+                                                                title="Abrir catálogo e aplicar letras decorativas, swashes e glifos desta fonte no texto"
+                                                            >
+                                                                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                                                                <span>Ver Glifos / Letras Decorativas</span>
+                                                            </button>
+                                                            <button onClick={fitToText} className="w-full py-1.5 px-3 bg-indigo-50 text-indigo-700 text-xs font-bold rounded border border-indigo-200 hover:bg-indigo-100 transition-colors flex items-center justify-center"><BoxSelect className="w-3 h-3 mr-1.5"/> Ajustar Quadro ao Texto</button>
+                                                        </div>
                                                     )}
-                                                    {(selectedElement.type === 'text' || selectedElement.type === 'verse' || selectedElement.type === 'quote') && (
-                                                        <button onClick={fitToText} className="w-full mb-2 py-1.5 px-3 bg-indigo-50 text-indigo-700 text-xs font-bold rounded border border-indigo-200 hover:bg-indigo-100 transition-colors flex items-center justify-center"><BoxSelect className="w-3 h-3 mr-1.5"/> Ajustar Quadro ao Texto</button>
+                                                    {selectedElement.type === 'text' && (
+                                                        <div className="space-y-1.5 mb-2.5 p-2 bg-gray-50/80 rounded-xl border border-gray-200/70">
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="text-[10px] font-bold text-gray-600 uppercase tracking-wider flex items-center gap-1">
+                                                                    <Columns className="w-3.5 h-3.5 text-indigo-600" /> Colunas do Texto
+                                                                </label>
+                                                                <span className="text-[9px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full border border-indigo-100">
+                                                                    {(selectedElement.style.columnCount || 1) === 1 ? '1 Coluna' : `${selectedElement.style.columnCount} Colunas`}
+                                                                </span>
+                                                            </div>
+                                                            <div className="grid grid-cols-4 gap-1">
+                                                                {[1, 2, 3, 4].map(cols => (
+                                                                    <button
+                                                                        key={cols}
+                                                                        type="button"
+                                                                        onClick={() => updateElementStyle(selectedElement.id, { columnCount: cols })}
+                                                                        className={`py-1.5 px-2 text-center rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                                                                            (selectedElement.style.columnCount || 1) === cols
+                                                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                                                                : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                                                        }`}
+                                                                    >
+                                                                        {cols} {cols === 1 ? 'Coluna' : 'Cols'}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
                                                     )}
                                                     {selectedElement.type === 'verse' && (
                                                         <button onClick={() => setVersesModalOpen(true)} className="w-full mb-2 py-1.5 px-3 bg-emerald-50 text-emerald-700 text-xs font-bold rounded border border-emerald-200 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5">
@@ -12869,6 +17344,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     className="w-16 text-xs p-1 border rounded" 
                                                                 />
                                                             </div>
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="text-[10px] font-bold text-gray-500">Pular Linha (Sem Horário)</label>
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    checked={selectedElement.style.skipBlankLine || false} 
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { skipBlankLine: e.target.checked })} 
+                                                                    className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" 
+                                                                />
+                                                            </div>
                                                             <div className="pt-2 border-t border-gray-100/50 mt-2">
                                                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-2">Fonte & Alinhamento dos Horários</label>
                                                                 {renderTypographyControls({
@@ -13020,30 +17504,133 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                                             {selectedElement.type === 'vector_shape' && (
                                                 <div className="space-y-3 pt-3 border-t border-gray-100">
-                                                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Configuração da Forma Vetorial</h4>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Tipo de Forma</label>
-                                                        <select 
-                                                            value={selectedElement.style.shapeType || 'rectangle'} 
-                                                            onChange={(e) => updateElementStyle(selectedElement.id, { shapeType: e.target.value as any })} 
-                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded"
-                                                        >
-                                                            <option value="rectangle">Retângulo</option>
-                                                            <option value="circle">Círculo</option>
-                                                            <option value="triangle">Triângulo</option>
-                                                            <option value="star">Estrela</option>
-                                                            <option value="heart">Coração</option>
-                                                            <option value="arrow">Seta</option>
-                                                            <option value="diamond">Diamante</option>
-                                                            <option value="hexagon">Hexágono</option>
-                                                            <option value="pentagon">Pentágono</option>
-                                                            <option value="parallelogram">Paralelogramo</option>
-                                                            <option value="trapezoid">Trapézio</option>
-                                                            <option value="octagon">Octógono</option>
-                                                            <option value="cloud">Nuvem</option>
-                                                            <option value="shield">Escudo</option>
-                                                        </select>
-                                                    </div>
+                                                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Elemento Vetorial & Peça de Design</h4>
+                                                    
+                                                    {(() => {
+                                                        const currentShapeDef = getVectorShapeById(selectedElement.style.shapeType || 'frame_thin_notched');
+                                                        return (
+                                                            <div className="space-y-2.5">
+                                                                {/* Shape Preview Card */}
+                                                                <div className="bg-stone-50 border border-stone-200/90 rounded-xl p-2.5 flex items-center gap-3">
+                                                                    <div className="w-12 h-12 bg-white rounded-lg border border-stone-200 flex items-center justify-center p-1.5 shrink-0 overflow-hidden shadow-2xs">
+                                                                        <svg viewBox={currentShapeDef.viewBox || "0 0 100 100"} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+                                                                            <path 
+                                                                                d={currentShapeDef.path}
+                                                                                fill={selectedElement.style.backgroundColor || currentShapeDef.defaultFill || 'transparent'}
+                                                                                fillRule={currentShapeDef.fillRule || 'nonzero'}
+                                                                                stroke={selectedElement.style.borderColor || currentShapeDef.defaultStroke || '#18181b'}
+                                                                                strokeWidth={Math.max(1, (selectedElement.style.borderWidth ?? 1) * 1.5)}
+                                                                                strokeLinecap="round"
+                                                                                strokeLinejoin="round"
+                                                                            />
+                                                                        </svg>
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center gap-1">
+                                                                            <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-100/90 text-amber-900">
+                                                                                {currentShapeDef.aesthetic}
+                                                                            </span>
+                                                                            <span className="text-[9px] uppercase font-semibold text-stone-400">
+                                                                                {currentShapeDef.category}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="text-xs font-bold text-stone-800 truncate mt-0.5" title={currentShapeDef.name}>
+                                                                            {currentShapeDef.name}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Change shape button */}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setShapeGalleryTargetId(selectedElement.id);
+                                                                        setShapeGalleryOpen(true);
+                                                                    }}
+                                                                    className="w-full py-2 px-3 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                                                                >
+                                                                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                                                    <span>Trocar Peça na Biblioteca...</span>
+                                                                </button>
+
+                                                                {/* Formas Geométricas Rápidas */}
+                                                                <div className="pt-2 border-t border-stone-100">
+                                                                    <div className="flex items-center justify-between mb-1.5">
+                                                                        <label className="text-[10px] font-bold text-stone-500 uppercase">Formas Geométricas Rápidas</label>
+                                                                        <span className="text-[9px] text-stone-400 font-medium">1-clique</span>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-6 gap-1.5">
+                                                                        {[
+                                                                            { id: 'geo_rectangle', label: 'Retângulo', path: 'M 6,14 L 94,14 L 94,86 L 6,86 Z' },
+                                                                            { id: 'geo_rounded_rect', label: 'Arredondado', path: 'M 18,12 L 82,12 C 88,12 94,18 94,24 L 94,76 C 94,82 88,88 82,88 L 18,88 C 12,88 6,82 6,76 L 6,24 C 6,18 12,12 18,12 Z' },
+                                                                            { id: 'geo_circle', label: 'Círculo', path: 'M 50,8 A 42,42 0 1,0 50,92 A 42,42 0 1,0 50,8 Z' },
+                                                                            { id: 'geo_triangle', label: 'Triângulo', path: 'M 50,10 L 90,88 L 10,88 Z' },
+                                                                            { id: 'geo_star_5', label: 'Estrela', path: 'M 50,8 L 62.4,32.8 L 92,36.8 L 70.3,57.1 L 75.8,86.2 L 50,72.2 L 24.2,86.2 L 29.7,57.1 L 8,36.8 L 37.6,32.8 Z' },
+                                                                            { id: 'geo_heart', label: 'Coração', path: 'M 50,88 C 46,84 10,58 10,32 C 10,18 21,8 35,8 C 43,8 47,12 50,17 C 53,12 57,8 65,8 C 79,8 90,18 90,32 C 90,58 54,84 50,88 Z' },
+                                                                            { id: 'geo_diamond', label: 'Losango', path: 'M 50,8 L 92,50 L 50,92 L 8,50 Z' },
+                                                                            { id: 'geo_hexagon', label: 'Hexágono', path: 'M 50,8 L 90,28 L 90,72 L 50,92 L 10,72 L 10,28 Z' },
+                                                                            { id: 'geo_arch', label: 'Arco', path: 'M 12,90 L 12,48 C 12,24 28,10 50,10 C 72,10 88,24 88,48 L 88,90 Z' },
+                                                                            { id: 'geo_cross', label: 'Cruz', path: 'M 36,10 L 64,10 L 64,36 L 90,36 L 90,64 L 64,64 L 64,90 L 36,90 L 36,64 L 10,64 L 10,36 L 36,36 Z' },
+                                                                            { id: 'geo_semicircle', label: 'Meio Círculo', path: 'M 10,82 A 40,40 0 0,1 90,82 Z' },
+                                                                            { id: 'geo_pill', label: 'Pílula', path: 'M 28,18 L 72,18 C 86,18 86,82 72,82 L 28,82 C 14,82 14,18 28,18 Z' },
+                                                                        ].map(geo => {
+                                                                            const isCurrent = (selectedElement.style.shapeType || 'frame_thin_notched') === geo.id;
+                                                                            return (
+                                                                                <button
+                                                                                    key={geo.id}
+                                                                                    type="button"
+                                                                                    title={geo.label}
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, { shapeType: geo.id })}
+                                                                                    className={`h-8 w-full rounded-lg border flex items-center justify-center p-1 transition-all cursor-pointer ${
+                                                                                        isCurrent 
+                                                                                            ? 'bg-amber-100 border-amber-500 text-amber-900 ring-2 ring-amber-300 shadow-2xs' 
+                                                                                            : 'bg-white hover:bg-stone-50 border-stone-200 text-stone-600 hover:border-stone-300'
+                                                                                    }`}
+                                                                                >
+                                                                                    <svg viewBox="0 0 100 100" className="w-4 h-4 pointer-events-none" fill="currentColor" fillOpacity={isCurrent ? 0.3 : 0.08} stroke="currentColor" strokeWidth="6">
+                                                                                        <path d={geo.path} strokeLinecap="round" strokeLinejoin="round" />
+                                                                                    </svg>
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Mirror & Orientation Controls */}
+                                                                <div className="pt-2 border-t border-stone-100 space-y-1.5">
+                                                                    <label className="text-[10px] font-bold text-stone-500 uppercase block">Orientação & Espelhamento</label>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateElementStyle(selectedElement.id, { flipX: !selectedElement.style.flipX })}
+                                                                            className={`py-1.5 px-2 rounded-lg border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                                                                selectedElement.style.flipX 
+                                                                                    ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-2xs' 
+                                                                                    : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                                                                            }`}
+                                                                            title="Espelhar Horizontalmente (Flip H)"
+                                                                        >
+                                                                            <FlipHorizontal className="w-3.5 h-3.5" />
+                                                                            <span>Flip H {selectedElement.style.flipX ? '✓' : ''}</span>
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateElementStyle(selectedElement.id, { flipY: !selectedElement.style.flipY })}
+                                                                            className={`py-1.5 px-2 rounded-lg border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                                                                selectedElement.style.flipY 
+                                                                                    ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-2xs' 
+                                                                                    : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                                                                            }`}
+                                                                            title="Espelhar Verticalmente (Flip V)"
+                                                                        >
+                                                                            <FlipVertical className="w-3.5 h-3.5" />
+                                                                            <span>Flip V {selectedElement.style.flipY ? '✓' : ''}</span>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     <div className="space-y-4">
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Tipo de Fundo</label>
@@ -13403,6 +17990,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 }}
                                                 currentEditorPageNum={editorParityToggle === 'even' ? 2 : 1}
                                                 pushHistory={pushHistory}
+                                                onOpenPdfLayoutImport={(file, dest) => {
+                                                    if (file) setPdfImportInitialFile(file);
+                                                    if (dest) setPdfImportInitialDestination(dest);
+                                                    setPdfImportModalOpen(true);
+                                                }}
                                             />
 
                                             {editMode !== 'daily' && (
@@ -13642,20 +18234,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         })}
                                                     </select>
                                                 </div>
+
+                                                <button
+                                                    onClick={() => setActiveTab('mockup')}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all cursor-pointer"
+                                                    title="Abrir no Estúdio de Mockup 3D"
+                                                >
+                                                    <Box className="w-3.5 h-3.5" />
+                                                    <span className="hidden sm:inline">Mockup 3D</span>
+                                                </button>
                                             </div>
                                         </div>
                                         <div className="no-print flex flex-col items-center gap-16 pb-40 max-w-[95vw] mx-auto overflow-x-auto">
                                             {(() => {
-                                                const renderedPages = renderPrintLayout(undefined, undefined, renderedPreviewCount);
+                                                const renderedPages = renderPrintLayout(undefined, undefined, renderedPreviewCount || generatedData.length);
                                                 if (!Array.isArray(renderedPages)) return renderedPages;
 
                                                 if (config.orientation === 'landscape') {
                                                     return renderedPages.map((page, idx) => (
-                                                        <div key={`page-landscape-${idx}`} className="w-full max-w-4xl flex justify-center print:contents">
-                                                            <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
-                                                                {page}
-                                                            </PreviewPageScaleWrapper>
-                                                        </div>
+                                                        <VirtualPreviewSpread
+                                                            key={`page-landscape-${idx}`}
+                                                            spreadKey={`page-landscape-${idx}`}
+                                                            isLandscape
+                                                            pageLeft={page}
+                                                            pageLeftNum={idx + 1}
+                                                            widthMm={PAGE_WIDTH_MM}
+                                                            heightMm={PAGE_HEIGHT_MM}
+                                                            zoom={zoom}
+                                                        />
                                                     ));
                                                 }
 
@@ -13664,14 +18270,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 // Page 1 is always alone on the right (Odd)
                                                 if (renderedPages.length > 0) {
                                                     spreads.push(
-                                                        <div key="spread-initial" className="flex items-start justify-center w-full print:contents">
-                                                            <div className="hidden lg:block w-[45%] opacity-0 pointer-events-none" /> {/* Placeholder for empty left */}
-                                                            <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
-                                                                <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
-                                                                    {renderedPages[0]}
-                                                                </PreviewPageScaleWrapper>
-                                                            </div>
-                                                        </div>
+                                                        <VirtualPreviewSpread
+                                                            key="spread-initial"
+                                                            spreadKey="spread-initial"
+                                                            isInitial
+                                                            pageLeft={renderedPages[0]}
+                                                            pageLeftNum={1}
+                                                            widthMm={PAGE_WIDTH_MM}
+                                                            heightMm={PAGE_HEIGHT_MM}
+                                                            zoom={zoom}
+                                                        />
                                                     );
                                                 }
 
@@ -13681,36 +18289,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     const right = renderedPages[i + 1];
                                                     
                                                     spreads.push(
-                                                        <div key={`spread-${i}`} className="flex flex-col lg:flex-row items-center lg:items-start justify-center w-full gap-8 lg:gap-0 print:contents">
-                                                            <div className="w-full lg:w-[45%] flex justify-center lg:justify-end pr-0 lg:pr-[2mm]">
-                                                                <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
-                                                                    {left}
-                                                                </PreviewPageScaleWrapper>
-                                                            </div>
-                                                            <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
-                                                                {right ? (
-                                                                    <PreviewPageScaleWrapper widthMm={PAGE_WIDTH_MM} heightMm={PAGE_HEIGHT_MM} zoom={zoom}>
-                                                                        {right}
-                                                                    </PreviewPageScaleWrapper>
-                                                                ) : (
-                                                                    <div className="hidden lg:block w-full opacity-0 pointer-events-none" />
-                                                                )}
-                                                            </div>
-                                                        </div>
+                                                        <VirtualPreviewSpread
+                                                            key={`spread-${i}`}
+                                                            spreadKey={`spread-${i}`}
+                                                            pageLeft={left}
+                                                            pageRight={right}
+                                                            pageLeftNum={i + 1}
+                                                            pageRightNum={right ? i + 2 : undefined}
+                                                            widthMm={PAGE_WIDTH_MM}
+                                                            heightMm={PAGE_HEIGHT_MM}
+                                                            zoom={zoom}
+                                                        />
                                                     );
                                                 }
                                                 
                                                 return spreads;
                                             })()}
                                         </div>
-                                        {renderedPreviewCount < generatedData.length && (
-                                            <div className="no-print flex justify-center pb-20">
-                                                <div className="flex items-center gap-2 bg-white/20 text-white px-4 py-2 rounded-full backdrop-blur-sm">
-                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                    <span className="text-xs font-medium">Carregando mais páginas...</span>
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
                                 )}
                             </div>
@@ -13787,7 +18382,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     <button onClick={() => { addElement('text', 'Texto'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Type className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Texto</span></button>
                                     <button onClick={() => { addElement('box', 'Caixa'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Square className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Caixa</span></button>
                                     <button onClick={() => { addElement('circle', 'Círculo'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Circle className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Círculo</span></button>
-                                    <button onClick={() => { addElement('vector_shape', 'Formas'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Shapes className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Formas</span></button>
+                                    <button onClick={() => { setShapeGalleryTargetId(null); setShapeGalleryOpen(true); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-amber-400 active:scale-95 transition-transform"><Shapes className="w-5 h-5 text-amber-700"/><span className="text-[9px] font-bold text-gray-600 uppercase text-center leading-tight">Elementos & Formas</span></button>
                                     <button onClick={() => { addElement('image', 'Imagem'); setMobileDrawer('none'); }} className="aspect-square flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Upload className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Imagem</span></button>
                                 </div>
                             </div>
@@ -13809,6 +18404,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             <div>
                                 <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-2">Widgets e Utilidades</span>
                                 <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={() => { setFooterGalleryOpen(true); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-indigo-200 rounded-xl bg-indigo-50/70 gap-1 shadow-2xs hover:border-indigo-400 active:scale-95 transition-transform"><PanelBottom className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-indigo-700 uppercase">Rodapé</span></button>
                                     <button onClick={() => { addElement('habit_tracker', 'Hábitos'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CheckSquare className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Hábitos</span></button>
                                     <button onClick={() => { addElement('mini_calendar', 'Calendário'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CalendarDays className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Mini Cal.</span></button>
                                     <button onClick={() => { addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Moon className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Lua</span></button>
@@ -13818,8 +18414,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                                     {editMode === 'intro' && (
                                         <>
-                                            <button onClick={() => { addElement('full_calendar', 'Cal. Anual'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CalendarRange className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Cal. Anual</span></button>
-                                            <button onClick={() => { addElement('holiday_list', 'Feriados'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Flag className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Lista Feriados</span></button>
+                                            <button onClick={() => { addElement('full_calendar', 'Cal. Anual'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-indigo-200 rounded-xl bg-indigo-50/50 gap-1 shadow-2xs hover:border-indigo-400 active:scale-95 transition-transform"><CalendarRange className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-indigo-700 uppercase">Cal. Anual</span></button>
+                                            <button onClick={() => { addElement('holiday_list', 'Feriados'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-amber-200 rounded-xl bg-amber-50/60 gap-1 shadow-2xs hover:border-amber-400 active:scale-95 transition-transform"><Flag className="w-5 h-5 text-amber-600"/><span className="text-[9px] font-bold text-amber-700 uppercase">Lista Feriados</span></button>
                                         </>
                                     )}
                                 </div>

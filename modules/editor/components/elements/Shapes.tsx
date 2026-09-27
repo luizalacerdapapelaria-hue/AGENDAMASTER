@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { BaseElementProps } from './types';
+import { getVectorShapeById } from './vectorShapesData';
 
 export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, style, pageHeight, pageWidth }) => {
     
@@ -29,7 +30,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
     if (element.type === 'lines') {
         const borderWidthVal = style.borderWidth !== undefined ? style.borderWidth : 0.5;
         const borderStyleVal = style.borderStyle || 'solid';
-        const isSingleLine = !style.showTimes && (element.h < 3 || (style.lineSpacing && element.h / 100 * pageHeight <= style.lineSpacing));
+        const isVertical = element.w < element.h && element.w < 2;
+        const isSingleLine = !style.showTimes && (isVertical || element.h < 3 || (style.lineSpacing && element.h / 100 * pageHeight <= style.lineSpacing));
         const dashArray = borderStyleVal === 'dashed' ? '5,5' : (borderStyleVal === 'dotted' ? `${Math.max(1, borderWidthVal)},${Math.max(2, borderWidthVal * 2)}` : 'none');
         const strokeColor = style.hideLines ? 'transparent' : (style.borderColor || style.color || '#d1d5db');
         
@@ -38,14 +40,14 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                 <div className="w-full h-full flex items-center justify-center">
                     <svg className="w-full h-full overflow-visible">
                         <line 
-                            x1="0" 
-                            y1="50%" 
-                            x2="100%" 
-                            y2="50%" 
+                            x1={isVertical ? "50%" : "0"} 
+                            y1={isVertical ? "0" : "50%"} 
+                            x2={isVertical ? "50%" : "100%"} 
+                            y2={isVertical ? "100%" : "50%"} 
                             stroke={strokeColor} 
                             strokeWidth={borderWidthVal} 
                             strokeDasharray={dashArray} 
-                            vectorEffect="non-scaling-stroke" 
+                            shapeRendering="crispEdges"
                         />
                     </svg>
                 </div>
@@ -61,6 +63,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             const startH = style.startHour !== undefined ? style.startHour : 7;
             const endH = style.endHour !== undefined ? style.endHour : 18;
             const intervalM = style.timeInterval || 60;
+            const skipLine = style.skipBlankLine || false;
             
             const startMin = startH * 60;
             const endMin = endH * 60;
@@ -69,6 +72,9 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                 const hourPart = Math.floor(min / 60) % 24;
                 const minPart = min % 60;
                 timesList.push(`${String(hourPart).padStart(2, '0')}:${String(minPart).padStart(2, '0')}`);
+                if (skipLine && min < endMin) {
+                    timesList.push('');
+                }
             }
             lineCount = timesList.length;
         } else if (style.rowCount && style.rowCount > 0) {
@@ -108,9 +114,10 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         return (
             <>
                 {Array(lineCount).fill(0).map((_, i) => {
-                    const timeText = style.showTimes && timesList[i];
+                    const rawTimeText = style.showTimes ? (timesList[i] ?? '') : '';
+                    const displayTime = rawTimeText || '\u00A0';
                     
-                    const timeNode = timeText ? (
+                    const timeNode = style.showTimes ? (
                         <div 
                             className={`shrink-0 select-none flex ${flexHorizontalAlign} ${selfVerticalAlign}`}
                             style={{ 
@@ -136,10 +143,11 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                                     textAlign: textAlign as any,
                                     lineHeight: 1,
                                     display: 'block',
-                                    width: '100%'
+                                    width: '100%',
+                                    visibility: rawTimeText ? 'visible' : 'hidden'
                                 }}
                             >
-                                {timeText}
+                                {displayTime}
                             </span>
                         </div>
                     ) : null;
@@ -154,17 +162,16 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             }}
                         >
                             {timeNode && timePosition === 'left' && timeNode}
-                            <div className="flex-1 self-end relative w-full h-[1px] flex items-center">
+                            <div className="flex-1 self-end relative w-full flex items-center" style={{ height: `${Math.max(1, borderWidthVal)}px` }}>
                                 <svg className="w-full h-full overflow-visible">
                                     <line 
                                         x1="0" 
-                                        y1="0" 
+                                        y1="50%" 
                                         x2="100%" 
-                                        y2="0" 
+                                        y2="50%" 
                                         stroke={strokeColor} 
                                         strokeWidth={borderWidthVal} 
                                         strokeDasharray={dashArray} 
-                                        vectorEffect="non-scaling-stroke" 
                                     />
                                 </svg>
                             </div>
@@ -203,7 +210,6 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             stroke={strokeColor} 
                             strokeWidth={strokeWidth} 
                             strokeDasharray={dashArray} 
-                            vectorEffect="non-scaling-stroke" 
                         />
                     </svg>
                 )}
@@ -234,7 +240,6 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             stroke={strokeColor} 
                             strokeWidth={strokeWidth} 
                             strokeDasharray={dashArray} 
-                            vectorEffect="non-scaling-stroke" 
                         />
                     </svg>
                 )}
@@ -243,37 +248,19 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
     }
 
     if (element.type === 'vector_shape') {
-        const shapeType = style.shapeType || 'rectangle';
-        const strokeColor = style.borderColor || '#000000';
-        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : 1;
+        const shapeType = style.shapeType || 'frame_thin_notched';
+        const shapeDef = getVectorShapeById(shapeType);
+        const strokeColor = style.borderColor || shapeDef.defaultStroke || '#000000';
+        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : (shapeDef.defaultBorderWidth || 1.2);
         const opacity = style.opacity ?? 1;
         const borderRadius = style.borderRadius || 0;
+        const isPreserveAspect = style.preserveAspectRatio !== false;
 
         const isGradient = style.backgroundType === 'gradient';
         const gradientId = `grad-${element.id}`;
-        const fillColor = isGradient ? `url(#${gradientId})` : (style.backgroundColor || 'transparent');
+        const fillColor = isGradient ? `url(#${gradientId})` : (style.backgroundColor || shapeDef.defaultFill || 'transparent');
         const fillOpacity = style.fillOpacity ?? 1;
         const strokeOpacity = style.strokeOpacity ?? 1;
-
-        const getShapePath = () => {
-            switch (shapeType) {
-                case 'rectangle': return 'M 5,5 H 95 V 95 H 5 Z';
-                case 'circle': return 'M 50,5 A 45,45 0 1,1 50,95 A 45,45 0 1,1 50,5 Z';
-                case 'triangle': return 'M 50,5 L 95,95 L 5,95 Z';
-                case 'star': return 'M 50,5 L 61,35 L 95,35 L 68,55 L 78,85 L 50,65 L 22,85 L 32,55 L 5,35 L 39,35 Z';
-                case 'heart': return 'M 50,30 C 50,15 70,10 80,25 C 90,40 75,60 50,85 C 25,60 10,40 20,25 C 30,10 50,15 50,30 Z';
-                case 'arrow': return 'M 5,40 H 60 V 15 L 95,50 L 60,85 V 60 H 5 Z';
-                case 'diamond': return 'M 50,5 L 95,50 L 50,95 L 5,50 Z';
-                case 'hexagon': return 'M 50,5 L 95,25 V 75 L 50,95 L 5,75 V 25 Z';
-                case 'octagon': return 'M 30,5 H 70 L 95,30 V 70 L 70,95 H 30 L 5,70 V 30 Z';
-                case 'pentagon': return 'M 50,5 L 95,38 L 78,92 H 22 L 5,38 Z';
-                case 'parallelogram': return 'M 20,5 H 95 L 80,95 H 5 Z';
-                case 'trapezoid': return 'M 30,5 H 70 L 95,95 H 5 Z';
-                case 'cloud': return 'M 25,75 C 5,75 5,45 25,45 C 25,25 55,25 55,45 C 75,45 75,75 55,75 Z';
-                case 'shield': return 'M 5,10 H 95 V 50 C 95,75 50,95 50,95 C 50,95 5,75 5,50 Z';
-                default: return 'M 5,5 H 95 V 95 H 5 Z';
-            }
-        };
 
         const renderGradient = () => {
             if (!isGradient || !style.gradientColors) return null;
@@ -309,9 +296,55 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             ? (style.boxShadow === 'sm' ? 'drop-shadow(0px 2px 4px rgba(0,0,0,0.18))' : style.boxShadow === 'md' ? 'drop-shadow(0px 5px 8px rgba(0,0,0,0.22))' : style.boxShadow === 'lg' ? 'drop-shadow(0px 10px 15px rgba(0,0,0,0.28))' : 'none')
             : 'none';
 
+        const s = style as any;
+        const isRepeated = s.repeatMode && s.repeatMode !== 'none' && (s.repeatCount ?? 1) > 1;
+        const repeatCount = Math.max(1, Math.min(30, s.repeatCount || 1));
+        const isRepeatY = s.repeatMode === 'repeat-y';
+        const repeatSpacing = s.repeatSpacing !== undefined ? s.repeatSpacing : 2;
+
+        if (isRepeated) {
+            const items = Array.from({ length: repeatCount });
+            return (
+                <div 
+                    className={`w-full h-full flex ${isRepeatY ? 'flex-col' : 'flex-row'} items-center justify-between overflow-visible`} 
+                    style={{ 
+                        opacity, 
+                        filter: dropShadowFilter !== 'none' ? dropShadowFilter : undefined,
+                        gap: `${repeatSpacing}px`
+                    }}
+                >
+                    {items.map((_, idx) => (
+                        <div key={idx} className="flex-1 w-full h-full flex items-center justify-center min-w-0 min-h-0 overflow-visible">
+                            <svg 
+                                viewBox={shapeDef.viewBox || "0 0 100 100"} 
+                                preserveAspectRatio={isPreserveAspect ? "xMidYMid meet" : "none"} 
+                                className="w-full h-full overflow-visible"
+                            >
+                                <defs>
+                                    {renderGradient()}
+                                </defs>
+                                <path 
+                                    d={shapeDef.path} 
+                                    fillRule={shapeDef.fillRule || 'nonzero'}
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    fill={fillColor} 
+                                    fillOpacity={fillOpacity}
+                                    stroke={strokeColor} 
+                                    strokeOpacity={strokeOpacity}
+                                    strokeWidth={strokeWidth} 
+                                    strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
+                                />
+                            </svg>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
         return (
             <div className="w-full h-full" style={{ opacity, filter: dropShadowFilter !== 'none' ? dropShadowFilter : undefined }}>
-                <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+                <svg viewBox={shapeDef.viewBox || "0 0 100 100"} preserveAspectRatio={isPreserveAspect ? "xMidYMid meet" : "none"} className="w-full h-full overflow-visible">
                     <defs>
                         {renderGradient()}
                     </defs>
@@ -325,18 +358,19 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             strokeOpacity={strokeOpacity}
                             strokeWidth={strokeWidth} 
                             strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
-                            vectorEffect="non-scaling-stroke"
                         />
                     ) : (
                         <path 
-                            d={getShapePath()} 
+                            d={shapeDef.path} 
+                            fillRule={shapeDef.fillRule || 'nonzero'}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
                             fill={fillColor} 
                             fillOpacity={fillOpacity}
                             stroke={strokeColor} 
                             strokeOpacity={strokeOpacity}
                             strokeWidth={strokeWidth} 
                             strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
-                            vectorEffect="non-scaling-stroke"
                         />
                     )}
                 </svg>

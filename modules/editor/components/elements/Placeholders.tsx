@@ -42,7 +42,8 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
     const currentYear = new Date().getFullYear();
     let d = { ...(dayData || { dayOfMonth: 1, month: 0, dayOfWeek: new Date(currentYear, 0, 1).getDay(), year: currentYear }) };
     
-    if (style?.simulateMaxSpace) {
+    // Simular maior espaço apenas no editor durante o ajuste de layout, nunca na visualização ou impressão
+    if (isEditor && style?.simulateMaxSpace) {
         d.dayOfMonth = 30;
         d.dayOfWeek = 1; // Segunda-feira (Monday)
         d.month = 10; // Novembro (November)

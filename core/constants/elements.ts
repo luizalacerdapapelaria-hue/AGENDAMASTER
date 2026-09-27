@@ -64,5 +64,119 @@ export const ELEMENT_VARIANTS: Record<string, ElementVariant[]> = {
     'note_grid': [
         { name: 'Pontilhado', description: 'Pontos discretos', styleOverride: { variant: 'dots', color: '#ccc', opacity: 0.5 } },
         { name: 'Quadriculado', description: 'Grade de quadrados', styleOverride: { variant: 'squared', color: '#ccc', opacity: 0.5 } },
+    ],
+    'footer_tracker': [
+        { 
+            name: 'Copos de Água (8 Copos)', 
+            description: 'Meta de 2L de água para colorir', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'water', iconVariant: 'glass', itemCount: 8, itemSize: 20, spacing: 5, strokeColor: '#2563eb', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Água', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 46, h: 6.5 } 
+        },
+        { 
+            name: 'Garrafinhas de Hidratação', 
+            description: 'Garrafas esportivas reutilizáveis', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'water', iconVariant: 'bottle', itemCount: 6, itemSize: 20, spacing: 5, strokeColor: '#0ea5e9', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Hidratação', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 42, h: 6.5 } 
+        },
+        { 
+            name: 'Gotas de Água', 
+            description: 'Gotas estilizadas minimalistas', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'water', iconVariant: 'drop', itemCount: 8, itemSize: 18, spacing: 5, strokeColor: '#1d4ed8', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: '2 Litros', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 40, h: 6.0 } 
+        },
+        { 
+            name: 'Humor do Dia (5 Carinhas)', 
+            description: 'Expressões: Radiante, Feliz, Neutro, Triste e Estressado', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'mood', iconVariant: 'faces_clean', itemCount: 5, itemSize: 21, spacing: 6, strokeColor: '#374151', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Humor', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 45, h: 6.5 } 
+        },
+        { 
+            name: 'Carinhas Kawaii (Fofas)', 
+            description: 'Carinhas com bochechinhas delicadas', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'mood', iconVariant: 'faces_cute', itemCount: 5, itemSize: 21, spacing: 6, strokeColor: '#e11d48', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Hoje me sinto', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 50, h: 6.5 } 
+        },
+        { 
+            name: 'Avaliação em Estrelas', 
+            description: 'De 1 a 5 estrelas para nota do dia', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'mood', iconVariant: 'stars', itemCount: 5, itemSize: 20, spacing: 5, strokeColor: '#d97706', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Meu Dia', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 40, h: 6.5 } 
+        },
+        { 
+            name: 'Corações de Energia', 
+            description: '5 corações para nível de vitalidade', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'mood', iconVariant: 'hearts', itemCount: 5, itemSize: 20, spacing: 5, strokeColor: '#e11d48', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Energia', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 40, h: 6.5 } 
+        },
+        { 
+            name: 'Clima do Dia (5 Ícones)', 
+            description: 'Sol, Parcialmente Nublado, Nuvem, Chuva e Tempestade', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'weather', iconVariant: 'weather_5', itemCount: 5, itemSize: 20, spacing: 6, strokeColor: '#f59e0b', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Clima', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 44, h: 6.5 } 
+        },
+        { 
+            name: 'Refeições (C, A, J, L)', 
+            description: 'Café, Almoço, Jantar e Lanches', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'meals', iconVariant: 'meals_4', itemCount: 4, itemSize: 19, spacing: 6, strokeColor: '#059669', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Refeições', labelPosition: 'left', showItemLabels: true } 
+            }, 
+            defaultSize: { w: 46, h: 7.2 } 
+        },
+        { 
+            name: 'Horas de Sono (5h a 9h+)', 
+            description: 'Lua com marcação de horas dormidas', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'sleep', iconVariant: 'sleep_hours', itemCount: 5, itemSize: 19, spacing: 4, strokeColor: '#4f46e5', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Sono', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 44, h: 6.5 } 
+        },
+        { 
+            name: 'Bateria de Disposição', 
+            description: 'Níveis de energia de 20% a 100%', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'sleep', iconVariant: 'battery', itemCount: 5, itemSize: 18, spacing: 5, strokeColor: '#0d9488', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Disposição', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 48, h: 6.5 } 
+        },
+        { 
+            name: 'Vitaminas & Remédios', 
+            description: 'Pílulas e comprimidos vazados', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'meds', iconVariant: 'pills', itemCount: 4, itemSize: 20, spacing: 6, strokeColor: '#7c3aed', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Vitaminas', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 40, h: 6.5 } 
+        },
+        { 
+            name: 'Linha de Gratidão', 
+            description: 'Coração e linha para escrever a gratidão', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'gratitude', iconVariant: 'gratitude_line', itemCount: 1, itemSize: 18, spacing: 6, strokeColor: '#6b7280', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Hoje sou grata por:', labelPosition: 'left', lineStyle: 'dashed' } 
+            }, 
+            defaultSize: { w: 75, h: 6.0 } 
+        },
+        { 
+            name: 'Treino & Atividade Física', 
+            description: 'Passos, musculação, calorias e cardio', 
+            styleOverride: { 
+                footerTracker: { trackerType: 'fitness', iconVariant: 'fitness_4', itemCount: 4, itemSize: 20, spacing: 6, strokeColor: '#ea580c', fillColor: 'transparent', strokeWidth: 1.2, showLabel: true, label: 'Treino', labelPosition: 'left' } 
+            }, 
+            defaultSize: { w: 44, h: 6.5 } 
+        }
     ]
 };

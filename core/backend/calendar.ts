@@ -46,8 +46,140 @@ const getMobileHolidays = (year: number): Holiday[] => {
   return [
     { date: formatDate(carnivalDate), name: 'Carnaval', type: 'optional' },
     { date: formatDate(goodFridayDate), name: 'Paixão de Cristo', type: 'national' },
+    { date: formatDate(easterDate), name: 'Páscoa', type: 'religious' },
     { date: formatDate(corpusDate), name: 'Corpus Christi', type: 'optional' },
   ];
+};
+
+export type HolidayDateFormat = 'full_written' | 'full_with_weekday' | 'short_written' | 'numeric' | 'day_month_name';
+
+export interface FormattedHolidayItem {
+  date: string;
+  day: number;
+  month: number; // 0-11
+  year: number;
+  dayOfWeek: number; // 0-6
+  name: string;
+  type: string;
+}
+
+export const getYearHolidays = (
+  year: number,
+  options: {
+    includeOptional?: boolean;
+    includeEaster?: boolean;
+    municipalHolidays?: Holiday[];
+  } = {}
+): FormattedHolidayItem[] => {
+  const includeOptional = options.includeOptional !== false; // default true
+  const includeEaster = options.includeEaster !== false;     // default true
+  const rawHolidays: Holiday[] = [
+    ...getFixedHolidays(year),
+    ...getMobileHolidays(year).filter(h => {
+      if (h.name === 'Páscoa' && !includeEaster) return false;
+      if (h.type === 'optional' && !includeOptional) return false;
+      return true;
+    })
+  ];
+
+  if (options.municipalHolidays && options.municipalHolidays.length > 0) {
+    for (const mh of options.municipalHolidays) {
+      if (!mh.date || !mh.name) continue;
+      const parts = mh.date.trim().split('-');
+      if (parts.length === 3) {
+        const m = parts[1].padStart(2, '0');
+        const d = parts[2].padStart(2, '0');
+        rawHolidays.push({ ...mh, date: `${year}-${m}-${d}`, type: mh.type || 'municipal' });
+      } else {
+        rawHolidays.push(mh);
+      }
+    }
+  }
+
+  const itemsMap = new Map<string, FormattedHolidayItem>();
+
+  for (const h of rawHolidays) {
+    if (!h.date || !h.name) continue;
+    const parts = h.date.trim().split('-');
+    if (parts.length < 3) continue;
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dateObj = new Date(y, m, d, 12, 0, 0);
+
+    const key = `${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (!itemsMap.has(key)) {
+      itemsMap.set(key, {
+        date: h.date,
+        day: d,
+        month: m,
+        year: y,
+        dayOfWeek: dateObj.getDay(),
+        name: h.name,
+        type: h.type || 'national'
+      });
+    }
+  }
+
+  const list = Array.from(itemsMap.values());
+  list.sort((a, b) => {
+    if (a.month !== b.month) return a.month - b.month;
+    return a.day - b.day;
+  });
+
+  return list;
+};
+
+export const formatHolidayItemText = (
+  item: FormattedHolidayItem,
+  format: HolidayDateFormat = 'full_written',
+  padDay = true
+): string => {
+  const dayStr = padDay ? String(item.day).padStart(2, '0') : String(item.day);
+  const monthNameFull = getMonthName(item.month, 'full');
+  const monthNameShort = getMonthName(item.month, 'short');
+  const monthNumStr = String(item.month + 1).padStart(2, '0');
+  const dayOfWeekName = getDayName(item.dayOfWeek, 'full');
+
+  switch (format) {
+    case 'full_written':
+      // Ex: 01 de Janeiro - Confraternização Universal
+      return `${dayStr} de ${monthNameFull} - ${item.name}`;
+
+    case 'full_with_weekday':
+      // Ex: 01 de Janeiro (Quarta-feira) - Confraternização Universal
+      return `${dayStr} de ${monthNameFull} (${dayOfWeekName}) - ${item.name}`;
+
+    case 'short_written':
+      // Ex: 01 Jan - Confraternização Universal
+      return `${dayStr} ${monthNameShort} - ${item.name}`;
+
+    case 'day_month_name':
+      // Ex: 01/Jan - Confraternização Universal
+      return `${dayStr}/${monthNameShort} - ${item.name}`;
+
+    case 'numeric':
+    default:
+      // Ex: 01/01 - Confraternização Universal
+      return `${dayStr}/${monthNumStr} - ${item.name}`;
+  }
+};
+
+export const generateHolidayListFullText = (
+  year: number,
+  options: {
+    format?: HolidayDateFormat;
+    includeOptional?: boolean;
+    includeEaster?: boolean;
+    municipalHolidays?: Holiday[];
+    padDay?: boolean;
+  } = {}
+): string => {
+  const items = getYearHolidays(year, options);
+  const format = options.format || 'full_written';
+  const padDay = options.padDay !== false;
+
+  return items.map(item => formatHolidayItemText(item, format, padDay)).join('\n');
 };
 
 // Helper function exported for UI rendering

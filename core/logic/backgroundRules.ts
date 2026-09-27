@@ -19,6 +19,11 @@ export function getEffectiveBackgroundForPage(
     legacyPageSpecificBg?: BackgroundConfig,
     legacyGlobalBgs?: BackgroundConfig[]
 ): BackgroundConfig | undefined {
+    // 0️⃣ Fundo específico direto da página (Ex: introPage.background, monthlyPage.background)
+    if (legacyPageSpecificBg && legacyPageSpecificBg.type && legacyPageSpecificBg.type !== 'none') {
+        return legacyPageSpecificBg;
+    }
+
     if (rules) {
         // 1️⃣ Página específica (Priority 1)
         if (rules.specificPages && rules.specificPages[pageIndex] !== undefined) {
@@ -47,11 +52,6 @@ export function getEffectiveBackgroundForPage(
         if (rules.global && rules.global.type && rules.global.type !== 'none') {
             return rules.global;
         }
-    }
-
-    // Fallback: se houver fundo específico legado na página
-    if (legacyPageSpecificBg && legacyPageSpecificBg.type && legacyPageSpecificBg.type !== 'none') {
-        return legacyPageSpecificBg;
     }
 
     // Fallback: processar lista legada de backgrounds

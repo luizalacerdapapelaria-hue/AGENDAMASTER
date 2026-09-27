@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { localStorage } from '../../services/safeStorage';
 import { User } from '../../types';
-import { Lock, Mail, ArrowRight, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings, Key, Globe } from 'lucide-react';
 import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from '../../services/supabase';
 
 interface LoginProps {
   onLogin: (user: User) => void;
+  onNavigateToLanding?: () => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
   const [email, setEmail] = useState('');
   
   // PWA (Progressive Web Application) Installation States
@@ -482,26 +483,27 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-100 via-amber-50 to-yellow-100 flex flex-col items-center justify-center p-4 gap-4 md:py-12">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-gray-100 flex flex-col shrink-0">
+    <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col items-center justify-center p-4 gap-4 md:py-12 relative font-sans">
+      {/* Ambient orange glow */}
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-72 bg-orange-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+
+      <div className="bg-stone-900 rounded-3xl shadow-2xl shadow-black/80 w-full max-w-lg overflow-hidden border border-stone-800 flex flex-col shrink-0 relative z-10">
         
         {/* Informative Guidance banner if database keys are not yet stored */}
         {!isSupabaseConfigured && (
-          <div className="mx-6 mt-6 p-4 bg-amber-50 rounded-2xl border border-amber-200/60 text-xs text-amber-800 flex flex-col gap-2 shadow-sm">
-            <div className="flex gap-2 font-bold text-amber-900 items-start">
-              <Database className="w-4 h-4 flex-shrink-0 text-amber-600 mt-0.5" />
+          <div className="mx-6 mt-6 p-4 bg-amber-950/40 rounded-2xl border border-amber-800/50 text-xs text-amber-200 flex flex-col gap-2 shadow-xs">
+            <div className="flex gap-2 font-bold text-amber-300 items-start">
+              <Database className="w-4 h-4 flex-shrink-0 text-amber-400 mt-0.5" />
               <span>Chaves de API Supabase não detectadas</span>
             </div>
-            <p className="text-amber-700 leading-relaxed">
+            <p className="text-amber-200/80 leading-relaxed">
               O aplicativo está pronto para autenticação via Supabase! Para ativar o login com a lista de alunos cadastrados, declare 
-              <code className="bg-amber-100/80 px-1 py-0.5 rounded mx-1 text-amber-900 font-mono">VITE_SUPABASE_URL</code> e 
-              <code className="bg-amber-100/80 px-1 py-0.5 rounded mx-1 text-amber-900 font-mono">VITE_SUPABASE_ANON_KEY</code> 
+              <code className="bg-amber-900/60 px-1 py-0.5 rounded mx-1 text-amber-300 font-mono">VITE_SUPABASE_URL</code> e 
+              <code className="bg-amber-900/60 px-1 py-0.5 rounded mx-1 text-amber-300 font-mono">VITE_SUPABASE_ANON_KEY</code> 
               nas configurações do seu projeto e execute um novo deploy.
             </p>
           </div>
         )}
-
-
 
         {/* Login Box Area */}
         <div className="p-8 md:p-10 flex-grow">
@@ -509,38 +511,41 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           {step === 'email' && (
             <>
               <div className="text-center mb-6">
-                <div className="bg-orange-600 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-orange-200">
-                  <Mail className="text-white w-6 h-6" />
+                <div className="bg-gradient-to-br from-amber-600 to-orange-600 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-600/20 text-white text-2xl select-none">
+                  <Sparkles className="w-7 h-7 text-white" />
                 </div>
-                <h1 className="text-2xl font-bold font-sans text-gray-900 tracking-tight">
-                  Acesse a Área do Aluno
+                <div className="inline-block bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider mb-2">
+                  Portal do Aluno
+                </div>
+                <h1 className="text-2xl font-black font-sans text-white tracking-tight">
+                  Área do Aluno
                 </h1>
-                <p className="text-gray-500 mt-2 text-xs font-medium max-w-sm mx-auto">
+                <p className="text-stone-400 mt-2 text-xs font-medium max-w-sm mx-auto">
                   Por favor, insira o e-mail que você utilizou para realizar a compra do curso na HeroSpark.
                 </p>
               </div>
 
               <form onSubmit={handleEmailSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Email de Aluno</label>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1.5">Email de Aluno</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Mail className="h-4 w-4 text-gray-400" />
+                      <Mail className="h-4 w-4 text-orange-400" />
                     </div>
                     <input
                       type="email"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="pl-10 block w-full border-gray-200 rounded-xl border p-3.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-gray-400"
+                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500"
                       placeholder="seuemail@exemplo.com"
                     />
                   </div>
                 </div>
 
                 {error && (
-                  <div className="text-red-650 text-xs bg-red-50/70 p-4 rounded-xl border border-red-200/60 flex gap-2.5 items-start leading-relaxed animate-shake">
-                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-300 text-xs bg-red-950/50 p-4 rounded-xl border border-red-800/60 flex gap-2.5 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
                     <p className="flex-1 font-medium text-left">{error}</p>
                   </div>
                 )}
@@ -548,28 +553,38 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-orange-600/10 text-xs font-bold uppercase tracking-wider text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/30 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
                 >
                   {isLoading ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                   ) : (
                     <div className="flex items-center gap-1.5">
-                      <span>Continuar</span> 
+                      <span>Continuar para o Painel</span> 
                       <ArrowRight className="h-3.5 w-3.5" />
                     </div>
                   )}
                 </button>
 
-                <div className="pt-1 text-center">
+                <div className="pt-1 text-center flex flex-col items-center gap-2">
                   <a
                     href="https://pay.herospark.com/agenda-master-523399"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-orange-600 hover:text-orange-700 font-semibold hover:underline inline-flex items-center gap-1.5 transition-colors"
+                    className="text-xs text-orange-400 hover:text-orange-300 font-semibold hover:underline inline-flex items-center gap-1.5 transition-colors"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                    <Sparkles className="w-3.5 h-3.5 text-orange-400" />
                     <span>Ainda não é aluno? Adquira seu acesso aqui</span>
                   </a>
+                  {onNavigateToLanding && (
+                    <button
+                      type="button"
+                      onClick={onNavigateToLanding}
+                      className="text-xs text-stone-400 hover:text-white font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Conhecer o Agenda Master AI (Landing Page)</span>
+                    </button>
+                  )}
                 </div>
 
               </form>
@@ -579,26 +594,26 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           {step === 'create_password' && (
             <>
               <div className="text-center mb-6">
-                <div className="bg-emerald-500 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-emerald-100">
-                  <Sparkles className="text-white w-6 h-6 animate-pulse" />
+                <div className="bg-orange-500/10 text-orange-400 border border-orange-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-500/10 text-2xl select-none">
+                  <Key className="w-7 h-7 text-orange-400" />
                 </div>
-                <h1 className="text-2xl font-bold font-sans text-gray-900 tracking-tight">
-                  Seja bem-vindo(a)! 🎉
+                <h1 className="text-2xl font-black font-sans text-white tracking-tight">
+                  Seja muito bem-vindo!
                 </h1>
-                <p className="text-gray-500 mt-2 text-xs font-medium max-w-sm mx-auto leading-relaxed">
-                  Identificamos que este é o seu **primeiro acesso**. Por favor, cadastre uma senha segura para proteger sua conta e acessar seus cursos de agora em diante.
+                <p className="text-stone-400 mt-2 text-xs font-medium max-w-sm mx-auto leading-relaxed">
+                  Identificamos que este é o seu <strong>primeiro acesso</strong>. Por favor, cadastre uma senha segura para proteger sua conta e acessar a plataforma de agora em diante.
                 </p>
-                <div className="mt-3 inline-block bg-slate-100 px-3 py-1 rounded-full text-[11px] text-gray-600 font-mono">
-                  E-mail: <span className="font-semibold">{email}</span>
+                <div className="mt-3 inline-block bg-stone-950 border border-stone-800 px-3 py-1 rounded-full text-[11px] text-stone-300 font-mono">
+                  E-mail: <span className="font-semibold text-orange-400">{email}</span>
                 </div>
               </div>
 
               <form onSubmit={handleCreatePasswordSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Escolha uma Senha</label>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1.5">Escolha uma Senha</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-gray-400" />
+                      <Lock className="h-4 w-4 text-orange-400" />
                     </div>
                     <input
                       type="password"
@@ -606,17 +621,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       minLength={6}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 block w-full border-gray-200 rounded-xl border p-3.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-gray-400 font-mono"
+                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500 font-mono"
                       placeholder="No mínimo 6 caracteres"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Confirme a Senha</label>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1.5">Confirme a Senha</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-gray-400" />
+                      <Lock className="h-4 w-4 text-orange-400" />
                     </div>
                     <input
                       type="password"
@@ -624,22 +639,22 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       minLength={6}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="pl-10 block w-full border-gray-200 rounded-xl border p-3.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-gray-400 font-mono"
+                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500 font-mono"
                       placeholder="Repita a senha escolhida"
                     />
                   </div>
                 </div>
 
                 {error && (
-                  <div className="text-red-600 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
-                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-300 text-xs bg-red-950/50 p-3 rounded-xl border border-red-800/60 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
                     <span>{error}</span>
                   </div>
                 )}
 
                 {successMessage && (
-                  <div className="text-emerald-700 text-xs bg-emerald-50 p-3 rounded-xl border border-emerald-200 flex gap-2 items-start leading-relaxed">
-                    <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-emerald-300 text-xs bg-emerald-950/50 p-3 rounded-xl border border-emerald-800/60 flex gap-2 items-start leading-relaxed">
+                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
                     <span>{successMessage}</span>
                   </div>
                 )}
@@ -648,14 +663,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   <button
                     type="button"
                     onClick={handleResetStep}
-                    className="flex-1 py-3.5 px-4 border border-gray-200 rounded-xl text-xs font-bold uppercase tracking-wider text-gray-500 bg-white hover:bg-gray-50 transition-all text-center"
+                    className="flex-1 py-3.5 px-4 border border-stone-750 rounded-xl text-xs font-bold uppercase tracking-wider text-stone-300 bg-stone-800 hover:bg-stone-750 transition-all text-center cursor-pointer"
                   >
                     Voltar
                   </button>
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="flex-[2] flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-emerald-500/10 text-xs font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    className="flex-[2] flex justify-center items-center py-3.5 px-4 rounded-xl shadow-lg shadow-orange-600/30 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
                   >
                     {isLoading ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -671,42 +686,42 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           {step === 'password' && (
             <>
               <div className="text-center mb-6">
-                <div className="bg-orange-600 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-orange-200">
+                <div className="bg-gradient-to-br from-amber-600 to-orange-600 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-600/20">
                   <Lock className="text-white w-6 h-6" />
                 </div>
-                <h1 className="text-2xl font-bold font-sans text-gray-900 tracking-tight">
+                <h1 className="text-2xl font-black font-sans text-white tracking-tight">
                   Insira sua Senha
                 </h1>
-                <p className="text-gray-500 mt-2 text-xs font-medium max-w-sm mx-auto">
+                <p className="text-stone-400 mt-2 text-xs font-medium max-w-sm mx-auto">
                   A conta já possui senha cadastrada. Digite abaixo para acessar seu painel de criação.
                 </p>
-                <div className="mt-3 inline-block bg-slate-100 px-3 py-1 rounded-full text-[11px] text-gray-600 font-mono">
-                  Logado como: <span className="font-semibold text-orange-600">{email}</span>
+                <div className="mt-3 inline-block bg-stone-950 border border-stone-800 px-3 py-1 rounded-full text-[11px] text-stone-300 font-mono">
+                  Logado como: <span className="font-semibold text-orange-400">{email}</span>
                 </div>
               </div>
 
               <form onSubmit={handlePasswordSubmit} className="space-y-4">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider">Senha de Aluno</label>
+                    <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider">Senha de Aluno</label>
                     <button
                       type="button"
                       onClick={handleResetStep}
-                      className="text-xs text-orange-600 hover:text-orange-800 font-bold"
+                      className="text-xs text-orange-400 hover:text-orange-300 font-bold cursor-pointer"
                     >
                       Alterar E-mail
                     </button>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-gray-400" />
+                      <Lock className="h-4 w-4 text-orange-400" />
                     </div>
                     <input
                       type="password"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 block w-full border-gray-200 rounded-xl border p-3.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-gray-400"
+                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500"
                       placeholder="Insira sua senha de acesso"
                       autoFocus
                     />
@@ -716,16 +731,16 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <button
                       type="button"
                       onClick={() => setShowForgotHelp(!showForgotHelp)}
-                      className="text-xs text-orange-600 hover:text-orange-800 hover:underline font-semibold focus:outline-none"
+                      className="text-xs text-orange-400 hover:text-orange-300 hover:underline font-semibold focus:outline-none cursor-pointer"
                     >
                       Esqueceu sua senha?
                     </button>
                   </div>
 
                   {showForgotHelp && (
-                    <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl text-xs text-orange-900 leading-relaxed shadow-sm mt-3 flex flex-col gap-2 animate-fade-in text-left">
-                      <div className="flex gap-2 font-bold text-orange-950 items-center">
-                        <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <div className="p-4 bg-stone-950/90 border border-stone-800 rounded-2xl text-xs text-stone-300 leading-relaxed shadow-xs mt-3 flex flex-col gap-2 animate-fade-in text-left">
+                      <div className="flex gap-2 font-bold text-white items-center">
+                        <ShieldCheck className="w-4 h-4 text-orange-400 flex-shrink-0" />
                         <span>Recuperação de Acesso do Aluno</span>
                       </div>
                       <p>
@@ -735,7 +750,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         Envie uma mensagem para o suporte com o e-mail de compra para que possamos resetar sua senha no banco:
                         <a 
                           href="mailto:luizalacerdaatelie@gmail.com?subject=Recuperar Senha AgendaMaster" 
-                          className="font-bold text-orange-700 hover:underline block mt-1"
+                          className="font-bold text-orange-400 hover:underline block mt-1"
                         >
                           luizalacerdaatelie@gmail.com
                         </a>
@@ -743,7 +758,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       <button
                         type="button"
                         onClick={() => setShowForgotHelp(false)}
-                        className="text-[10px] uppercase font-bold text-orange-700 hover:text-orange-900 self-end mt-1 border border-orange-200 px-2.5 py-1 rounded-lg bg-white shadow-sm"
+                        className="text-[10px] uppercase font-bold text-orange-400 hover:text-orange-300 self-end mt-1 border border-stone-700 px-2.5 py-1 rounded-lg bg-stone-850 shadow-2xs cursor-pointer"
                       >
                         Entendi
                       </button>
@@ -752,8 +767,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </div>
 
                 {error && (
-                  <div className="text-red-600 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
-                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-300 text-xs bg-red-950/50 p-3 rounded-xl border border-red-800/60 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
                     <span>{error}</span>
                   </div>
                 )}
@@ -761,13 +776,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-orange-600/10 text-xs font-bold uppercase tracking-wider text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/30 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
                 >
                   {isLoading ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                   ) : (
                     <div className="flex items-center gap-1.5">
-                      <span>Acessar Portal</span> 
+                      <span>Acessar Painel</span> 
                       <ArrowRight className="h-3.5 w-3.5" />
                     </div>
                   )}
@@ -778,13 +793,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           )}
 
           {/* Secure transaction notice */}
-          <div className="mt-6 flex justify-center items-center gap-1.5 text-gray-400 text-[10px] font-semibold uppercase tracking-wider">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+          <div className="mt-6 flex justify-center items-center gap-1.5 text-stone-400 text-[10px] font-semibold uppercase tracking-wider">
+            <ShieldCheck className="w-3.5 h-3.5 text-orange-500" />
             <span>Portal do Aluno Protegido e Criptografado</span>
           </div>
 
           {/* Self-healing Cache purger option */}
-          <div className="mt-6 pt-4 border-t border-gray-100 flex flex-col items-center gap-2">
+          <div className="mt-6 pt-4 border-t border-stone-800 flex flex-col items-center gap-2">
             <button
               type="button"
               onClick={async () => {
@@ -799,9 +814,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   window.location.reload();
                 }
               }}
-              className="text-[10px] text-orange-500 hover:text-orange-700 hover:underline font-bold uppercase tracking-wider flex items-center justify-center gap-1 bg-orange-50/50 hover:bg-orange-50 px-3.5 py-2 rounded-xl transition-all border border-orange-200 w-full animate-pulse-slow"
+              className="text-[10px] text-stone-400 hover:text-orange-400 hover:underline font-bold uppercase tracking-wider flex items-center justify-center gap-1 bg-stone-950/60 hover:bg-stone-950 px-3.5 py-2 rounded-xl transition-all border border-stone-800 w-full cursor-pointer"
             >
-              🛠️ Travamentos ou problemas para carregar? Limpar Cache
+              🧹 Travamentos ou problemas para carregar? Limpar Cache
             </button>
           </div>
         </div>

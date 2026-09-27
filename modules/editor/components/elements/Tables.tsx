@@ -1,4 +1,4 @@
-import React, { useRef, useLayoutEffect, useEffect, memo } from 'react';
+import React, { useRef, useLayoutEffect, useEffect, useState, useCallback, memo } from 'react';
 import { TableElementProps } from './types';
 
 const applyTextTransform = (text: string, transform?: string) => {
@@ -14,9 +14,23 @@ const applyTextTransform = (text: string, transform?: string) => {
     return text;
 };
 
+const filterDefined = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return {};
+    const res: any = {};
+    Object.keys(obj).forEach(k => {
+        if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') {
+            res[k] = obj[k];
+        }
+    });
+    return res;
+};
+
 const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementId, onTableCellChange, onTableCellFocus, isActive }: any) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
+    const isEditing = Boolean(isEditor && isActive);
+
     const textTransform = style.textTransform;
     const isSentenceOrCapitalize = textTransform === 'sentence' || textTransform === 'capitalize';
     const cssTransform = isSentenceOrCapitalize ? 'none' : textTransform;
@@ -55,33 +69,40 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
         };
     }
 
-    // Auto-adjust textarea height to ensure multi-line wrapped text is always completely visible
-    const adjustTextareaHeight = () => {
+    const adjustTextareaHeight = useCallback(() => {
         const textarea = inputRef.current;
         if (!textarea) return;
-        if (textWrap === 'nowrap' || textWrap === 'clip' || textWrap === 'ellipsis') {
-            textarea.style.height = '100%';
-            return;
-        }
         if (va === 'top') {
-            // For top aligned cells, height 100% fills all available cell height so multiple lines show smoothly
-            textarea.style.height = '100%';
+            setTextareaHeight(undefined);
         } else {
-            // For middle/bottom aligned cells, adjust to scrollHeight so parent flexbox centers or bottom-aligns cleanly
             textarea.style.height = 'auto';
-            textarea.style.height = `${textarea.scrollHeight}px`;
+            const sh = textarea.scrollHeight;
+            setTextareaHeight(sh > 0 ? sh : undefined);
         }
-    };
+    }, [va]);
 
     useLayoutEffect(() => {
-        adjustTextareaHeight();
-    }, [content, style.fontSize, style.lineHeight, style.width, style.padding, textWrap, va]);
+        if (isEditing) {
+            adjustTextareaHeight();
+            if (inputRef.current) {
+                inputRef.current.focus();
+                const len = inputRef.current.value.length;
+                inputRef.current.setSelectionRange(len, len);
+            }
+        }
+    }, [isEditing]);
+
+    useLayoutEffect(() => {
+        if (isEditing) {
+            adjustTextareaHeight();
+        }
+    }, [isEditing, content, adjustTextareaHeight]);
 
     useEffect(() => {
+        if (!isEditing) return;
         const textarea = inputRef.current;
         if (!textarea) return;
 
-        // ResizeObserver adjusts textarea whenever the column width is dragged/resized
         const observer = new ResizeObserver(() => {
             adjustTextareaHeight();
         });
@@ -90,12 +111,12 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
             observer.observe(containerRef.current);
         }
         return () => observer.disconnect();
-    }, [va, textWrap]);
+    }, [isEditing, adjustTextareaHeight]);
 
     return (
         <div 
             ref={containerRef}
-            className={`relative flex-shrink-0 transition-all ${isActive && isEditor ? 'ring-1 ring-inset ring-indigo-500 bg-indigo-50/20' : ''}`} 
+            className={`relative flex-shrink-0 transition-all ${isEditor ? 'cursor-pointer' : ''} ${isActive && isEditor ? 'ring-1 ring-inset ring-indigo-500 bg-indigo-50/20' : ''}`} 
             style={{ 
                 ...style, 
                 textTransform: cssTransform,
@@ -104,17 +125,15 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
             onClick={() => {
                 if (isEditor) {
                     onTableCellFocus && onTableCellFocus(elementId, r, c);
-                    inputRef.current?.focus();
                 }
             }}
         >
-            {isEditor ? (
+            {isEditing ? (
                 <textarea 
                     ref={inputRef} 
                     value={content} 
                     onChange={(e) => {
                         onTableCellChange && onTableCellChange(elementId, r, c, e.target.value);
-                        adjustTextareaHeight();
                     }} 
                     onFocus={() => onTableCellFocus && onTableCellFocus(elementId, r, c)} 
                     className={`w-full bg-transparent border-none resize-none focus:ring-1 focus:ring-indigo-300 focus:bg-white/50 block outline-none ${wrapClasses}`} 
@@ -127,7 +146,9 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                         color: 'inherit', 
                         textAlign: style.textAlign || 'inherit', 
                         width: '100%',
-                        height: '100%',
+                        height: (va === 'middle' || va === 'center' || va === 'bottom') 
+                            ? (textareaHeight ? `${textareaHeight}px` : 'auto') 
+                            : '100%',
                         minHeight: 0,
                         maxHeight: '100%',
                         padding: 0,
@@ -138,7 +159,7 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                 />
             ) : (
                 <div 
-                    className={`w-full ${wrapClasses}`} 
+                    className={`w-full select-none ${wrapClasses}`} 
                     style={{ 
                         fontFamily: 'inherit',
                         fontSize: 'inherit',
@@ -153,7 +174,7 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                         ...wrapInlineStyles
                     }}
                 >
-                    {transformedContent}
+                    {transformedContent || '\u00A0'}
                 </div>
             )}
         </div>
@@ -256,7 +277,6 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             stroke={borderColor}
                             strokeWidth={insideBorderWidth}
                             strokeDasharray={dashArray}
-                            vectorEffect="non-scaling-stroke"
                         />
                     ))}
 
@@ -274,7 +294,6 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 stroke={borderColor}
                                 strokeWidth={insideBorderWidth}
                                 strokeDasharray={dashArray}
-                                vectorEffect="non-scaling-stroke"
                             />
                         );
                     })}
@@ -297,8 +316,8 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             const cellKeyAlt = `${r}_${c}`;
                             const content = style.table?.cellContent?.[cellKey] ?? style.table?.cellContent?.[cellKeyAlt] ?? '';
                             const isHeaderCell = hasHeader && r === 0;
-                            const cellCustomStyle = cellStyles[cellKey] || cellStyles[cellKeyAlt] || {};
-                            const tStyle = { ...globalTextStyle, ...(rowStyles[r] || {}), ...(colStyles[c] || {}), ...cellCustomStyle };
+                            const cellCustomStyle = filterDefined(cellStyles[cellKey] || cellStyles[cellKeyAlt] || {});
+                            const tStyle = { ...globalTextStyle, ...filterDefined(rowStyles[r]), ...filterDefined(colStyles[c]), ...cellCustomStyle };
                             const va = (tStyle.verticalAlign as string) || 'top';
                             
                             let justifyContent = 'flex-start';
@@ -328,7 +347,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 justifyContent: justifyContent, 
                                 alignItems: 'stretch', 
                                 fontFamily: tStyle.fontFamily, 
-                                fontSize: tStyle.fontSize, 
+                                fontSize: typeof tStyle.fontSize === 'number' ? `${tStyle.fontSize}px` : (tStyle.fontSize || '10px'), 
                                 fontWeight: tStyle.fontWeight, 
                                 fontStyle: tStyle.fontStyle || 'normal',
                                 lineHeight: tStyle.lineHeight || 1.25,

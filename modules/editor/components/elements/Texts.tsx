@@ -52,10 +52,11 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     const cssTransform = isSentenceOrCapitalize ? 'none' : textTransform;
 
     if (element.type === 'holiday_list') {
-        const content = isSentenceOrCapitalize ? applyTextTransform(element.content || "Feriados Nacionais (Editável)", textTransform) : (element.content || "Feriados Nacionais (Editável)");
+        const rawContent = element.content || "Feriados Nacionais (Editável)";
+        const content = isSentenceOrCapitalize ? applyTextTransform(rawContent, textTransform) : rawContent;
         if (isEditor && isSelected && isEditing) { 
             return (
-                <div style={{...alignmentStyles, width: '100%', height: '100%'}}>
+                <div style={{ width: '100%', height: '100%' }}>
                     <textarea 
                         value={element.content || "Feriados Nacionais (Editável)"} 
                         onChange={(e) => onContentChange && onContentChange(element.id, e.target.value)} 
@@ -68,19 +69,23 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         style={{ 
                             fontSize: style.fontSize, 
                             fontFamily: style.fontFamily, 
+                            fontWeight: style.fontWeight || 'normal',
+                            fontStyle: style.fontStyle,
                             color: style.color, 
-                            textAlign: style.textAlign, 
-                            lineHeight: style.lineHeight || 1.5, 
+                            textAlign: style.textAlign || 'left', 
+                            lineHeight: style.lineHeight || 1.4, 
                             width: '100%', 
-                            height: 'auto', 
+                            height: '100%', 
                             minHeight: '1.5em',
                             resize: 'none', 
-                            background: 'rgba(255,255,255,0.5)', 
-                            border: '1px dashed #ccc', 
+                            background: 'rgba(255,255,255,0.92)', 
+                            border: '1.5px dashed #6366f1', 
                             outline: 'none', 
                             whiteSpace: 'pre-wrap', 
                             textTransform: cssTransform as any,
-                            overflow: 'hidden'
+                            overflow: 'auto',
+                            padding: '4px',
+                            boxSizing: 'border-box'
                         }} 
                         autoFocus 
                         onMouseDown={(e) => e.stopPropagation()} 
@@ -88,23 +93,122 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                 </div>
             );
         }
+
+        const cols = Math.max(1, Math.min(6, style.columnCount || 1));
+        const colGap = typeof style.columnGap === 'number' ? style.columnGap : 20;
+        const lines = (content || '').split('\n');
+        const parsedFontSize = typeof style.fontSize === 'number' 
+            ? style.fontSize 
+            : (parseFloat(String(style.fontSize || 12)) || 12);
+        const cssFontSize = `${parsedFontSize}px`;
+
+        if (cols > 1) {
+            // Divide as linhas proporcionalmente entre as N colunas para alinhamento uniforme
+            const linesPerCol = Math.ceil(lines.length / cols);
+            const columnsData: string[][] = [];
+            for (let c = 0; c < cols; c++) {
+                columnsData.push(lines.slice(c * linesPerCol, (c + 1) * linesPerCol));
+            }
+
+            return (
+                <div 
+                    className="w-full h-full" 
+                    onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}
+                    title={isEditor ? "Clique duplo para editar a lista de feriados" : undefined}
+                    style={{ 
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                        columnGap: `${colGap}px`,
+                        rowGap: '2px',
+                        fontSize: cssFontSize, 
+                        fontFamily: style.fontFamily, 
+                        fontWeight: style.fontWeight || 'normal',
+                        fontStyle: style.fontStyle,
+                        letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
+                        color: style.color, 
+                        lineHeight: style.lineHeight || 1.4, 
+                        textTransform: cssTransform as any,
+                        width: '100%',
+                        height: '100%',
+                        overflow: 'visible',
+                        boxSizing: 'border-box'
+                    }}
+                >
+                    {columnsData.map((colLines, colIdx) => (
+                        <div 
+                            key={colIdx} 
+                            style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
+                                textAlign: style.textAlign || 'left',
+                                minWidth: 0,
+                                width: '100%',
+                                fontSize: cssFontSize,
+                                boxSizing: 'border-box'
+                            }}
+                        >
+                            {colLines.map((line, lineIdx) => (
+                                <div 
+                                    key={lineIdx} 
+                                    style={{ 
+                                        minHeight: line.trim() ? undefined : '1em',
+                                        whiteSpace: 'normal',
+                                        wordBreak: 'normal',
+                                        overflowWrap: 'break-word',
+                                        fontSize: cssFontSize,
+                                        paddingBottom: '1px'
+                                    }}
+                                >
+                                    {line || '\u00A0'}
+                                </div>
+                            ))}
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        // 1 Coluna (Lista Única Vertical)
         return (
             <div 
-                className="w-full h-full whitespace-pre-wrap" 
+                className="w-full h-full" 
                 onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}
+                title={isEditor ? "Clique duplo para editar a lista de feriados" : undefined}
                 style={{ 
-                    ...alignmentStyles, 
-                    fontSize: style.fontSize, 
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
+                    textAlign: style.textAlign || 'left',
+                    fontSize: cssFontSize, 
                     fontFamily: style.fontFamily, 
+                    fontWeight: style.fontWeight || 'normal',
+                    fontStyle: style.fontStyle,
+                    letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
                     color: style.color, 
-                    textAlign: style.textAlign, 
-                    lineHeight: style.lineHeight || 1.5, 
-                    columnCount: style.columnCount || 1, 
-                    columnGap: '1em', 
-                    textTransform: cssTransform as any 
+                    lineHeight: style.lineHeight || 1.4, 
+                    textTransform: cssTransform as any,
+                    width: '100%',
+                    height: '100%',
+                    overflow: 'visible',
+                    boxSizing: 'border-box'
                 }}
             >
-                {content}
+                {lines.map((line, idx) => (
+                    <div 
+                        key={idx} 
+                        style={{ 
+                            minHeight: line.trim() ? undefined : '1em',
+                            whiteSpace: 'normal',
+                            wordBreak: 'normal',
+                            overflowWrap: 'break-word',
+                            fontSize: cssFontSize,
+                            paddingBottom: '1px'
+                        }}
+                    >
+                        {line || '\u00A0'}
+                    </div>
+                ))}
             </div>
         );
     }
@@ -143,6 +247,63 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                 </div>
             );
         }
+
+        const cols = style.columnCount && style.columnCount > 1 ? Math.min(6, style.columnCount) : 1;
+        if (cols > 1) {
+            const colGap = typeof style.columnGap === 'number' ? style.columnGap : 20;
+            const lines = (content || '').split('\n');
+            const linesPerCol = Math.ceil(lines.length / cols);
+            const columnsData: string[][] = [];
+            for (let c = 0; c < cols; c++) {
+                columnsData.push(lines.slice(c * linesPerCol, (c + 1) * linesPerCol));
+            }
+
+            return (
+                <div 
+                    onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}
+                    style={{
+                        ...style, 
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                        columnGap: `${colGap}px`,
+                        rowGap: 0,
+                        lineHeight: style.lineHeight || 1.5,
+                        width: '100%', 
+                        height: '100%', 
+                        textTransform: cssTransform as any,
+                        overflow: 'hidden'
+                    }}
+                >
+                    {columnsData.map((colLines, colIdx) => (
+                        <div 
+                            key={colIdx} 
+                            style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
+                                textAlign: style.textAlign || 'left',
+                                minWidth: 0,
+                                width: '100%'
+                            }}
+                        >
+                            {colLines.map((line, lineIdx) => (
+                                <div 
+                                    key={lineIdx} 
+                                    style={{ 
+                                        minHeight: line.trim() ? undefined : '1em',
+                                        wordBreak: 'break-word',
+                                        overflowWrap: 'break-word'
+                                    }}
+                                >
+                                    {line || '\u00A0'}
+                                </div>
+                            ))}
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
         return (
             <div 
                 onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}

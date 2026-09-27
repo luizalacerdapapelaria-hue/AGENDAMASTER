@@ -8,7 +8,7 @@ export interface User {
 export interface Holiday {
   date: string; // ISO format YYYY-MM-DD
   name: string;
-  type: 'national' | 'optional';
+  type: 'national' | 'optional' | 'religious' | 'municipal' | string;
 }
 
 export interface DayData {
@@ -49,7 +49,62 @@ export type ElementType =
   | 'vector_shape' // Novo: Formas vetoriais moldáveis
   | 'permanent_day_header' // Cabeçalho para agenda permanente
   | 'planner_day_box' // Novo: Box de dia para Planner Semanal
+  | 'footer_tracker' // Elementos de rodapé: copos de água, carinhas de humor, clima, refeições, etc.
   | 'verse'; 
+
+export type FooterTrackerType = 
+  | 'water'       // Copos de Água / Hidratação
+  | 'mood'        // Humor do Dia / Carinhas
+  | 'weather'     // Clima / Tempo
+  | 'meals'       // Refeições (Café, Almoço, Jantar, Lanches)
+  | 'sleep'       // Horas de Sono / Disposição
+  | 'meds'        // Remédios / Vitaminas
+  | 'gratitude'   // Linha de Gratidão do Dia
+  | 'fitness';    // Atividade Física / Treino
+
+export interface FooterTrackerSection {
+    id: string;
+    type: FooterTrackerType;
+    enabled: boolean;
+    label?: string;
+    showLabel?: boolean;
+    iconVariant?: string;
+    itemCount?: number;
+    customItemLabels?: string[];
+}
+
+export interface FooterTrackerConfig {
+    mode?: 'single' | 'composite'; // 'composite' agrupa múltiplos itens (água, carinhas, clima) em um único rodapé
+    sections?: FooterTrackerSection[];
+    layoutDistribution?: 'auto' | 'space-between' | 'center' | 'start' | 'end';
+    showTopDivider?: boolean;
+    topDividerColor?: string;
+    topDividerWidth?: number;
+    topDividerStyle?: 'solid' | 'dashed' | 'dotted';
+    showSectionDividers?: boolean;
+    sectionDividerColor?: string;
+
+    trackerType: FooterTrackerType;
+    iconVariant?: string; // ex: 'glass' | 'bottle' | 'drop' | 'mug' | 'faces_clean' | 'faces_cute' | 'stars' | 'hearts' | 'weather_5' | 'meals_4' | 'sleep_hours' | 'battery' | 'pills' | 'gratitude_line' | 'fitness_4'
+    itemCount?: number;
+    itemSize?: number;
+    spacing?: number;
+    strokeColor?: string;
+    fillColor?: string;
+    strokeWidth?: number;
+    showLabel?: boolean;
+    label?: string;
+    labelPosition?: 'top' | 'left';
+    showBox?: boolean;
+    boxBackgroundColor?: string;
+    boxBorderColor?: string;
+    boxBorderWidth?: number;
+    boxBorderRadius?: number;
+    boxPadding?: number;
+    showItemLabels?: boolean;
+    customItemLabels?: string[];
+    lineStyle?: 'solid' | 'dashed' | 'dotted';
+} 
 
 export interface TextStyleConfig {
     fontFamily?: string;
@@ -104,6 +159,7 @@ export interface LayoutElement {
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize' | 'sentence';
     letterSpacing?: number;
     padding?: number;
+    cellPadding?: number; // Margem interna do texto/célula
     opacity?: number;
     lineSpacing?: number; // Para pautas
     gridSpacing?: number; // Para grids de notas
@@ -113,6 +169,7 @@ export interface LayoutElement {
     startHour?: number; // Hora inicial para pautas
     endHour?: number; // Hora final para pautas
     timeInterval?: number; // Intervalo em minutos para pautas
+    skipBlankLine?: boolean; // Pular uma linha sem horário entre os horários
     timePosition?: 'left' | 'right'; // Posição dos horários (esquerda ou direita)
     timeWidth?: number; // Largura do bloco/coluna de horários em px
     rotation?: number; // Em graus
@@ -121,6 +178,7 @@ export interface LayoutElement {
     customPages?: string; // Novo: Intervalo de páginas manual (ex: "1, 3, 5-10")
     yearOffset?: number; // Novo: Offset de ano para calendários (ex: 1 para próximo ano)
     imageUrl?: string; // Para elementos do tipo image
+    fit?: 'cover' | 'contain' | 'fill'; // Modo de ajuste da imagem
     iconName?: string; // Nome do ícone Lucide
     flipX?: boolean; // Espelhar horizontalmente
     flipY?: boolean; // Espelhar verticalmente
@@ -130,7 +188,13 @@ export interface LayoutElement {
     nameFormat?: 'full' | 'short' | 'initial' | string; // Formato de nome/abreviação (Completo, 3 letras, 1 letra)
     fillOpacity?: number; // Transparência do preenchimento (0 a 1)
     strokeOpacity?: number; // Transparência da borda (0 a 1)
-    shapeType?: 'rectangle' | 'circle' | 'triangle' | 'star' | 'heart' | 'arrow' | 'diamond' | 'hexagon' | 'octagon' | 'pentagon' | 'parallelogram' | 'trapezoid' | 'cloud' | 'shield'; // Tipos de formas vetoriais
+    preserveAspectRatio?: boolean; // Manter proporção no SVG
+    shapeType?: 
+      | 'rectangle' | 'circle' | 'triangle' | 'star' | 'heart' | 'arrow' | 'diamond' | 'hexagon' | 'octagon' | 'pentagon' | 'parallelogram' | 'trapezoid' | 'cloud' | 'shield'
+      | 'rounded_rect' | 'washi_tape' | 'ribbon_banner' | 'banner_flag' | 'bookmark_tag' | 'postage_stamp' | 'sticky_note' | 'speech_bubble' | 'thought_cloud' | 'paperclip' | 'pushpin' | 'scalloped_tag'
+      | 'bow' | 'cat_paw' | 'bear_silhouette' | 'cute_cup' | 'pencil_cute' | 'cookie_scallop' | 'sparkle_magic' | 'sparkle_stars' | 'butterfly' | 'cute_mushroom'
+      | 'flower_daisy' | 'flower_tulip' | 'clover_four' | 'cute_leaf' | 'rainbow_cute' | 'cute_sun' | 'crescent_moon' | 'cute_cloud' | 'water_drop'
+      | (string & {}); // Tipos de formas vetoriais e papelaria fofa
     calendarOffset?: number; // -1 (mês anterior), 0 (atual), 1 (próximo)
     calendarMonthMode?: 'relative' | 'sequence' | 'fixed'; // Modo do mês exibido
     calendarFixedMonth?: number; // 0 (Janeiro) a 11 (Dezembro) para Mês Fixo
@@ -138,6 +202,11 @@ export interface LayoutElement {
     monthsPerRow?: number; // Para full_calendar: quantos meses por linha
     gap?: number; // Espaçamento entre meses
     columnCount?: number; // Novo: Número de colunas para texto (holiday_list)
+    columnGap?: number | string; // Espaçamento entre colunas
+    holidayFormat?: 'full_written' | 'full_with_weekday' | 'short_written' | 'numeric' | 'day_month_name' | string; // Formato das datas dos feriados
+    includeOptional?: boolean; // Incluir feriados facultativos na lista
+    includeEaster?: boolean; // Incluir domingo de Páscoa
+    includeMunicipal?: boolean; // Incluir feriados municipais
     useGlobalStyle?: boolean; // Se true, herda estilo do full_calendar encontrado nas introPages
     gridSize?: number; // Tamanho da grade para formas e gráficos
   highlightCurrentDay?: boolean;
@@ -176,6 +245,12 @@ export interface LayoutElement {
         rowStyles?: Record<number, TextStyleConfig>; // Estilos específicos por índice de linha
         colStyles?: Record<number, TextStyleConfig>; // Estilos específicos por índice de coluna
         cellStyles?: Record<string, TextStyleConfig>; // Estilos específicos por chave de célula "r-c"
+        scheduleConfig?: {
+            startHour?: number;
+            endHour?: number;
+            intervalMinutes?: number;
+            skipLine?: boolean;
+        };
         borders?: {
             top: boolean;
             bottom: boolean;
@@ -193,11 +268,13 @@ export interface LayoutElement {
         weekDays: TextStyleConfig;
         days: TextStyleConfig;
         showYearInTitle?: boolean; // Nova propriedade: Mostrar ano no título do mês
+        monthFormat?: 'full' | 'short' | 'two_letters' | 'initial' | string; // Formato do nome do mês (Completo, 3 letras, 2 letras, 1 letra)
         weekdayFormat?: 'initial' | 'two_letters' | 'short' | 'medium' | 'full' | 'ordinal_short' | 'ordinal_full' | 'custom' | string; // Formato dos cabeçalhos dos dias da semana
         customWeekdayNames?: string[]; // Nomes customizados para os 7 dias
         customWeekdayText?: string; // String separada por vírgula para edição rápida: "D, S, T, Q, Q, S, S"
         weekdayHeight?: number; // Altura customizada da linha dos dias da semana em px
         weekdayPadding?: number; // Padding interno das células dos dias da semana
+        dayRowHeight?: number; // Altura customizada das linhas dos dias do mês em px (espaçamento entre linhas)
         startOfWeekOnMonday?: boolean;
         startOfWeekDay?: number; // Dia de início da semana (0 = Domingo, 1 = Segunda, 2 = Terça, 3 = Quarta, 4 = Quinta, 5 = Sexta, 6 = Sábado)
         splitMode?: 'all' | 'left' | 'right';
@@ -251,6 +328,7 @@ export interface LayoutElement {
         startHour?: number;
         endHour?: number;
         timeInterval?: number;
+        skipBlankLine?: boolean;
         timetableHeightPercent?: number;
         timetableFit?: 'fixed' | 'distribute';
         hideLines?: boolean;
@@ -260,6 +338,7 @@ export interface LayoutElement {
         fontWeight?: string;
         color?: string;
     };
+    footerTracker?: FooterTrackerConfig;
   };
 }
 
@@ -358,11 +437,17 @@ export interface AgendaConfig {
     elements?: LayoutElement[];
     background?: BackgroundConfig;
     versoBackground?: BackgroundConfig;
+    versoQuoteStyle?: TextStyleConfig;
+    versoQuotePosition?: { x: number; y: number; w: number; h: number };
+    versoElements?: LayoutElement[];
   };
   margins: PageMargins;
+  initialMargins?: PageMargins; // Margens originais definidas no setup inicial (para manter espelhamento inteligente mesmo após importar PDF 1:1)
+  bindingMargins?: PageMargins; // Margens de encadernação (interna/externa) usadas para cálculo de espelhamento e recuo de espiral
   startMonth?: number; // Mês inicial (0-11)
   durationMonths?: number; // Duração em meses
   startOfWeekDay?: number; // Dia de início da semana para calendários (0-6)
+  customCalendarStyle?: LayoutElement['style']['fullCalendar']; // Estilo global sincronizado entre mini calendário e calendário anual
   background?: BackgroundConfig; // Fundo global padrão (legado)
   backgrounds?: BackgroundConfig[]; // Lista de múltiplos planos de fundo globais
   backgroundRules?: BackgroundRulesConfig; // Sistema de regras hierárquicas de plano de fundo
@@ -379,6 +464,27 @@ export interface AgendaConfig {
   elementsWeeklyRight?: LayoutElement[]; // Template para página direita do planner semanal
   introPages: IntroPage[]; // Lista de páginas iniciais (DADOS, CALENDARIOS, ETC)
   monthlyIntroPages?: IntroPage[]; // Páginas introdutórias que começam toda mês (após o divisor de cada mês)
+}
+
+export type PdfImportDestination = 
+  | 'miolo_default'      // Layout de Miolo Principal (Páginas Diárias)
+  | 'miolo_left'         // Layout de Miolo - Verso / Página Esquerda (Pares)
+  | 'miolo_right'        // Layout de Miolo - Frente / Página Direita (Ímpares)
+  | 'new_intro'          // Nova Página Inicial (Apresentação / Dados / etc.)
+  | 'new_monthly_intro'  // Nova Página de Abertura Mensal
+  | 'divider'            // Layout de Divisória Mensal (Frente / Capa)
+  | 'divider_verso'      // Verso da Divisória Mensal
+  | 'replace'            // Substituir Página Atual
+  | 'append'             // Adicionar à Página Atual
+  | 'save_template';     // Salvar na Biblioteca de Modelos (Meus Modelos)
+
+export interface PdfImportBatchItem {
+  pageNumber: number;
+  pageName: string;
+  elements: LayoutElement[];
+  backgroundImage?: string;
+  destination: PdfImportDestination;
+  isDividerVerso?: boolean;
 }
 
 export enum AppState {

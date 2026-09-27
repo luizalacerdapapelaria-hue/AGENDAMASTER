@@ -3,7 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   printToPDF: (options) => ipcRenderer.invoke('print-to-pdf', options),
-  savePDFBase64: (base64String, defaultName) => ipcRenderer.invoke('save-pdf-base64', { base64String, defaultName })
+  savePDFBase64: (base64String, defaultName) => ipcRenderer.invoke('save-pdf-base64', { base64String, defaultName }),
+  getSystemFonts: () => ipcRenderer.invoke('get-system-fonts'),
+  readFontFile: (filePath) => ipcRenderer.invoke('read-font-file', filePath),
+  pickSystemFontFile: () => ipcRenderer.invoke('pick-system-font-file')
 });
 
 // Preload script for safe context bridge (if needed in the future)

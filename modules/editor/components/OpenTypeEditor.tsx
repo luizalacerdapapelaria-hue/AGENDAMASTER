@@ -1,32 +1,45 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as opentype from 'opentype.js';
 import { 
-  Upload, Search, Type, Sliders, ChevronRight, Settings, 
-  HelpCircle, Eye, EyeOff, Sparkles, RefreshCw, ZoomIn, 
-  ZoomOut, Copy, Download, Trash2, ArrowRight, Check, CheckSquare, Square,
-  Moon, Sun, Info, Play, Palette, FileText, X, Monitor, Layers, AlertCircle
+  Upload, Search, Type, Sparkles, RefreshCw, Copy, Check, X, 
+  Monitor, Plus, ArrowLeft, Trash2, HelpCircle, CheckCheck,
+  ChevronDown, ZoomIn, ZoomOut, AlertCircle, Loader2, Wand2
 } from 'lucide-react';
-import { saveFontToDB, getAllFontsFromDB, deleteFontFromDB, StoredFont as DBStoredFont } from '../../../core/logic/fontStorage';
+import { saveFontToDB, getAllFontsFromDB, deleteFontFromDB, StoredFont } from '../../../core/logic/fontStorage';
+import { detectInstalledFonts, getCachedInstalledFonts, CANDIDATE_SYSTEM_FONTS } from '../../../core/logic/fontDetector';
+import { SYSTEM_FONTS, AVAILABLE_FONTS } from '../../../core/constants/elements';
 
-interface OpenTypeEditorProps {
+export interface SelectedTextInfo {
+  id: string;
+  content: string;
+  fontFamily: string;
+  name?: string;
+}
+
+export interface OpenTypeEditorProps {
   user: { name: string; email: string };
   onClose?: () => void;
+  systemFonts?: string[];
+  localFonts?: string[];
+  customFonts?: string[];
+  manualFonts?: string[];
+  onLoadLocalFonts?: () => Promise<void> | void;
+  localFontsLoading?: boolean;
+  onAddManualFont?: () => void;
   onRegisterFont?: (fontFamily: string) => void;
   onInsertIntoLayout?: (text: string, fontFamily: string) => void;
   onInsertVectorGlyph?: (svgDataUrl: string, title: string) => void;
+  selectedTextElement?: SelectedTextInfo | null;
+  onApplyToSelectedText?: (newContent: string, newFontFamily?: string) => void;
+  initialFontFamily?: string;
 }
 
-interface ActiveFontItem {
+export interface ActiveFontItem {
   name: string;
   family: string;
   source: 'preset' | 'uploaded' | 'local';
   font: opentype.Font;
-  buffer: ArrayBuffer;
-}
-
-interface GlyphCategory {
-  name: string;
-  label: string;
+  buffer?: ArrayBuffer;
 }
 
 // Convert opentype.Glyph to a standalone SVG data URL and SVG string
@@ -35,29 +48,39 @@ export function generateGlyphSVG(glyph: opentype.Glyph, font: opentype.Font, col
   const ascender = font.ascender || 800;
   const descender = font.descender || -200;
   
-  const xMin = glyph.xMin !== undefined ? glyph.xMin : 0;
-  const xMax = glyph.xMax !== undefined ? glyph.xMax : (glyph.advanceWidth || unitsPerEm * 0.6);
-  const yMin = glyph.yMin !== undefined ? glyph.yMin : descender;
-  const yMax = glyph.yMax !== undefined ? glyph.yMax : ascender;
+  const hasPathCommands = glyph.path && glyph.path.commands && glyph.path.commands.length > 0;
 
-  const width = Math.max(xMax - xMin, glyph.advanceWidth || unitsPerEm * 0.6, 10);
-  const height = Math.max(ascender - descender, yMax - yMin, 10);
+  if (hasPathCommands) {
+    const xMin = glyph.xMin !== undefined ? glyph.xMin : 0;
+    const xMax = glyph.xMax !== undefined ? glyph.xMax : (glyph.advanceWidth || unitsPerEm * 0.6);
+    const yMin = glyph.yMin !== undefined ? glyph.yMin : descender;
+    const yMax = glyph.yMax !== undefined ? glyph.yMax : ascender;
 
-  const path = glyph.getPath(0, ascender, unitsPerEm);
-  path.fill = color;
-  const pathSvg = path.toSVG(2);
+    const width = Math.max(xMax - xMin, glyph.advanceWidth || unitsPerEm * 0.6, 10);
+    const height = Math.max(ascender - descender, yMax - yMin, 10);
 
-  const viewBoxWidth = Math.max(glyph.advanceWidth || width, 20);
-  const viewBoxHeight = Math.max(height, 20);
+    const path = glyph.getPath(0, ascender, unitsPerEm);
+    path.fill = color;
+    const pathSvg = path.toSVG(2);
 
-  const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" width="${viewBoxWidth}" height="${viewBoxHeight}">${pathSvg}</svg>`;
+    const viewBoxWidth = Math.max(glyph.advanceWidth || width, 20);
+    const viewBoxHeight = Math.max(height, 20);
+
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" width="${viewBoxWidth}" height="${viewBoxHeight}">${pathSvg}</svg>`;
+    const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgString)}`;
+
+    return { svgString, dataUrl };
+  }
+
+  const char = glyph.unicode ? String.fromCodePoint(glyph.unicode) : (glyph.name || '');
+  const family = (font as any).familyName || font.names?.fontFamily?.en || 'sans-serif';
+  const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><text x="50" y="70" font-family="${family}, sans-serif" font-size="64" text-anchor="middle" fill="${color}">${char}</text></svg>`;
   const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgString)}`;
-
   return { svgString, dataUrl };
 }
 
 // Component to render crisp preview thumbnail of any opentype glyph via canvas
-const GlyphThumbnail: React.FC<{ glyph: opentype.Glyph; size?: number; color?: string }> = React.memo(({ glyph, size = 32, color }) => {
+const GlyphThumbnail: React.FC<{ glyph: opentype.Glyph; size?: number; color?: string; fontFamily?: string }> = React.memo(({ glyph, size = 44, color = '#ffffff', fontFamily }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -78,139 +101,216 @@ const GlyphThumbnail: React.FC<{ glyph: opentype.Glyph; size?: number; color?: s
     const ascender = font?.ascender || 800;
     const descender = font?.descender || -200;
 
-    const glyphXMin = glyph.xMin !== undefined ? glyph.xMin : 0;
-    const glyphXMax = glyph.xMax !== undefined ? glyph.xMax : (glyph.advanceWidth || unitsPerEm * 0.6);
-    const glyphYMin = glyph.yMin !== undefined ? glyph.yMin : descender;
-    const glyphYMax = glyph.yMax !== undefined ? glyph.yMax : ascender;
+    const hasPathCommands = glyph.path && glyph.path.commands && glyph.path.commands.length > 0;
 
-    const glyphW = Math.max(glyphXMax - glyphXMin, 1);
-    const glyphH = Math.max(glyphYMax - glyphYMin, 1);
+    if (hasPathCommands) {
+      const glyphXMin = glyph.xMin !== undefined ? glyph.xMin : 0;
+      const glyphXMax = glyph.xMax !== undefined ? glyph.xMax : (glyph.advanceWidth || unitsPerEm * 0.6);
+      const glyphYMin = glyph.yMin !== undefined ? glyph.yMin : descender;
+      const glyphYMax = glyph.yMax !== undefined ? glyph.yMax : ascender;
 
-    const scale = Math.min((size * 0.72) / glyphW, (size * 0.72) / glyphH, (size * 0.72) / (ascender - descender));
-    const fontSize = unitsPerEm * scale;
+      const glyphW = Math.max(glyphXMax - glyphXMin, 1);
+      const glyphH = Math.max(glyphYMax - glyphYMin, 1);
 
-    const x = (size - glyphW * scale) / 2 - glyphXMin * scale;
-    const y = (size + glyphH * scale) / 2 + glyphYMin * scale;
+      const scale = Math.min((size * 0.72) / glyphW, (size * 0.72) / glyphH, (size * 0.72) / (ascender - descender));
+      const fontSize = unitsPerEm * scale;
 
-    try {
-      const path = glyph.getPath(x, y, fontSize);
-      path.fill = color || '#3b82f6';
-      path.draw(ctx);
-    } catch (e) {
-      // Fallback
-      ctx.fillStyle = color || '#3b82f6';
-      ctx.font = `${size * 0.5}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(glyph.name || '?', size / 2, size / 2);
+      const x = (size - glyphW * scale) / 2 - glyphXMin * scale;
+      const y = (size + glyphH * scale) / 2 + glyphYMin * scale;
+
+      try {
+        const path = glyph.getPath(x, y, fontSize);
+        path.fill = color;
+        path.draw(ctx);
+        return;
+      } catch (e) {
+        // Fallback to text draw
+      }
     }
-  }, [glyph, size, color]);
+
+    const effectiveFamily = fontFamily || font?.familyName || (font as any)?.names?.fontFamily?.en || 'sans-serif';
+    const char = glyph.unicode ? String.fromCodePoint(glyph.unicode) : (glyph.name || '?');
+    ctx.fillStyle = color;
+    ctx.font = `500 ${Math.round(size * 0.58)}px "${effectiveFamily}", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(char.length > 3 ? char.slice(0, 2) : char, size / 2, size / 2 + 1);
+  }, [glyph, size, color, fontFamily]);
 
   return <canvas ref={canvasRef} style={{ width: size, height: size }} className="shrink-0 pointer-events-none" />;
 });
 
-export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({ 
-  user, 
-  onClose, 
-  onRegisterFont, 
-  onInsertIntoLayout, 
-  onInsertVectorGlyph 
+export function createSystemFontItem(familyName: string): ActiveFontItem {
+  const glyphs: opentype.Glyph[] = [];
+
+  // .notdef
+  glyphs.push(new opentype.Glyph({
+    name: '.notdef',
+    unicode: 0,
+    advanceWidth: 650,
+    path: new opentype.Path()
+  }));
+
+  // A-Z
+  for (let c = 65; c <= 90; c++) {
+    const ch = String.fromCharCode(c);
+    glyphs.push(new opentype.Glyph({
+      name: ch,
+      unicode: c,
+      unicodes: [c],
+      advanceWidth: 650,
+      path: new opentype.Path()
+    }));
+  }
+
+  // a-z
+  for (let c = 97; c <= 122; c++) {
+    const ch = String.fromCharCode(c);
+    glyphs.push(new opentype.Glyph({
+      name: ch,
+      unicode: c,
+      unicodes: [c],
+      advanceWidth: 550,
+      path: new opentype.Path()
+    }));
+  }
+
+  // 0-9
+  for (let c = 48; c <= 57; c++) {
+    const ch = String.fromCharCode(c);
+    glyphs.push(new opentype.Glyph({
+      name: ch,
+      unicode: c,
+      unicodes: [c],
+      advanceWidth: 550,
+      path: new opentype.Path()
+    }));
+  }
+
+  // Common Punctuation & Symbols
+  const punctuation = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`"\'°ºª©®™€$£';
+  for (let i = 0; i < punctuation.length; i++) {
+    const ch = punctuation[i];
+    const code = ch.codePointAt(0)!;
+    glyphs.push(new opentype.Glyph({
+      name: ch,
+      unicode: code,
+      unicodes: [code],
+      advanceWidth: 400,
+      path: new opentype.Path()
+    }));
+  }
+
+  // Accented Latin characters
+  const accented = 'ÁÀÃÂÉÊÍÓÕÔÚÇáàãâéêíóõôúç';
+  for (let i = 0; i < accented.length; i++) {
+    const ch = accented[i];
+    const code = ch.codePointAt(0)!;
+    glyphs.push(new opentype.Glyph({
+      name: ch,
+      unicode: code,
+      unicodes: [code],
+      advanceWidth: 550,
+      path: new opentype.Path()
+    }));
+  }
+
+  const font = new opentype.Font({
+    familyName,
+    styleName: 'Regular',
+    unitsPerEm: 1000,
+    ascender: 800,
+    descender: -200,
+    glyphs
+  });
+
+  return {
+    name: familyName,
+    family: familyName,
+    source: 'local',
+    font
+  };
+}
+
+export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
+  user,
+  onClose,
+  systemFonts = [],
+  localFonts = [],
+  customFonts = [],
+  manualFonts = [],
+  onLoadLocalFonts,
+  localFontsLoading,
+  onAddManualFont,
+  onRegisterFont,
+  onInsertIntoLayout,
+  onInsertVectorGlyph,
+  selectedTextElement,
+  onApplyToSelectedText,
+  initialFontFamily
 }) => {
-  // Theme state
-  const [workspaceTheme, setWorkspaceTheme] = useState<'light' | 'dark'>('light');
-
-  // Sidebar Visibility
-  const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(() => {
-    return typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
-  });
-  const [showRightSidebar, setShowRightSidebar] = useState<boolean>(() => {
-    return typeof window !== 'undefined' ? window.innerWidth >= 1280 : true;
-  });
-  const [showTutorial, setShowTutorial] = useState<boolean>(true);
-
-  // System local fonts modal state
-  const [showSystemFontsModal, setShowSystemFontsModal] = useState<boolean>(false);
-  const [systemFontsList, setSystemFontsList] = useState<any[]>([]);
-  const [systemFontSearch, setSystemFontSearch] = useState<string>('');
-
-  // Font states
+  // Fonts State
   const [fonts, setFonts] = useState<ActiveFontItem[]>([]);
-  const [activeFontIndex, setActiveFontIndex] = useState<number>(-1);
-  const [loadingFont, setLoadingFont] = useState<boolean>(false);
+  const [activeFontIndex, setActiveFontIndex] = useState<number>(0);
+  const [loadingFont, setLoadingFont] = useState<boolean>(true);
   const [fontError, setFontError] = useState<string | null>(null);
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
-  // Editor configuration
-  const [editorText, setEditorText] = useState<string>(
-    "Elegância & Arte com Tipografia OpenType.\nSelecione qualquer letra para ver glifos alternativos!"
-  );
-  const [fontSize, setFontSize] = useState<number>(30);
-  const [lineHeight, setLineHeight] = useState<number>(1.4);
-  const [letterSpacing, setLetterSpacing] = useState<number>(0);
-
-  // Active OpenType Feature Settings
-  const [features, setFeatures] = useState({
-    liga: true,  // Standard Ligatures
-    dlig: false, // Discretionary Ligatures
-    salt: false, // Stylistic Alternates
-    swsh: false, // Swashes
-    calt: true,  // Contextual Alternates
-    smcp: false, // Small Caps
-    frac: false, // Fractions
-    onum: false, // Oldstyle Figures
-    tnum: false, // Tabular Figures
+  // User's working text
+  const [composerText, setComposerText] = useState<string>(() => {
+    if (selectedTextElement && selectedTextElement.content) {
+      return selectedTextElement.content;
+    }
+    return 'Agenda 2026';
   });
 
-  // Stylistic sets ss01 - ss10
-  const [stylisticSets, setStylisticSets] = useState<Record<string, boolean>>({
-    ss01: false, ss02: false, ss03: false, ss04: false, ss05: false,
-    ss06: false, ss07: false, ss08: false, ss09: false, ss10: false,
-  });
+  const [applyFontToSelected, setApplyFontToSelected] = useState<boolean>(true);
+  const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
+  const [appliedNotification, setAppliedNotification] = useState<boolean>(false);
+  const [showGuide, setShowGuide] = useState<boolean>(false);
 
-  // Sidebar search & filters
+  // Search & Filter
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const glyphsPerPage = 120;
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'swashes' | 'letters' | 'numbers' | 'symbols'>('all');
+  const [gridSize, setGridSize] = useState<'sm' | 'md' | 'lg'>('md');
 
-  // Detail View of Selected Glyph
-  const [selectedGlyphIndex, setSelectedGlyphIndex] = useState<number | null>(null);
+  // Selected Glyph for detail inspection / bottom actions
+  const [selectedGlyph, setSelectedGlyph] = useState<opentype.Glyph | null>(null);
 
-  // Floating Alternates state
-  const [alternates, setAlternates] = useState<opentype.Glyph[]>([]);
-  const [alternatesPosition, setAlternatesPosition] = useState<{ x: number; y: number } | null>(null);
-  const [selectedCharRange, setSelectedCharRange] = useState<{ start: number; end: number; text: string } | null>(null);
-
-  // Refs
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const savedRangeRef = useRef<Range | null>(null);
+  // Text Input Ref for selection / insertion tracking
+  const textInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
-  // Preset fonts definitions
   const presetFontsList = useMemo(() => [
     {
       name: 'Great Vibes (Caligrafia & Swashes)',
-      family: 'Great-Vibes',
+      family: 'Great Vibes',
       url: '/fonts/greatvibes.ttf'
     },
     {
-      name: 'Cinzel Decorative (Letras & Capitulares)',
-      family: 'Cinzel-Decorative',
+      name: 'Cinzel Decorative (Capitulares & Títulos)',
+      family: 'Cinzel Decorative',
       url: '/fonts/cinzel.ttf'
     },
     {
       name: 'Playfair Display (Serifada Elegante)',
-      family: 'Playfair-Display',
+      family: 'Playfair Display',
       url: '/fonts/playfair.ttf'
     }
   ], []);
 
-  // Register font in the browser's Document FontFaceSet
+  // Update text when selectedTextElement changes externally
+  useEffect(() => {
+    if (selectedTextElement && selectedTextElement.content !== undefined) {
+      setComposerText(selectedTextElement.content);
+    }
+  }, [selectedTextElement]);
+
+  const showToast = (msg: string) => {
+    setCopiedNotification(msg);
+    setTimeout(() => setCopiedNotification(null), 3000);
+  };
+
+  // Helper to register FontFace in the document
   const registerFontFace = async (family: string, buffer: ArrayBuffer) => {
     try {
       const fontFace = new FontFace(family, buffer);
@@ -221,7 +321,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     }
   };
 
-  // Helper to load and parse a font buffer
+  // Parse font buffer with graceful fallback
   const parseAndAddFont = async (
     name: string, 
     family: string, 
@@ -229,11 +329,9 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     buffer: ArrayBuffer
   ): Promise<ActiveFontItem | null> => {
     try {
-      // Must clone buffer before passing to opentype to avoid detached ArrayBuffers
       const bufferCopy = buffer.slice(0);
       const font = opentype.parse(bufferCopy);
       
-      // Inject font reference into glyphs for accurate metrics drawing
       for (let i = 0; i < font.glyphs.length; i++) {
         const g = font.glyphs.get(i);
         if (g) (g as any).font = font;
@@ -241,20 +339,20 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
 
       await registerFontFace(family, buffer);
 
-      return {
-        name,
-        family,
-        source,
-        font,
-        buffer
-      };
+      return { name, family, source, font, buffer };
     } catch (e: any) {
-      console.error(`Failed to parse font ${name}:`, e);
-      return null;
+      console.warn(`[OpenType] Aviso ao decodificar buffer da fonte "${name}":`, e?.message || e);
+      // Fallback gracioso para item sintético de sistema sem travar a interface
+      try {
+        const fallback = createSystemFontItem(family);
+        return { ...fallback, name, source };
+      } catch (fallbackErr) {
+        return null;
+      }
     }
   };
 
-  // Load all initial fonts (Presets + IndexedDB saved fonts)
+  // Load all initial fonts (Presets + IndexedDB)
   useEffect(() => {
     let isMounted = true;
 
@@ -263,7 +361,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
       setFontError(null);
       const loaded: ActiveFontItem[] = [];
 
-      // 1. Load Presets
+      // 1. Presets
       for (const preset of presetFontsList) {
         try {
           const res = await fetch(preset.url);
@@ -272,47 +370,51 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
             const parsed = await parseAndAddFont(preset.name, preset.family, 'preset', ab);
             if (parsed) loaded.push(parsed);
           }
-        } catch (e) {
-          console.warn(`Failed to load preset font ${preset.name}:`, e);
+        } catch (e: any) {
+          console.warn(`[OpenType] Não foi possível carregar preset ${preset.name}:`, e?.message || e);
         }
       }
 
-      // 2. Load Stored Custom Fonts from IndexedDB (AgendaFontsDB)
+      // 2. Custom fonts from IndexedDB
       try {
         const storedList = await getAllFontsFromDB();
         for (const stored of storedList) {
           if (stored.buffer && stored.buffer.byteLength > 0) {
             const familyName = stored.name.replace(/\.[^/.]+$/, '').trim() || 'CustomFont';
             const parsed = await parseAndAddFont(stored.name, familyName, 'uploaded', stored.buffer);
-            if (parsed) {
-              // Avoid duplicates
-              if (!loaded.some(f => f.family === parsed.family)) {
-                loaded.push(parsed);
-              }
+            if (parsed && !loaded.some(f => f.family === parsed.family)) {
+              loaded.push(parsed);
             }
           }
         }
-      } catch (e) {
-        console.warn('Failed to load custom fonts from IndexedDB:', e);
+      } catch (e: any) {
+        console.warn('[OpenType] Erro ao carregar fontes salvas:', e?.message || e);
       }
 
       if (isMounted) {
-        setFonts(loaded);
-        if (loaded.length > 0) {
-          setActiveFontIndex(0);
-        } else {
-          setFontError('Nenhuma fonte disponível no momento. Envie uma fonte TTF ou OTF.');
+        if (loaded.length === 0) {
+          loaded.push(createSystemFontItem('Playfair Display'));
+          loaded.push(createSystemFontItem('Inter'));
         }
+        setFonts(loaded);
         setLoadingFont(false);
+
+        // Preselect font matching initialFontFamily if possible
+        if (initialFontFamily && loaded.length > 0) {
+          const matchingIdx = loaded.findIndex(
+            f => f.family.toLowerCase() === initialFontFamily.toLowerCase() ||
+                 f.name.toLowerCase().includes(initialFontFamily.toLowerCase())
+          );
+          if (matchingIdx >= 0) {
+            setActiveFontIndex(matchingIdx);
+          }
+        }
       }
     };
 
     loadAllFonts();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [presetFontsList]);
+    return () => { isMounted = false; };
+  }, [presetFontsList, initialFontFamily]);
 
   const activeFont = useMemo(() => {
     if (activeFontIndex >= 0 && activeFontIndex < fonts.length) {
@@ -327,143 +429,99 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     if (!files || files.length === 0) return;
 
     setLoadingFont(true);
-    setFontError(null);
-
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
         const buffer = await file.arrayBuffer();
         const rawFamily = file.name.replace(/\.[^/.]+$/, '').trim();
-        const family = `Custom-${rawFamily.replace(/\s+/g, '-')}-${Date.now()}`;
+        const family = rawFamily;
         
         const parsed = await parseAndAddFont(file.name, family, 'uploaded', buffer);
         if (parsed) {
-          // Persist to unified IndexedDB
           await saveFontToDB(file.name, buffer);
-
           setFonts(prev => [parsed, ...prev]);
           setActiveFontIndex(0);
-          setSelectedGlyphIndex(null);
-
-          if (onRegisterFont) {
-            onRegisterFont(family);
-          }
-
-          showNotification(`Fonte "${file.name}" carregada com sucesso! (${parsed.font.glyphs.length} glifos detectados)`);
-        } else {
-          setFontError(`Não foi possível decodificar o arquivo de fonte "${file.name}".`);
+          if (onRegisterFont) onRegisterFont(family);
+          showToast(`Fonte "${file.name}" carregada! (${parsed.font.glyphs.length} glifos)`);
         }
       } catch (err: any) {
-        setFontError(`Erro ao carregar fonte: ${err.message}`);
+        showToast(`Erro ao carregar fonte: ${err.message}`);
       }
     }
-
     setLoadingFont(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Remove a custom uploaded font
-  const handleDeleteFont = async (index: number) => {
-    const fontToDelete = fonts[index];
-    if (!fontToDelete || fontToDelete.source === 'preset') return;
-
-    try {
-      await deleteFontFromDB(fontToDelete.name);
-      const updated = fonts.filter((_, idx) => idx !== index);
-      setFonts(updated);
-      if (activeFontIndex >= updated.length) {
-        setActiveFontIndex(Math.max(0, updated.length - 1));
+  // Helper to extract character string from opentype Glyph
+  const getGlyphCharacter = useCallback((glyph: opentype.Glyph): string => {
+    if (glyph.unicode !== undefined && glyph.unicode !== null && glyph.unicode > 0) {
+      try { return String.fromCodePoint(glyph.unicode); } catch (e) {}
+    }
+    if (glyph.unicodes && glyph.unicodes.length > 0) {
+      const validCode = glyph.unicodes.find(u => u && u > 0);
+      if (validCode) {
+        try { return String.fromCodePoint(validCode); } catch (e) {}
       }
-      showNotification(`Fonte "${fontToDelete.name}" removida.`, 'info');
-    } catch (e) {
-      console.error('Error deleting font:', e);
     }
-  };
-
-  // Open Local System Fonts Picker (if supported by browser)
-  const handleQueryLocalFonts = async () => {
-    if ('queryLocalFonts' in window) {
-      try {
-        setLoadingFont(true);
-        const localFonts = await (window as any).queryLocalFonts();
-        setSystemFontsList(localFonts);
-        setShowSystemFontsModal(true);
-      } catch (e: any) {
-        alert('Permissão para acessar fontes locais não concedida ou cancelada.');
-      } finally {
-        setLoadingFont(false);
+    if (glyph.name) {
+      const uniMatch = glyph.name.match(/^(?:uni|u|u\+)([0-9a-fA-F]{4,6})$/i);
+      if (uniMatch) {
+        const code = parseInt(uniMatch[1], 16);
+        if (code > 0) {
+          try { return String.fromCodePoint(code); } catch (e) {}
+        }
       }
-    } else {
-      alert('A API de Fontes Locais não é suportada diretamente no seu navegador. Por favor, utilize o botão "Enviar Fonte (TTF/OTF)".');
+      const baseCharMatch = glyph.name.match(/^([a-zA-Z0-9])/);
+      if (baseCharMatch) return baseCharMatch[1];
     }
-  };
+    return '';
+  }, []);
 
-  const handleSelectSystemFont = async (fontMetadata: any) => {
-    try {
-      setShowSystemFontsModal(false);
-      setLoadingFont(true);
-      const blob = await fontMetadata.blob();
-      const buffer = await blob.arrayBuffer();
-      const family = fontMetadata.family || 'LocalFont';
-      
-      const parsed = await parseAndAddFont(fontMetadata.fullName || family, family, 'uploaded', buffer);
-      if (parsed) {
-        await saveFontToDB(fontMetadata.fullName || family, buffer);
-        setFonts(prev => [parsed, ...prev]);
-        setActiveFontIndex(0);
-        if (onRegisterFont) onRegisterFont(family);
-        showNotification(`Fonte do computador "${fontMetadata.fullName || family}" importada com sucesso!`);
+  // Determine if a glyph is a special swash / alternate
+  const isGlyphSwash = useCallback((glyph: opentype.Glyph): boolean => {
+    const name = (glyph.name || '').toLowerCase();
+    const unicode = glyph.unicode || (glyph.unicodes && glyph.unicodes[0]);
+    if (unicode && unicode >= 0xE000 && unicode <= 0xF8FF) return true; // Private Use Area (PUA)
+    if (name.includes('swsh') || name.includes('swash') || name.includes('alt') || 
+        name.includes('ss0') || name.includes('ss1') || name.includes('fina') || 
+        name.includes('init') || name.includes('medi') || name.includes('ornm') ||
+        name.includes('heart') || name.includes('flower') || name.includes('curl') ||
+        name.includes('tail') || name.includes('flourish') || name.includes('loop')) {
+      return true;
+    }
+    return false;
+  }, []);
+
+  // Determine glyph category
+  const getGlyphType = useCallback((glyph: opentype.Glyph): 'swashes' | 'letters' | 'numbers' | 'symbols' => {
+    const name = (glyph.name || '').toLowerCase();
+    const unicode = glyph.unicode || (glyph.unicodes && glyph.unicodes[0]);
+
+    if (isGlyphSwash(glyph)) return 'swashes';
+
+    if (unicode) {
+      if (unicode >= 48 && unicode <= 57) return 'numbers';
+      if ((unicode >= 65 && unicode <= 90) || (unicode >= 97 && unicode <= 122) || (unicode >= 192 && unicode <= 382)) {
+        return 'letters';
       }
-    } catch (e: any) {
-      alert(`Falha ao ler dados da fonte local: ${e.message}`);
-    } finally {
-      setLoadingFont(false);
     }
-  };
+    return 'symbols';
+  }, [isGlyphSwash]);
 
-  // Category detection for every glyph
-  const getGlyphCategory = (g: opentype.Glyph, unicode: number | null): string => {
-    const name = (g.name || '').toLowerCase();
-    if (unicode !== null && unicode > 0) {
-      if (unicode >= 48 && unicode <= 57) return 'number';
-      if ((unicode >= 65 && unicode <= 90) || (unicode >= 97 && unicode <= 122) || (unicode >= 192 && unicode <= 382)) return 'letter';
-      if ((unicode >= 33 && unicode <= 47) || (unicode >= 58 && unicode <= 64) || (unicode >= 91 && unicode <= 96) || (unicode >= 123 && unicode <= 126)) return 'punctuation';
-      if (unicode >= 8704 && unicode <= 8959) return 'math';
-      if (unicode >= 0xE000 && unicode <= 0xF8FF) return 'alternate';
-    }
-    if (name.includes('liga') || name.includes('_') || name.startsWith('f_')) return 'ligature';
-    if (name.includes('swsh') || name.includes('swash')) return 'swash';
-    if (name.includes('alt') || name.includes('ss') || name.includes('init') || name.includes('fina') || name.includes('medi')) return 'alternate';
-    if (name.includes('ornm') || name.includes('ornament') || name.includes('bullet') || name.includes('star') || name.includes('heart') || name.includes('flower')) return 'ornament';
-    return 'other';
-  };
-
-  // Categories definitions
-  const categories: GlyphCategory[] = [
-    { name: 'all', label: 'Todos os Glifos' },
-    { name: 'letter', label: 'Letras e Alfabeto' },
-    { name: 'swash', label: 'Swashes e Florais (swsh)' },
-    { name: 'alternate', label: 'Alternativas Estilísticas (salt/ss)' },
-    { name: 'ligature', label: 'Ligaduras (liga/dlig)' },
-    { name: 'ornament', label: 'Ornamentos e Ícones' },
-    { name: 'number', label: 'Algarismos' },
-    { name: 'punctuation', label: 'Pontuação e Símbolos' },
-    { name: 'other', label: 'Outros Caracteres' },
-  ];
-
-  // All parsed glyph items for the active font
+  // All extracted glyphs for the active font
   const glyphItems = useMemo(() => {
     if (!activeFont) return [];
+    const font = activeFont.font;
     const items: Array<{
       index: number;
       name: string;
       unicode: number | null;
       glyph: opentype.Glyph;
-      category: string;
-      isMapped: boolean;
+      charStr: string;
+      isSwash: boolean;
+      type: 'swashes' | 'letters' | 'numbers' | 'symbols';
     }> = [];
 
-    const font = activeFont.font;
     for (let i = 0; i < font.glyphs.length; i++) {
       const g = font.glyphs.get(i);
       if (!g) continue;
@@ -475,1172 +533,694 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
         unicode = g.unicodes[0];
       }
 
-      const category = getGlyphCategory(g, unicode);
+      const charStr = getGlyphCharacter(g);
+      const isSwash = isGlyphSwash(g);
+      const type = getGlyphType(g);
+
       items.push({
         index: i,
-        name: g.name || `glyph-${i}`,
+        name: g.name || `glifo-${i}`,
         unicode,
         glyph: g,
-        category,
-        isMapped: unicode !== null
+        charStr,
+        isSwash,
+        type
       });
     }
 
     return items;
-  }, [activeFont]);
+  }, [activeFont, getGlyphCharacter, isGlyphSwash, getGlyphType]);
 
-  // Filtered glyph items based on search and category
+  // Filtered glyphs based on category & search
   const filteredGlyphs = useMemo(() => {
-    let result = glyphItems;
+    let list = glyphItems;
 
-    if (selectedCategory !== 'all') {
-      result = result.filter(item => item.category === selectedCategory);
+    if (categoryFilter !== 'all') {
+      list = list.filter(item => item.type === categoryFilter);
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      result = result.filter(item => {
-        const nameMatch = item.name.toLowerCase().includes(q);
-        const indexMatch = item.index.toString() === q;
-        const hexMatch = item.unicode ? `u+${item.unicode.toString(16)}`.includes(q) : false;
-        let charMatch = false;
-        if (item.unicode) {
-          try {
-            charMatch = String.fromCodePoint(item.unicode).toLowerCase().includes(q);
-          } catch (e) {}
-        }
-        return nameMatch || indexMatch || hexMatch || charMatch;
+      list = list.filter(item => {
+        if (item.name.toLowerCase().includes(q)) return true;
+        if (item.charStr && item.charStr.toLowerCase().includes(q)) return true;
+        if (item.unicode && `u+${item.unicode.toString(16)}`.includes(q)) return true;
+        return false;
       });
     }
 
-    return result;
-  }, [glyphItems, selectedCategory, searchQuery]);
+    return list;
+  }, [glyphItems, categoryFilter, searchQuery]);
 
-  // Paginated glyph items
-  const paginatedGlyphs = useMemo(() => {
-    const start = (currentPage - 1) * glyphsPerPage;
-    return filteredGlyphs.slice(start, start + glyphsPerPage);
-  }, [filteredGlyphs, currentPage, glyphsPerPage]);
+  // Count swashes / special characters
+  const swashesCount = useMemo(() => {
+    return glyphItems.filter(g => g.type === 'swashes').length;
+  }, [glyphItems]);
 
-  const totalPages = Math.ceil(filteredGlyphs.length / glyphsPerPage) || 1;
-
-  // Reset pagination on filter or font change
-  useEffect(() => {
-    setCurrentPage(1);
-    setSelectedGlyphIndex(null);
-  }, [activeFontIndex, selectedCategory, searchQuery]);
-
-  // CSS Font-Feature-Settings string
-  const computedFontFeatures = useMemo(() => {
-    const list: string[] = [];
-    Object.entries(features).forEach(([feat, active]) => {
-      if (active) list.push(`"${feat}" 1`);
-    });
-    Object.entries(stylisticSets).forEach(([set, active]) => {
-      if (active) list.push(`"${set}" 1`);
-    });
-    return list.join(', ');
-  }, [features, stylisticSets]);
-
-  // Helper to extract a character string from an opentype Glyph
-  const getGlyphCharacter = (glyph: opentype.Glyph): string => {
-    if (glyph.unicode !== undefined && glyph.unicode !== null && glyph.unicode > 0) {
-      try {
-        return String.fromCodePoint(glyph.unicode);
-      } catch (e) {}
+  // Insert a glyph character into the composer input
+  const insertGlyphIntoComposer = (glyph: opentype.Glyph) => {
+    setSelectedGlyph(glyph);
+    const charStr = getGlyphCharacter(glyph);
+    if (!charStr) {
+      showToast('Este glifo é um ornamento vetorial especial.');
+      return;
     }
 
-    if (glyph.unicodes && glyph.unicodes.length > 0) {
-      const validCode = glyph.unicodes.find(u => u && u > 0);
-      if (validCode) {
-        try {
-          return String.fromCodePoint(validCode);
-        } catch (e) {}
-      }
+    const input = textInputRef.current;
+    if (!input) {
+      setComposerText(prev => prev + charStr);
+      return;
     }
 
-    if (glyph.name) {
-      const uniMatch = glyph.name.match(/^(?:uni|u|u\+)([0-9a-fA-F]{4,6})$/i);
-      if (uniMatch) {
-        const code = parseInt(uniMatch[1], 16);
-        if (code > 0) {
-          try {
-            return String.fromCodePoint(code);
-          } catch (e) {}
-        }
-      }
-      const baseCharMatch = glyph.name.match(/^([a-zA-Z0-9])/);
-      if (baseCharMatch) {
-        return baseCharMatch[1];
-      }
-    }
+    const start = input.selectionStart ?? composerText.length;
+    const end = input.selectionEnd ?? composerText.length;
+    const newText = composerText.substring(0, start) + charStr + composerText.substring(end);
+    setComposerText(newText);
 
-    return '';
+    // Restore focus and place cursor right after inserted character
+    setTimeout(() => {
+      input.focus();
+      const newPos = start + charStr.length;
+      input.setSelectionRange(newPos, newPos);
+    }, 10);
   };
 
-  // Insert Glyph into Text Editor
-  const insertGlyph = (glyph: opentype.Glyph): string => {
-    if (!editorRef.current) return editorText;
-
-    let selection = window.getSelection();
-    let range: Range | null = null;
-
-    if (selection && selection.rangeCount > 0) {
-      const currentRange = selection.getRangeAt(0);
-      if (editorRef.current.contains(currentRange.startContainer)) {
-        range = currentRange;
+  // 1-Click: Apply directly to selected text in Dashboard
+  const handleApplyToSelected = () => {
+    if (!onApplyToSelectedText || !selectedTextElement) {
+      // If no text element selected, insert as new text
+      if (onInsertIntoLayout && activeFont) {
+        onInsertIntoLayout(composerText, activeFont.family);
+        showToast('Texto inserido no miolo da agenda!');
+        if (onClose) onClose();
       }
+      return;
     }
 
-    if (!range && savedRangeRef.current) {
-      range = savedRangeRef.current;
-    }
-
-    if (!range) {
-      editorRef.current.focus();
-      selection = window.getSelection();
-      range = document.createRange();
-      range.selectNodeContents(editorRef.current);
-      range.collapse(false);
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-    }
-
-    try {
-      range.deleteContents();
-    } catch (e) {}
-
-    const charStr = getGlyphCharacter(glyph) || ' ';
-    const textNode = document.createTextNode(charStr);
-    range.insertNode(textNode);
-    range.setStartAfter(textNode);
-    range.collapse(true);
-
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-
-    const updatedText = editorRef.current.innerText || editorRef.current.textContent || '';
-    setEditorText(updatedText);
-
-    savedRangeRef.current = null;
-    setAlternates([]);
-    setAlternatesPosition(null);
-
-    return updatedText;
+    const targetFont = applyFontToSelected && activeFont ? activeFont.family : undefined;
+    onApplyToSelectedText(composerText, targetFont);
+    setAppliedNotification(true);
+    showToast('✨ Texto atualizado com sucesso no seu miolo!');
+    setTimeout(() => setAppliedNotification(false), 2500);
   };
 
-  // Double Click on Glyph: sends directly to Layout as Vector HD or Text!
+  // Double click on a glyph: immediate insertion / apply
   const handleGlyphDoubleClick = (glyph: opentype.Glyph) => {
-    setSelectedGlyphIndex(glyph.index);
-    if (!activeFont) return;
-
-    const isDirectUnicode = glyph.unicode !== undefined && glyph.unicode !== null && glyph.unicode > 0;
+    insertGlyphIntoComposer(glyph);
     const charStr = getGlyphCharacter(glyph);
 
-    if (isDirectUnicode && charStr) {
-      const updated = insertGlyph(glyph);
-      if (onInsertIntoLayout) {
-        onInsertIntoLayout(updated || charStr, activeFont.family);
-      }
-      showNotification(`Texto enviado ao layout!`);
-    } else {
-      // Send as Crisp Vector HD Graphic
-      const { dataUrl } = generateGlyphSVG(glyph, activeFont.font, '#111827');
-      if (onInsertVectorGlyph) {
-        onInsertVectorGlyph(dataUrl, glyph.name || `Glifo ${glyph.index}`);
-        showNotification(`Glifo vetorial enviado diretamente ao layout!`);
-      } else if (onInsertIntoLayout && charStr) {
-        onInsertIntoLayout(charStr, activeFont.family);
-      }
-    }
-  };
-
-  // Sync ContentEditable content
-  const handleEditorInput = () => {
-    if (editorRef.current) {
-      setEditorText(editorRef.current.innerText);
-    }
-  };
-
-  // Find glyph alternates for selected character
-  const detectAlternatesForSelection = () => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || !activeFont || !editorRef.current) {
-      setAlternates([]);
-      setAlternatesPosition(null);
-      return;
-    }
-
-    const range = selection.getRangeAt(0);
-    if (!editorRef.current.contains(range.startContainer)) return;
-
-    savedRangeRef.current = range.cloneRange();
-    const selectedText = range.toString();
-
-    if (selectedText.length !== 1) {
-      setAlternates([]);
-      setAlternatesPosition(null);
-      return;
-    }
-
-    const char = selectedText;
-    const font = activeFont.font;
-    const baseGlyphIndex = font.charToGlyphIndex(char);
-    if (baseGlyphIndex === 0) return;
-
-    const baseGlyph = font.glyphs.get(baseGlyphIndex);
-    const baseName = baseGlyph.name || '';
-    const foundAlts: opentype.Glyph[] = [];
-    const addedIndices = new Set<number>([baseGlyphIndex]);
-
-    // 1. Prefix Pattern-based Alternates Finder (e.g. a.alt, a.swsh, a.ss01)
-    if (baseName) {
-      const prefix = baseName + '.';
-      for (let i = 0; i < font.glyphs.length; i++) {
-        const g = font.glyphs.get(i);
-        if (g && g.name && g.name.startsWith(prefix) && !addedIndices.has(i)) {
-          foundAlts.push(g);
-          addedIndices.add(i);
-        }
-      }
-    }
-
-    // 2. OpenType GSUB Lookup Engine parser
-    const gsub = font.tables.gsub;
-    if (gsub && gsub.lookups) {
-      gsub.lookups.forEach((lookup: any) => {
-        if (lookup.subtables) {
-          lookup.subtables.forEach((subtable: any) => {
-            if (subtable.coverage && subtable.coverage.glyphs) {
-              const idxInCoverage = subtable.coverage.glyphs.indexOf(baseGlyphIndex);
-              if (idxInCoverage !== -1) {
-                if (subtable.alternateGlyphs && subtable.alternateGlyphs[idxInCoverage]) {
-                  subtable.alternateGlyphs[idxInCoverage].forEach((altIdx: number) => {
-                    if (!addedIndices.has(altIdx)) {
-                      const g = font.glyphs.get(altIdx);
-                      if (g) {
-                        foundAlts.push(g);
-                        addedIndices.add(altIdx);
-                      }
-                    }
-                  });
-                } else if (subtable.substitute && subtable.substitute[idxInCoverage]) {
-                  const altIdx = subtable.substitute[idxInCoverage];
-                  if (!addedIndices.has(altIdx)) {
-                    const g = font.glyphs.get(altIdx);
-                    if (g) {
-                      foundAlts.push(g);
-                      addedIndices.add(altIdx);
-                    }
-                  }
-                } else if (subtable.deltaGlyphId) {
-                  const altIdx = baseGlyphIndex + subtable.deltaGlyphId;
-                  if (!addedIndices.has(altIdx)) {
-                    const g = font.glyphs.get(altIdx);
-                    if (g) {
-                      foundAlts.push(g);
-                      addedIndices.add(altIdx);
-                    }
-                  }
-                }
-              }
-            }
-          });
-        }
-      });
-    }
-
-    if (foundAlts.length > 0) {
-      const rect = range.getBoundingClientRect();
-      const parentRect = editorRef.current.getBoundingClientRect();
+    if (charStr && selectedTextElement && onApplyToSelectedText) {
+      // Apply immediately with active font
+      const input = textInputRef.current;
+      const start = input?.selectionStart ?? composerText.length;
+      const end = input?.selectionEnd ?? composerText.length;
+      const updatedText = composerText.substring(0, start) + charStr + composerText.substring(end);
       
-      setAlternates(foundAlts);
-      setAlternatesPosition({
-        x: rect.left - parentRect.left + (rect.width / 2),
-        y: rect.top - parentRect.top - 70
-      });
-
-      setSelectedCharRange({
-        start: range.startOffset,
-        end: range.endOffset,
-        text: selectedText
-      });
-    } else {
-      setAlternates([]);
-      setAlternatesPosition(null);
+      const targetFont = applyFontToSelected && activeFont ? activeFont.family : undefined;
+      onApplyToSelectedText(updatedText, targetFont);
+      showToast(`Glifo inserido diretamente no texto!`);
+    } else if (!charStr && activeFont && onInsertVectorGlyph) {
+      // Insert as decorative vector element
+      const { dataUrl } = generateGlyphSVG(glyph, activeFont.font, '#1e293b');
+      onInsertVectorGlyph(dataUrl, glyph.name || 'Glifo Decorativo');
+      showToast('Enfeite vetorial adicionado ao miolo!');
     }
   };
 
-  useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.alternates-popover') && !target.closest('.workspace-textarea')) {
-        setAlternates([]);
-        setAlternatesPosition(null);
-      }
-    };
-
-    window.addEventListener('mousedown', handleGlobalClick);
-    return () => {
-      window.removeEventListener('mousedown', handleGlobalClick);
-    };
-  }, []);
-
-  // Selected Glyph Data Details
-  const selectedGlyphData = useMemo(() => {
-    if (selectedGlyphIndex === null || !activeFont) return null;
-    const g = activeFont.font.glyphs.get(selectedGlyphIndex);
-    if (!g) return null;
-
-    let unicode: number | null = null;
-    if (g.unicode !== undefined && g.unicode !== null && g.unicode > 0) {
-      unicode = g.unicode;
-    } else if (g.unicodes && g.unicodes.length > 0 && g.unicodes[0] > 0) {
-      unicode = g.unicodes[0];
+  // Copy individual glyph to clipboard
+  const handleCopyGlyph = async (glyph: opentype.Glyph) => {
+    const charStr = getGlyphCharacter(glyph);
+    if (!charStr) {
+      showToast('Este glifo é uma arte vetorial interna da fonte.');
+      return;
     }
-
-    const hexUnicode = unicode ? `U+${unicode.toString(16).toUpperCase().padStart(4, '0')}` : 'Alternativa / Vetorial';
-    const metrics = g.getMetrics();
-    const { svgString, dataUrl } = generateGlyphSVG(g, activeFont.font, '#111827');
-
-    return {
-      index: selectedGlyphIndex,
-      name: g.name || `glyph-${selectedGlyphIndex}`,
-      unicode: hexUnicode,
-      advanceWidth: g.advanceWidth || 'N/A',
-      metrics,
-      glyph: g,
-      svgString,
-      dataUrl,
-      isDirectUnicode: unicode !== null
-    };
-  }, [selectedGlyphIndex, activeFont]);
-
-  // Download glyph as standalone SVG File
-  const handleDownloadGlyphSVG = () => {
-    if (!selectedGlyphData) return;
-    const { svgString, name } = selectedGlyphData;
-    const blob = new Blob([svgString], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${name || 'glifo'}.svg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showNotification(`Arquivo SVG baixado com sucesso!`);
+    try {
+      await navigator.clipboard.writeText(charStr);
+      showToast(`Caractere "${charStr}" copiado para a área de transferência!`);
+    } catch (e) {
+      showToast('Erro ao copiar caractere.');
+    }
   };
 
-  // Copy SVG markup to clipboard
-  const handleCopySVG = () => {
-    if (!selectedGlyphData) return;
-    navigator.clipboard.writeText(selectedGlyphData.svgString);
-    showNotification(`Código SVG copiado para a área de transferência!`);
+  // Copy full composer text to clipboard
+  const handleCopyComposerText = async () => {
+    if (!composerText) return;
+    try {
+      await navigator.clipboard.writeText(composerText);
+      showToast('Texto completo copiado com sucesso!');
+    } catch (e) {
+      showToast('Erro ao copiar texto.');
+    }
+  };
+
+  // Insert as new text element
+  const handleInsertAsNewText = () => {
+    if (onInsertIntoLayout && activeFont && composerText) {
+      onInsertIntoLayout(composerText, activeFont.family);
+      showToast('Novo texto adicionado ao miolo!');
+      if (onClose) onClose();
+    }
+  };
+
+  // Insert glyph as vector element
+  const handleInsertAsVector = (glyph: opentype.Glyph) => {
+    if (!activeFont || !onInsertVectorGlyph) return;
+    const { dataUrl } = generateGlyphSVG(glyph, activeFont.font, '#1e293b');
+    onInsertVectorGlyph(dataUrl, glyph.name || 'Glifo Decorativo');
+    showToast('Enfeite adicionado à página!');
+    if (onClose) onClose();
+  };
+
+  // Add system font manually or by name
+  const handleSelectFontByName = (familyName: string) => {
+    const existingIdx = fonts.findIndex(f => f.family.toLowerCase() === familyName.toLowerCase());
+    if (existingIdx >= 0) {
+      setActiveFontIndex(existingIdx);
+      return;
+    }
+
+    const sysItem = createSystemFontItem(familyName);
+    setFonts(prev => [...prev, sysItem]);
+    setActiveFontIndex(fonts.length);
+    if (onRegisterFont) onRegisterFont(familyName);
   };
 
   return (
-    <div className={`flex flex-col h-full rounded-2xl overflow-hidden border transition-colors duration-300 ${
-      workspaceTheme === 'dark' 
-        ? 'bg-slate-950 border-slate-800 text-slate-100' 
-        : 'bg-slate-50 border-slate-200 text-slate-900'
-    }`}>
+    <div className="w-full h-full flex flex-col bg-slate-900 text-slate-100 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl select-none">
       
-      {/* Toast Notification */}
-      {notification && (
-        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
-          <div className={`px-4 py-2.5 rounded-xl shadow-xl border flex items-center gap-2.5 text-xs font-bold ${
-            notification.type === 'success' 
-              ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-500/20' 
-              : notification.type === 'error'
-              ? 'bg-red-600 text-white border-red-500 shadow-red-500/20'
-              : 'bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/20'
-          }`}>
-            <Sparkles className="w-4 h-4" />
-            <span>{notification.message}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Hidden File Input */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFontUpload} 
-        accept=".ttf,.otf,.woff" 
-        multiple 
-        className="hidden" 
-      />
-
-      {/* Upper Navigation & Action Toolbar */}
-      <div className={`flex flex-wrap items-center justify-between p-4 gap-4 border-b ${
-        workspaceTheme === 'dark' ? 'bg-slate-900/65 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
-      }`}>
+      {/* 1. TOP HEADER */}
+      <div className="px-5 py-3.5 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-md shadow-indigo-200 dark:shadow-none">
-            <Type className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md">
+            <Sparkles className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="text-base font-bold leading-tight flex items-center gap-2">
-              <span>Editor de Glifos OpenType</span>
-              <span className="bg-indigo-100 text-indigo-700 text-[10px] font-extrabold px-2 py-0.5 rounded-full dark:bg-indigo-900/40 dark:text-indigo-300">
-                PRO ENGINE
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-white tracking-tight">Catálogo de Glifos & Letras Especiais</h2>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Fácil & Rápido
               </span>
-            </h2>
-            <p className="text-[11px] opacity-60">Visualização de glifos, swashes florais, ligaduras e alternativas em tempo real.</p>
+            </div>
+            <p className="text-xs text-slate-400">
+              Escolha a fonte, clique nas letras decorativas e aplique diretamente no seu texto.
+            </p>
           </div>
         </div>
 
-        {/* Global Toolbar Options */}
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Panel Visibility Toggles */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg gap-1 border border-slate-200 dark:border-slate-700">
-            <button
-              onClick={() => setShowLeftSidebar(!showLeftSidebar)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md flex items-center gap-1 transition-all ${
-                showLeftSidebar
-                  ? 'bg-white dark:bg-slate-900 shadow-xs text-indigo-600 dark:text-indigo-400 font-bold'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-              title={showLeftSidebar ? "Ocultar Catálogo de Glifos" : "Mostrar Catálogo de Glifos"}
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Glifos (Esq.)</span>
-            </button>
-            <button
-              onClick={() => setShowRightSidebar(!showRightSidebar)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md flex items-center gap-1 transition-all ${
-                showRightSidebar
-                  ? 'bg-white dark:bg-slate-900 shadow-xs text-indigo-600 dark:text-indigo-400 font-bold'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-              title={showRightSidebar ? "Ocultar Painel de Recursos" : "Mostrar Painel de Recursos"}
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Recursos (Dir.)</span>
-            </button>
-            <button
-              onClick={() => setShowTutorial(!showTutorial)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md flex items-center gap-1 transition-all ${
-                showTutorial
-                  ? 'bg-white dark:bg-slate-900 shadow-xs text-indigo-600 dark:text-indigo-400 font-bold'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-              title={showTutorial ? "Ocultar Guia Rápido" : "Mostrar Guia Rápido"}
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Como Usar?</span>
-            </button>
-          </div>
-
-          {/* Theme switcher */}
+        <div className="flex items-center gap-2">
+          {/* Help Button */}
           <button
-            onClick={() => setWorkspaceTheme(workspaceTheme === 'light' ? 'dark' : 'light')}
-            className={`p-2 rounded-lg border transition-all ${
-              workspaceTheme === 'dark'
-                ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700'
-                : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-            }`}
-            title="Alternar modo claro/escuro"
+            onClick={() => setShowGuide(!showGuide)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition-all cursor-pointer"
+            title="Dicas de como usar"
           >
-            {workspaceTheme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+            <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden sm:inline">Como Usar?</span>
           </button>
 
-          {/* Close/Return */}
+          {/* Close & Return Button */}
           {onClose && (
             <button
               onClick={onClose}
-              className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all"
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 active:scale-95 rounded-lg shadow-sm transition-all cursor-pointer"
             >
-              <span>Voltar ao AgendaMaster</span>
-              <ChevronRight className="w-4 h-4" />
+              <ArrowLeft className="w-4 h-4" />
+              <span>Voltar ao Miolo</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Main Grid: Left Panel (Sidebar - Fonts & Glyphs) + Center (Canvas) + Right (Properties) */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      {/* HOW TO USE GUIDE ACCORDION */}
+      {showGuide && (
+        <div className="px-5 py-3 bg-indigo-950/40 border-b border-indigo-800/40 text-xs text-indigo-200 flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="space-y-0.5">
+              <p className="font-semibold text-white">Como aplicar letras especiais no seu miolo:</p>
+              <p className="text-[11px] text-indigo-200/80">
+                1. Selecione a fonte desejada no campo abaixo. &bull; 2. No campo de texto, selecione a letra que quer embelezar. &bull; 3. Clique no glifo/swash desejado e clique em <b>"Salvar no Texto Selecionado"</b>!
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setShowGuide(false)}
+            className="p-1 text-indigo-300 hover:text-white rounded-md hover:bg-indigo-900/50"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* 2. FONT SELECTION & LIVE TEXT BUILDER BANNER */}
+      <div className="p-4 md:p-5 bg-slate-900/90 border-b border-slate-800 space-y-3.5 shrink-0">
         
-        {/* LEFT SIDEBAR: Font Select & Glyph Directory */}
-        {showLeftSidebar && (
-        <div className={`w-full md:w-64 lg:w-72 flex flex-col border-r shrink-0 overflow-hidden absolute md:relative inset-y-0 left-0 z-30 shadow-2xl md:shadow-none ${
-          workspaceTheme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-        }`}>
-          {/* Active Font / Font Upload Area */}
-          <div className={`p-4 border-b ${workspaceTheme === 'dark' ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-500">
-                Fontes Disponíveis ({fonts.length})
-              </span>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1 hover:underline cursor-pointer"
+        {/* Row 1: Font Selector & Upload Actions */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <Type className="w-3.5 h-3.5 text-indigo-400" />
+              Fonte:
+            </label>
+            <div className="relative flex-1 max-w-md">
+              <select
+                value={activeFontIndex}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value);
+                  setActiveFontIndex(idx);
+                  setSelectedGlyph(null);
+                }}
+                className="w-full pl-3 pr-8 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none appearance-none cursor-pointer"
               >
-                <Upload className="w-3 h-3" />
-                <span>+ Enviar Fonte</span>
-              </button>
-            </div>
-            
-            {/* Horizontal Scroll list of available parsed fonts */}
-            <div className="space-y-1.5 max-h-36 overflow-y-auto mb-3 pr-1">
-              {fonts.map((f, i) => {
-                const isActive = activeFontIndex === i;
-                return (
-                  <div
-                    key={`${f.family}-${i}`}
-                    className={`w-full flex items-center justify-between p-2 rounded-lg border text-left text-xs font-medium transition-all ${
-                      isActive
-                        ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-500/50 text-indigo-600 dark:text-indigo-400 font-bold shadow-xs'
-                        : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    <button
-                      onClick={() => {
-                        setActiveFontIndex(i);
-                        setSelectedGlyphIndex(null);
-                      }}
-                      className="flex-1 text-left min-w-0 pr-2 cursor-pointer"
-                    >
-                      <p className="truncate">{f.name}</p>
-                      <span className="text-[9px] opacity-60 font-mono block">
-                        {f.source === 'uploaded' ? 'Fonte Enviada' : 'Padrão Profissional'} • {f.font.glyphs.length} glifos
-                      </span>
-                    </button>
-                    
-                    {f.source === 'uploaded' && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteFont(i);
-                        }}
-                        className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors"
-                        title="Remover fonte enviada"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+                <optgroup label="✨ Fontes Especiais com Swashes">
+                  {fonts.map((f, i) => (
+                    <option key={`font-${i}`} value={i}>
+                      {f.name} {f.source === 'uploaded' ? '(Enviada)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+                {systemFonts && systemFonts.length > 0 && (
+                  <optgroup label="💻 Fontes do Computador">
+                    {systemFonts.slice(0, 40).map(sysFont => (
+                      <option key={`sys-${sysFont}`} value={-1} onClick={() => handleSelectFontByName(sysFont)}>
+                        {sysFont}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
-            {/* Quick Upload Button */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-1 py-1.5 px-2.5 rounded-lg border border-dashed border-indigo-400/50 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Upload TTF/OTF</span>
-              </button>
-              
-              {'queryLocalFonts' in window && (
-                <button
-                  onClick={handleQueryLocalFonts}
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs transition-all"
-                  title="Buscar fontes instaladas no seu computador"
-                >
-                  <Monitor className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
+            {/* Hidden Font File Input */}
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFontUpload} 
+              accept=".ttf,.otf,.woff" 
+              className="hidden" 
+            />
 
-          {/* Glyph Search and Category Filter Toolbar */}
-          <div className="p-3 space-y-2 border-b dark:border-slate-800">
-            {/* Search Input */}
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Pesquisar glifo (ex: ampersand, A, u+0041)"
-                className={`w-full pl-8 pr-3 py-1.5 rounded-lg text-xs border transition-all ${
-                  workspaceTheme === 'dark'
-                    ? 'bg-slate-950 border-slate-700 text-slate-100 focus:border-indigo-500 focus:outline-none'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-500 focus:outline-none'
-                }`}
-              />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-            </div>
-
-            {/* Category Select Filter */}
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className={`w-full p-1.5 rounded-lg text-xs border transition-all cursor-pointer ${
-                workspaceTheme === 'dark'
-                  ? 'bg-slate-950 border-slate-700 text-slate-100 focus:border-indigo-500 focus:outline-none'
-                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-500 focus:outline-none'
-              }`}
+            {/* Upload TTF/OTF Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loadingFont}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-800/80 rounded-xl transition-all cursor-pointer shadow-xs disabled:opacity-50 shrink-0"
+              title="Subir arquivo de fonte (.ttf, .otf, .woff) do seu computador"
             >
-              {categories.map(cat => (
-                <option key={cat.name} value={cat.name}>{cat.label}</option>
-              ))}
-            </select>
-          </div>
+              <Upload className="w-3.5 h-3.5" />
+              <span>+ Subir Fonte</span>
+            </button>
 
-          {/* Glyph Grid Explorer */}
-          <div className="flex-1 overflow-y-auto p-3 min-h-0">
-            {loadingFont ? (
-              <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                <RefreshCw className="w-8 h-8 animate-spin text-indigo-500 mb-3" />
-                <p className="text-xs">Lendo arquivo e mapeando glifos...</p>
-              </div>
-            ) : fontError && fonts.length === 0 ? (
-              <div className="p-4 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 rounded-xl text-center text-xs border border-red-100 dark:border-red-900/50">
-                <p className="font-bold mb-1">Aviso de Fonte</p>
-                <p className="opacity-80">{fontError}</p>
-              </div>
-            ) : filteredGlyphs.length === 0 ? (
-              <div className="text-center py-12 text-slate-400">
-                <Info className="w-6 h-6 mx-auto mb-2 text-slate-350" />
-                <p className="text-xs">Nenhum glifo corresponde à pesquisa.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-4 gap-1.5">
-                {paginatedGlyphs.map((item) => {
-                  const isSelected = selectedGlyphIndex === item.index;
-                  return (
-                    <button
-                      key={item.index}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setSelectedGlyphIndex(item.index);
-                        insertGlyph(item.glyph);
-                      }}
-                      onDoubleClick={() => {
-                        handleGlyphDoubleClick(item.glyph);
-                      }}
-                      className={`group p-1.5 rounded-lg border flex flex-col items-center justify-center transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-indigo-500 border-indigo-500 text-white shadow-md'
-                          : workspaceTheme === 'dark'
-                            ? 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
-                            : 'bg-slate-50 border-slate-200 text-slate-800 hover:border-indigo-300 hover:bg-indigo-50/20'
-                      }`}
-                      title={`Clique para aplicar / Duplo clique para enviar ao layout\n${item.name} (${item.unicode ? `U+${item.unicode.toString(16).toUpperCase().padStart(4, '0')}` : 'Alternativa Vetorial'})`}
-                    >
-                      <GlyphThumbnail glyph={item.glyph} size={28} color={isSelected ? '#ffffff' : (workspaceTheme === 'dark' ? '#cbd5e1' : '#1e293b')} />
-                      <span className={`text-[8px] font-mono truncate w-full text-center mt-1 ${
-                        isSelected ? 'text-indigo-100' : 'text-slate-400'
-                      }`}>
-                        {item.unicode ? `U+${item.unicode.toString(16).toUpperCase().padStart(4, '0')}` : `#${item.index}`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Load PC Fonts Button */}
+            {onLoadLocalFonts && (
+              <button
+                type="button"
+                onClick={() => onLoadLocalFonts()}
+                disabled={localFontsLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-xl transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                title="Carregar fontes instaladas no seu computador"
+              >
+                {localFontsLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                ) : (
+                  <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+                )}
+                <span className="hidden lg:inline">Buscar Fontes do PC</span>
+              </button>
             )}
           </div>
 
-          {/* Grid Pagination Footer */}
-          {filteredGlyphs.length > glyphsPerPage && (
-            <div className={`p-3 border-t flex items-center justify-between text-[11px] ${
-              workspaceTheme === 'dark' ? 'border-slate-800' : 'border-slate-100'
-            }`}>
-              <button
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors"
-              >
-                Anterior
-              </button>
-              <span className="opacity-60 font-mono">
-                {currentPage} / {totalPages} ({filteredGlyphs.length} glifos)
+          {/* Quick info tag */}
+          {activeFont && (
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700/70 font-mono text-[11px] text-slate-300">
+                {glyphItems.length} glifos detectados
               </span>
-              <button
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors"
-              >
-                Próxima
-              </button>
+              {swashesCount > 0 && (
+                <span className="px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-800/60 text-purple-300 font-bold text-[11px] flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-purple-400" />
+                  {swashesCount} swashes decorativos
+                </span>
+              )}
             </div>
           )}
         </div>
-        )}
 
-        {/* CENTER STAGE: Typographic Worksheet & Real-time Visualizer */}
-        <div className="flex-1 flex flex-col min-w-0 bg-transparent overflow-hidden">
-          
-          {/* Typographic Controls Toolbar */}
-          <div className={`p-3 border-b flex flex-wrap items-center justify-between gap-3 ${
-            workspaceTheme === 'dark' ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-100/70 border-slate-200'
-          }`}>
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Font size control */}
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="font-bold text-slate-500 uppercase tracking-wider">Tamanho</span>
-                <input
-                  type="range"
-                  min="16"
-                  max="90"
-                  value={fontSize}
-                  onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
-                  className="w-20 accent-indigo-600 h-1 bg-slate-200 rounded-lg cursor-pointer"
-                />
-                <span className="font-mono font-bold text-slate-700 dark:text-slate-300 w-8">{fontSize}px</span>
-              </div>
-
-              {/* Line height */}
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="font-bold text-slate-500 uppercase tracking-wider">Altura</span>
-                <input
-                  type="range"
-                  min="1"
-                  max="2.5"
-                  step="0.1"
-                  value={lineHeight}
-                  onChange={(e) => setLineHeight(parseFloat(e.target.value))}
-                  className="w-16 accent-indigo-600 h-1 bg-slate-200 rounded-lg cursor-pointer"
-                />
-                <span className="font-mono font-bold text-slate-700 dark:text-slate-300 w-6">{lineHeight}</span>
-              </div>
-
-              {/* Letter spacing */}
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="font-bold text-slate-500 uppercase tracking-wider">Espaçamento</span>
-                <input
-                  type="range"
-                  min="-2"
-                  max="10"
-                  value={letterSpacing}
-                  onChange={(e) => setLetterSpacing(parseInt(e.target.value, 10))}
-                  className="w-16 accent-indigo-600 h-1 bg-slate-200 rounded-lg cursor-pointer"
-                />
-                <span className="font-mono font-bold text-slate-700 dark:text-slate-300 w-9">{letterSpacing}px</span>
-              </div>
+        {/* Row 2: Selected Text / Composer Bar (THE STAR FEATURE) */}
+        <div className={`p-3.5 rounded-xl border transition-all ${
+          selectedTextElement 
+            ? 'bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border-indigo-500/40 shadow-lg' 
+            : 'bg-slate-800/60 border-slate-700/70'
+        }`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                {selectedTextElement ? `Texto Selecionado no Miolo (${selectedTextElement.name || 'Texto'})` : 'Montar Texto com Glifos'}
+              </span>
+              {selectedTextElement && activeFont && (
+                <span className="text-[11px] text-slate-400 font-normal">
+                  (Fonte original: <b className="text-slate-200">{selectedTextElement.fontFamily}</b>)
+                </span>
+              )}
             </div>
 
-            {/* Quick action buttons */}
-            <div className="flex items-center gap-2">
-              {onInsertIntoLayout && (
+            {selectedTextElement && activeFont && (
+              <label className="flex items-center gap-2 text-xs text-indigo-300 cursor-pointer hover:text-white">
+                <input
+                  type="checkbox"
+                  checked={applyFontToSelected}
+                  onChange={(e) => setApplyFontToSelected(e.target.checked)}
+                  className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Mudar fonte do texto para <b>{activeFont.family}</b></span>
+              </label>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            {/* The Live Interactive Text Input */}
+            <div className="relative flex-1">
+              <input
+                ref={textInputRef}
+                type="text"
+                value={composerText}
+                onChange={(e) => setComposerText(e.target.value)}
+                placeholder="Clique nos glifos abaixo para inserir letras decorativas..."
+                style={{ fontFamily: activeFont ? activeFont.family : undefined }}
+                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-lg text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none shadow-inner"
+              />
+              <span className="absolute right-3 top-3 text-[10px] text-slate-500 pointer-events-none hidden md:inline">
+                {composerText.length} caracteres
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* PRIMARY: Apply to selected text in Dashboard */}
+              {selectedTextElement && (
                 <button
-                  onClick={() => {
-                    if (editorText.trim() && activeFont) {
-                      onInsertIntoLayout(editorText, activeFont.family);
-                      showNotification(`Texto estilizado enviado para a sua página!`);
-                    }
-                  }}
-                  disabled={!editorText.trim() || !activeFont}
-                  className="p-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-100 dark:shadow-none transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
-                  title="Inserir este texto com fonte estilizada diretamente no Layout da Agenda"
+                  type="button"
+                  onClick={handleApplyToSelected}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
+                    appliedNotification
+                      ? 'bg-emerald-600 text-white scale-105'
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white active:scale-95'
+                  }`}
+                  title="Aplica o texto modificado diretamente na caixa selecionada do miolo"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
-                  <span>Aplicar no Layout</span>
+                  {appliedNotification ? (
+                    <CheckCheck className="w-4 h-4 text-white" />
+                  ) : (
+                    <Wand2 className="w-4 h-4 text-white" />
+                  )}
+                  <span>{appliedNotification ? 'Aplicado no Miolo!' : 'Salvar no Texto Selecionado'}</span>
                 </button>
               )}
 
-              <button
-                onClick={() => {
-                  if (editorRef.current) {
-                    editorRef.current.innerText = "";
-                    setEditorText("");
-                  }
-                }}
-                className={`p-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  workspaceTheme === 'dark'
-                    ? 'border-slate-800 hover:bg-slate-900 text-slate-400 hover:text-red-400'
-                    : 'border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-red-500'
-                }`}
-                title="Limpar texto"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Limpar</span>
-              </button>
+              {/* Insert as New Text on Layout */}
+              {(!selectedTextElement || onInsertIntoLayout) && (
+                <button
+                  type="button"
+                  onClick={handleInsertAsNewText}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-md transition-all cursor-pointer active:scale-95"
+                  title="Insere este texto como um novo elemento na página"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Novo Texto na Página</span>
+                </button>
+              )}
 
+              {/* Copy Full Text */}
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(editorText);
-                  showNotification('Texto copiado!');
-                }}
-                className={`p-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  workspaceTheme === 'dark'
-                    ? 'border-slate-800 hover:bg-slate-900 text-slate-400 hover:text-emerald-400'
-                    : 'border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-emerald-600'
-                }`}
-                title="Copiar texto"
+                type="button"
+                onClick={handleCopyComposerText}
+                className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all cursor-pointer"
+                title="Copiar texto para área de transferência"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
+            <span className="text-amber-400 font-bold">💡 Dica:</span> 
+            Selecione uma letra no campo acima e clique em qualquer glifo abaixo para substituí-la pelo modelo decorativo!
+          </p>
+        </div>
+
+      </div>
+
+      {/* 3. FILTER BAR & GRID CONTROLS */}
+      <div className="px-5 py-2.5 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        
+        {/* Category Tabs */}
+        <div className="flex items-center gap-1 overflow-x-auto py-0.5 custom-scrollbar">
+          <button
+            onClick={() => setCategoryFilter('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+              categoryFilter === 'all'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            ✨ Todos ({glyphItems.length})
+          </button>
+          <button
+            onClick={() => setCategoryFilter('swashes')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
+              categoryFilter === 'swashes'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-purple-300 hover:text-white hover:bg-purple-950/40'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>Swashes & Decorativas ({swashesCount})</span>
+          </button>
+          <button
+            onClick={() => setCategoryFilter('letters')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+              categoryFilter === 'letters'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            🔤 Letras (A-Z)
+          </button>
+          <button
+            onClick={() => setCategoryFilter('numbers')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+              categoryFilter === 'numbers'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            🔢 Números (0-9)
+          </button>
+          <button
+            onClick={() => setCategoryFilter('symbols')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+              categoryFilter === 'symbols'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            ⭐ Símbolos & Enfeites
+          </button>
+        </div>
+
+        {/* Search & Size Switcher */}
+        <div className="flex items-center gap-3">
+          {/* Quick Search */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar letra..."
+              className="pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:ring-1 focus:ring-indigo-500 outline-none w-32 md:w-44"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-2 text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Grid Size Toggle */}
+          <div className="flex items-center bg-slate-900 p-1 rounded-lg border border-slate-700/80">
+            <button
+              onClick={() => setGridSize('sm')}
+              className={`px-2 py-1 text-[11px] font-bold rounded ${gridSize === 'sm' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              title="Miniaturas Pequenas"
+            >
+              P
+            </button>
+            <button
+              onClick={() => setGridSize('md')}
+              className={`px-2 py-1 text-[11px] font-bold rounded ${gridSize === 'md' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              title="Miniaturas Médias"
+            >
+              M
+            </button>
+            <button
+              onClick={() => setGridSize('lg')}
+              className={`px-2 py-1 text-[11px] font-bold rounded ${gridSize === 'lg' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              title="Miniaturas Grandes"
+            >
+              G
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* 4. GLYPHS TILES GRID */}
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar bg-slate-950/40">
+        {loadingFont ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+            <p className="text-sm font-medium">Carregando fontes e decodificando glifos...</p>
+          </div>
+        ) : filteredGlyphs.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 p-8 text-center">
+            <AlertCircle className="w-10 h-10 text-slate-600" />
+            <p className="text-sm font-semibold text-slate-300">Nenhum glifo encontrado para este filtro.</p>
+            <p className="text-xs text-slate-500">Tente buscar por outra letra ou selecionar "Todos".</p>
+          </div>
+        ) : (
+          <div className={`grid gap-2.5 ${
+            gridSize === 'sm'
+              ? 'grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14'
+              : gridSize === 'md'
+              ? 'grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12'
+              : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10'
+          }`}>
+            {filteredGlyphs.map((item) => {
+              const isSelected = selectedGlyph?.index === item.index;
+              const thumbnailSize = gridSize === 'sm' ? 36 : gridSize === 'md' ? 52 : 72;
+
+              return (
+                <div
+                  key={`glyph-${item.index}`}
+                  onClick={() => insertGlyphIntoComposer(item.glyph)}
+                  onDoubleClick={() => handleGlyphDoubleClick(item.glyph)}
+                  className={`group relative flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer border ${
+                    isSelected
+                      ? 'bg-indigo-600/30 border-indigo-400 shadow-md ring-2 ring-indigo-500/50 scale-105 z-10'
+                      : item.isSwash
+                      ? 'bg-purple-950/20 hover:bg-purple-900/30 border-purple-800/40 hover:border-purple-600'
+                      : 'bg-slate-900/80 hover:bg-slate-800/90 border-slate-800 hover:border-slate-700'
+                  }`}
+                  title={`${item.name} ${item.charStr ? `("${item.charStr}")` : ''} - Clique para inserir, duplo clique para aplicar`}
+                >
+                  {/* Swash badge */}
+                  {item.isSwash && (
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-purple-400 ring-2 ring-slate-900"></span>
+                  )}
+
+                  {/* Crisp Canvas Glyph Render */}
+                  <div className="flex items-center justify-center pointer-events-none py-1">
+                    <GlyphThumbnail 
+                      glyph={item.glyph} 
+                      size={thumbnailSize} 
+                      color={isSelected ? '#a5b4fc' : item.isSwash ? '#f472b6' : '#f8fafc'}
+                      fontFamily={activeFont?.family}
+                    />
+                  </div>
+
+                  {/* Subtle label */}
+                  <span className="text-[10px] font-mono text-slate-400 group-hover:text-slate-200 truncate max-w-full px-1">
+                    {item.charStr || item.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 5. BOTTOM ACTION BAR FOR SELECTED GLYPH */}
+      {selectedGlyph && activeFont && (
+        <div className="px-5 py-3 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center shadow-inner">
+              <GlyphThumbnail glyph={selectedGlyph} size={40} color="#38bdf8" fontFamily={activeFont.family} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-white">
+                  {getGlyphCharacter(selectedGlyph) ? `Glifo: "${getGlyphCharacter(selectedGlyph)}"` : (selectedGlyph.name || 'Glifo Decorativo')}
+                </span>
+                {isGlyphSwash(selectedGlyph) && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 border border-purple-700/50">
+                    Swash / Alternativo
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400">
+                Fonte ativa: <b className="text-slate-200">{activeFont.name}</b>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Insert into composer / selected text */}
+            <button
+              onClick={() => insertGlyphIntoComposer(selectedGlyph)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-sm transition-all cursor-pointer active:scale-95"
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              <span>Inserir no Texto</span>
+            </button>
+
+            {/* Copy Glyph Character */}
+            {getGlyphCharacter(selectedGlyph) && (
+              <button
+                onClick={() => handleCopyGlyph(selectedGlyph)}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all cursor-pointer"
+                title="Copiar caractere para colar em qualquer lugar"
               >
                 <Copy className="w-3.5 h-3.5" />
                 <span>Copiar</span>
               </button>
-            </div>
-          </div>
-
-          {/* Quick instructions / tutorial guide */}
-          {showTutorial && (
-            <div className={`mx-6 mt-6 p-4 rounded-xl border relative transition-all animate-in fade-in slide-in-from-top-4 duration-300 ${
-              workspaceTheme === 'dark' 
-                ? 'bg-slate-900/60 border-indigo-500/25 text-slate-200' 
-                : 'bg-indigo-50/40 border-indigo-100 text-slate-800'
-            }`}>
-              <button 
-                onClick={() => setShowTutorial(false)}
-                className="absolute top-3 right-3 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1 cursor-pointer"
-                title="Fechar guia"
-              >
-                <X className="w-4 h-4" />
-              </button>
-              
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-indigo-500 mt-0.5 shrink-0" />
-                <div className="flex-1">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mb-2">
-                    Guia: Como usar o Editor e aplicar glifos artísticos na Agenda
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-xs leading-relaxed">
-                    <div>
-                      <p className="font-extrabold text-indigo-600 dark:text-indigo-400 mb-0.5">1. Digite seu Texto</p>
-                      <p className="opacity-80">Escreva o título, frase ou nome na grande área de edição central.</p>
-                    </div>
-                    <div>
-                      <p className="font-extrabold text-indigo-600 dark:text-indigo-400 mb-0.5">2. Selecione uma Letra</p>
-                      <p className="opacity-80">Selecione uma única letra com o mouse para ver as alternativas flutuantes.</p>
-                    </div>
-                    <div>
-                      <p className="font-extrabold text-indigo-600 dark:text-indigo-400 mb-0.5">3. Catálogo de Glifos</p>
-                      <p className="opacity-80">Clique no catálogo para aplicar ao texto ou duplo clique para enviar diretamente ao layout!</p>
-                    </div>
-                    <div>
-                      <p className="font-extrabold text-indigo-600 dark:text-indigo-400 mb-0.5">4. Recursos OpenType</p>
-                      <p className="opacity-80">Ative swashes, ligaduras ou conjuntos estilísticos (ss01 a ss10) no painel direito.</p>
-                    </div>
-                    <div>
-                      <p className="font-extrabold text-indigo-600 dark:text-indigo-400 mb-0.5">5. Enviar ao Layout</p>
-                      <p className="opacity-80">Clique em "Aplicar no Layout" ou "Inserir Glifo HD" para colocar na página!</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TYPOGRAPHIC WORKSHEET AREA: Rich Editable area with font face active */}
-          <div 
-            className="flex-1 p-8 overflow-y-auto flex flex-col items-center justify-center relative select-text"
-          >
-            {/* The canvas/container wrapper */}
-            <div className="w-full max-w-3xl relative">
-              
-              {/* Floating Alternates Popover */}
-              {alternates.length > 0 && alternatesPosition && (
-                <div 
-                  className="absolute z-50 bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 shadow-2xl rounded-2xl p-2.5 flex items-center gap-2 animate-in fade-in duration-200 pointer-events-auto alternates-popover"
-                  style={{
-                    left: `${alternatesPosition.x}px`,
-                    top: `${alternatesPosition.y}px`,
-                    transform: 'translateX(-50%)'
-                  }}
-                >
-                  <div className="text-[10px] font-black uppercase tracking-wider text-indigo-500 border-r border-slate-200 dark:border-slate-800 pr-2 mr-1">
-                    Alternativas
-                  </div>
-                  <div className="flex items-center gap-1.5 overflow-x-auto max-w-sm">
-                    {alternates.map((alt) => (
-                      <button
-                        key={alt.index}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => insertGlyph(alt)}
-                        onDoubleClick={() => handleGlyphDoubleClick(alt)}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:border-indigo-500 dark:border-slate-800 dark:hover:border-indigo-500 bg-slate-50 dark:bg-slate-950 flex shrink-0 items-center justify-center transition-all hover:scale-110 cursor-pointer"
-                        title={`${alt.name || `glyph-${alt.index}`} (Duplo clique para enviar ao layout)`}
-                      >
-                        <GlyphThumbnail glyph={alt} size={24} color={workspaceTheme === 'dark' ? '#e2e8f0' : '#1e293b'} />
-                      </button>
-                    ))}
-                  </div>
-                  <div className="w-1.5 h-1.5 bg-white dark:bg-slate-900 border-b border-r border-slate-200 dark:border-slate-700 absolute -bottom-1 left-1/2 -translate-x-1/2 rotate-45" />
-                </div>
-              )}
-
-              {/* Interactive rich text editor using contenteditable */}
-              <div
-                ref={editorRef}
-                contentEditable
-                suppressContentEditableWarning
-                onInput={handleEditorInput}
-                onSelect={detectAlternatesForSelection}
-                onMouseUp={detectAlternatesForSelection}
-                onKeyUp={detectAlternatesForSelection}
-                className="w-full min-h-[300px] outline-none border-none bg-transparent whitespace-pre-wrap workspace-textarea break-words text-center selection:bg-indigo-500/30 font-sans"
-                style={{
-                  fontFamily: activeFont ? `"${activeFont.family}", sans-serif` : 'sans-serif',
-                  fontSize: `${fontSize}px`,
-                  lineHeight: lineHeight,
-                  letterSpacing: `${letterSpacing}px`,
-                  fontFeatureSettings: computedFontFeatures,
-                  color: workspaceTheme === 'dark' ? '#f3f4f6' : '#111827',
-                }}
-              >
-                Elegância & Arte com Tipografia OpenType.
-Selecione qualquer letra para ver glifos alternativos!
-              </div>
-            </div>
-
-            {/* Micro tooltip explaining alternates trigger */}
-            <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[10px] font-bold shadow-sm border ${
-              workspaceTheme === 'dark' 
-                ? 'bg-slate-900/90 border-slate-800 text-slate-400' 
-                : 'bg-white/90 border-slate-200 text-slate-500'
-            }`}>
-              <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-              <span>DICA: Selecione qualquer letra no texto acima para ver opções de swashes e florais alternativos!</span>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT PANEL: OpenType Properties and Details Viewer */}
-        {showRightSidebar && (
-        <div className={`w-full md:w-64 lg:w-72 flex flex-col border-l shrink-0 overflow-y-auto absolute md:relative inset-y-0 right-0 z-30 shadow-2xl md:shadow-none ${
-          workspaceTheme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-        }`}>
-          {/* Section: OpenType Features Switchboard */}
-          <div className="p-4 border-b dark:border-slate-800">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-indigo-500" />
-              <span>Recursos OpenType</span>
-            </h3>
-
-            <div className="space-y-2 text-xs">
-              {[
-                { key: 'swsh', label: 'Swashes / Florituras (swsh)', desc: 'Adiciona caudas decorativas e floreios artísticos nas pontas' },
-                { key: 'salt', label: 'Alternativas Estilísticas (salt)', desc: 'Substitui glifos padrão por variações estilizadas' },
-                { key: 'liga', label: 'Ligaduras Padrão (liga)', desc: 'Combina caracteres como fi, fl, ffi em glifos únicos' },
-                { key: 'dlig', label: 'Ligaduras Decorativas (dlig)', desc: 'Ligaduras caligráficas raras para elegância' },
-                { key: 'calt', label: 'Alternativas Contextuais (calt)', desc: 'Ajusta glifos dinamicamente baseando-se em letras vizinhas' },
-                { key: 'smcp', label: 'Small Caps / Versalete (smcp)', desc: 'Transforma letras minúsculas em maiúsculas reduzidas' },
-                { key: 'frac', label: 'Frações Automáticas (frac)', desc: 'Converte 1/2, 3/4 em frações profissionais' },
-                { key: 'onum', label: 'Números Antigos (onum)', desc: 'Números tradicionais com alturas dinâmicas' },
-                { key: 'tnum', label: 'Números Tabulares (tnum)', desc: 'Números com largura idêntica, ideal para tabelas' },
-              ].map(({ key, label, desc }) => {
-                const isActive = (features as any)[key];
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setFeatures(prev => ({ ...prev, [key]: !isActive }))}
-                    className={`w-full flex items-start gap-2.5 p-2 rounded-lg text-left transition-all border cursor-pointer ${
-                      isActive 
-                        ? 'bg-indigo-500/10 border-indigo-500/30' 
-                        : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <div className="mt-0.5 text-indigo-600 dark:text-indigo-400">
-                      {isActive ? <CheckSquare className="w-4 h-4 shrink-0" /> : <Square className="w-4 h-4 shrink-0 text-slate-300 dark:text-slate-700" />}
-                    </div>
-                    <div>
-                      <p className="font-bold text-[11px] leading-tight">{label}</p>
-                      <p className="text-[9px] opacity-60 leading-normal mt-0.5">{desc}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Stylistic Sets Switchbox (ss01 - ss10) */}
-          <div className="p-4 border-b dark:border-slate-800">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
-              <span>Conjuntos Estilísticos</span>
-            </h3>
-            
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {Object.keys(stylisticSets).map((set) => {
-                const isActive = stylisticSets[set];
-                return (
-                  <button
-                    key={set}
-                    onClick={() => setStylisticSets(prev => ({ ...prev, [set]: !isActive }))}
-                    className={`flex items-center gap-1.5 p-1.5 rounded-lg border text-xs font-semibold uppercase transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-600 dark:text-indigo-400'
-                        : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700 bg-slate-50 dark:bg-slate-950/40 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {isActive ? <CheckSquare className="w-3.5 h-3.5 shrink-0" /> : <Square className="w-3.5 h-3.5 shrink-0" />}
-                    <span className="font-mono">{set}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-[9px] opacity-50 mt-2">Ative variações estilísticas organizadas da fonte atual.</p>
-          </div>
-
-          {/* Selected Glyph Inspector Detail View */}
-          <div className="p-4 flex-1">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-              <Info className="w-4 h-4 text-indigo-500" />
-              <span>Metadados do Glifo</span>
-            </h3>
-
-            {selectedGlyphData ? (
-              <div className="space-y-4">
-                {/* Visualizer Frame */}
-                <div className={`aspect-square rounded-2xl border flex items-center justify-center p-6 relative group overflow-hidden ${
-                  workspaceTheme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-                }`}>
-                  <div className="scale-125 transition-transform duration-300 group-hover:scale-150">
-                    <GlyphThumbnail 
-                      glyph={selectedGlyphData.glyph} 
-                      size={96} 
-                      color={workspaceTheme === 'dark' ? '#f8fafc' : '#0f172a'} 
-                    />
-                  </div>
-                  <div className="absolute top-2 right-2 flex items-center gap-1 text-[8px] font-mono opacity-40">
-                    <span>Index: {selectedGlyphData.index}</span>
-                  </div>
-                </div>
-
-                {/* Metadata details list */}
-                <div className={`p-3 rounded-xl space-y-2 text-[11px] font-semibold border ${
-                  workspaceTheme === 'dark' ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-100'
-                }`}>
-                  <div className="flex justify-between border-b dark:border-slate-800 pb-1.5">
-                    <span className="text-slate-400">Nome:</span>
-                    <span className="font-mono text-indigo-500 truncate max-w-[140px]" title={selectedGlyphData.name}>
-                      {selectedGlyphData.name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-b dark:border-slate-800 pb-1.5">
-                    <span className="text-slate-400">Unicode:</span>
-                    <span className="font-mono text-slate-500">{selectedGlyphData.unicode}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Avanço:</span>
-                    <span className="font-mono text-slate-500">{selectedGlyphData.advanceWidth} UEm</span>
-                  </div>
-                </div>
-
-                {/* Action buttons */}
-                <div className="space-y-2">
-                  {onInsertVectorGlyph && (
-                    <button
-                      onClick={() => {
-                        onInsertVectorGlyph(selectedGlyphData.dataUrl, selectedGlyphData.name);
-                        showNotification(`Glifo vetorial inserido no layout da página!`);
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-200 dark:shadow-none transition-all cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4 text-indigo-200" />
-                      <span>Inserir Glifo no Layout (Vetor HD)</span>
-                    </button>
-                  )}
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => insertGlyph(selectedGlyphData.glyph)}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                    >
-                      <span>No Texto</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={handleCopySVG}
-                      className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all cursor-pointer"
-                      title="Copiar código SVG"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      onClick={handleDownloadGlyphSVG}
-                      className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all cursor-pointer"
-                      title="Baixar Glifo como arquivo SVG"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className={`p-6 text-center border border-dashed rounded-2xl flex flex-col items-center justify-center text-slate-400 ${
-                workspaceTheme === 'dark' ? 'border-slate-800' : 'border-slate-250'
-              }`}>
-                <Info className="w-6 h-6 mb-2 text-slate-350" />
-                <p className="text-xs">Selecione qualquer glifo no catálogo para ver metadados ou enviar como vetor para a página.</p>
-              </div>
             )}
+
+            {/* If Vector/Non-Unicode */}
+            {onInsertVectorGlyph && (
+              <button
+                onClick={() => handleInsertAsVector(selectedGlyph)}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-purple-200 hover:text-white bg-purple-950/60 hover:bg-purple-900/80 border border-purple-800/80 rounded-xl transition-all cursor-pointer"
+                title="Insere este desenho vetorial independente no miolo"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                <span>Inserir como Desenho (Vetor)</span>
+              </button>
+            )}
+
+            {/* Dismiss Bar */}
+            <button
+              onClick={() => setSelectedGlyph(null)}
+              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+              title="Fechar detalhes"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
-        )}
+      )}
 
-      </div>
-
-      {/* Modal: System Local Fonts Explorer */}
-      {showSystemFontsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className={`w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl shadow-2xl border ${
-            workspaceTheme === 'dark' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'
-          }`}>
-            <div className="p-4 border-b dark:border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Monitor className="w-5 h-5 text-indigo-500" />
-                <div>
-                  <h3 className="font-bold text-sm">Fontes Instaladas no Computador</h3>
-                  <p className="text-[10px] opacity-60">Selecione uma fonte do PC para inspecionar seus glifos OpenType</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowSystemFontsModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-3 border-b dark:border-slate-800">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Pesquisar fonte no seu computador..."
-                  value={systemFontSearch}
-                  onChange={(e) => setSystemFontSearch(e.target.value)}
-                  className={`w-full pl-9 pr-3 py-1.5 rounded-lg text-xs outline-none border ${
-                    workspaceTheme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div className="p-3 overflow-y-auto flex-1 space-y-1 max-h-[50vh]">
-              {systemFontsList
-                .filter(f => {
-                  const search = systemFontSearch.toLowerCase();
-                  return (f.family && f.family.toLowerCase().includes(search)) ||
-                         (f.fullName && f.fullName.toLowerCase().includes(search));
-                })
-                .slice(0, 100)
-                .map((f, idx) => (
-                  <button
-                    key={`${f.family}-${f.fullName}-${idx}`}
-                    onClick={() => handleSelectSystemFont(f)}
-                    className={`w-full text-left p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
-                      workspaceTheme === 'dark' 
-                        ? 'border-slate-800 hover:border-indigo-500 hover:bg-slate-800/80 text-slate-200' 
-                        : 'border-slate-100 hover:border-indigo-500 hover:bg-indigo-50/50 text-slate-700'
-                    }`}
-                  >
-                    <div>
-                      <p className="font-bold">{f.fullName || f.family}</p>
-                      <span className="text-[10px] opacity-60 font-mono">Família: {f.family} • Estilo: {f.style || 'Regular'}</span>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-400" />
-                  </button>
-                ))}
-            </div>
-
-            <div className="p-3 border-t dark:border-slate-800 text-center">
-              <p className="text-[10px] opacity-50">Clique em qualquer fonte para carregar todos os glifos no editor OpenType.</p>
-            </div>
-          </div>
+      {/* FLOATING TOAST NOTIFICATION */}
+      {copiedNotification && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 bg-slate-900 text-white border border-indigo-500/50 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <Sparkles className="w-4 h-4 text-amber-400" />
+          <span>{copiedNotification}</span>
         </div>
       )}
 

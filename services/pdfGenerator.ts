@@ -146,10 +146,10 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
         if (style.textTransform === 'uppercase') text = text.toUpperCase();
         if (style.textTransform === 'lowercase') text = text.toLowerCase();
 
-        // Specific rendering for holiday_list with columns
-        if (el.type === 'holiday_list' && style.columnCount && style.columnCount > 1) {
+        // Specific rendering for holiday_list or text with multiple columns
+        if ((el.type === 'holiday_list' || el.type === 'text') && style.columnCount && style.columnCount > 1) {
             const cols = style.columnCount;
-            const colGap = 5; // mm
+            const colGap = typeof style.columnGap === 'number' ? Math.max(2, style.columnGap * 0.264583) : 5; // mm
             const colWidth = (absW - ((cols - 1) * colGap)) / cols;
             const rawLines = text.split('\n');
             const linesPerCol = Math.ceil(rawLines.length / cols);
@@ -455,10 +455,14 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
             return config.elementsVerso;
         }
         if (config.mirrorEvenPages && isEven) {
+            if (config.mirrorContentOnVerso === false) return elements;
             return elements.map(el => {
                 const newX = 100 - el.x - el.w;
                 let newTextAlign = el.style.textAlign;
-                if (newTextAlign === 'left') newTextAlign = 'right'; else if (newTextAlign === 'right') newTextAlign = 'left';
+                const isCalendarType = el.type === 'mini_calendar' || el.type === 'full_calendar';
+                if (!isCalendarType) {
+                    if (newTextAlign === 'left') newTextAlign = 'right'; else if (newTextAlign === 'right') newTextAlign = 'left';
+                }
                 
                 let newFlipX = el.style.flipX;
                 if (el.style.autoMirrorImage && (el.type === 'image' || el.type === 'icon')) {

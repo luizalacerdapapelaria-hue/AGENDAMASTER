@@ -408,11 +408,18 @@ const App: React.FC = () => {
   return (
     <>
       {appState === AppState.WELCOME && (
-        <Welcome onChooseBrowser={() => navigateToState(AppState.LOGIN)} exeUrl={exeUrl} />
+        <Welcome 
+          onChooseBrowser={() => navigateToState(AppState.LOGIN)} 
+          exeUrl={exeUrl} 
+          onNavigateToLanding={() => navigateToState(AppState.LANDING)}
+        />
       )}
 
       {appState === AppState.LOGIN && (
-        <Login onLogin={handleLogin} />
+        <Login 
+          onLogin={handleLogin} 
+          onNavigateToLanding={() => navigateToState(AppState.LANDING)}
+        />
       )}
 
       {appState === AppState.INITIAL_SETUP && currentUser && (

@@ -1,28 +1,60 @@
 /* Fallback vazio para index.css para evitar erros 404 e permitir o registro correto do Service Worker do PWA */
 
-#editor-scroll-container::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+/* Scrollbar moderna em tons de laranja e preto */
+#editor-scroll-container::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
   display: block !important;
 }
 
-#editor-scroll-container::-webkit-scrollbar-track {
-  background: #f1f5f9 !important;
-  border-radius: 6px;
+#editor-scroll-container::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #18181b !important;
+  border-radius: 9999px;
 }
 
-#editor-scroll-container::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1 !important;
-  border-radius: 6px;
-  border: 3px solid #f1f5f9 !important;
+#editor-scroll-container::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #ea580c !important;
+  border-radius: 9999px;
+  border: 2px solid #18181b !important;
 }
 
-#editor-scroll-container::-webkit-scrollbar-thumb:hover {
-  background-color: #94a3b8 !important;
+#editor-scroll-container::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #f97316 !important;
 }
 
 /* Para navegadores Firefox */
 #editor-scroll-container {
   scrollbar-width: auto;
-  scrollbar-color: #cbd5e1 #f1f5f9;
+  scrollbar-color: #ea580c #18181b;
+}
+
+/* Otimizações críticas de alta fluidez (60-120 FPS) para o editor */
+body.dragging-active {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+body.dragging-active .layout-element-wrapper {
+  transition: none !important;
+  animation: none !important;
+}
+
+body.dragging-active .layout-element-wrapper:not(.is-dragging-target) {
+  pointer-events: none !important;
+}
+
+.layout-element-wrapper.is-dragging-target {
+  will-change: left, top, width, height;
+  z-index: 9999 !important;
+}
+
+/* Otimização Estúdio Mockup 3D: remoção de indicadores de página e margens pretas no canvas */
+.mockup-page-wrapper .no-print,
+.mockup-page-wrapper [class*="-top-7"],
+.mockup-page-wrapper [class*="bottom-3"] {
+  display: none !important;
 }

@@ -81,7 +81,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
 
             for (let i = 0; i <= rows; i++) {
                 const y = i * actualSpacing;
-                lines.push(<line key={i} x1="0" y1={y} x2="100%" y2={y} stroke={plannerDayBox.hideLines ? 'transparent' : strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} style={{ vectorEffect: 'non-scaling-stroke' }} />);
+                lines.push(<line key={i} x1="0" y1={y} x2="100%" y2={y} stroke={plannerDayBox.hideLines ? 'transparent' : strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
             }
             return <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{lines}</svg>;
         }
@@ -120,12 +120,12 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
             // Vertical lines
             for (let i = 0; i <= cols; i++) {
                 const x = i * actualSpacingX;
-                lines.push(<line key={`v-${i}`} x1={x} y1="0" x2={x} y2="100%" stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} style={{ vectorEffect: 'non-scaling-stroke' }} />);
+                lines.push(<line key={`v-${i}`} x1={x} y1="0" x2={x} y2="100%" stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
             }
             // Horizontal lines
             for (let i = 0; i <= rows; i++) {
                 const y = i * actualSpacingY;
-                lines.push(<line key={`h-${i}`} x1="0" y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} style={{ vectorEffect: 'non-scaling-stroke' }} />);
+                lines.push(<line key={`h-${i}`} x1="0" y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
             }
             return <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{lines}</svg>;
         }
@@ -134,6 +134,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
             const startH = plannerDayBox.startHour !== undefined ? plannerDayBox.startHour : 7;
             const endH = plannerDayBox.endHour !== undefined ? plannerDayBox.endHour : 18;
             const intervalM = plannerDayBox.timeInterval || 60;
+            const skipLine = plannerDayBox.skipBlankLine || false;
 
             const startMin = startH * 60;
             const endMin = endH * 60;
@@ -143,6 +144,9 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                 const hourPart = Math.floor(min / 60) % 24;
                 const minPart = min % 60;
                 timesList.push(`${String(hourPart).padStart(2, '0')}:${String(minPart).padStart(2, '0')}`);
+                if (skipLine && min < endMin) {
+                    timesList.push('');
+                }
             }
 
             const heightPercent = plannerDayBox.timetableHeightPercent !== undefined ? plannerDayBox.timetableHeightPercent : 100;
@@ -182,10 +186,11 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                                     fontWeight: plannerDayBox.fontWeight || 'normal',
                                     color: plannerDayBox.color || '#6b7280',
                                     lineHeight: 1,
-                                    marginBottom: '2px'
+                                    marginBottom: '2px',
+                                    visibility: timesList[i] ? 'visible' : 'hidden'
                                 }}
                             >
-                                {timesList[i]}
+                                {timesList[i] || '\u00A0'}
                             </span>
                             <div 
                                 className="flex-1 h-0 border-b" 

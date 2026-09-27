@@ -24,14 +24,43 @@ export const INTRO_TEMPLATES: IntroPage[] = [
         id: 'tpl-calendario-anual',
         name: 'Calendário Anual',
         elements: [
-            { id: 't2', type: 'text', content: 'CALENDÁRIO 2026', x: 10, y: 5, w: 80, h: 8, zIndex: 1, style: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', fontFamily: 'Inter', color: '#000', textTransform: 'none', letterSpacing: 0 } },
-            { id: 'c1', type: 'full_calendar', x: 5, y: 15, w: 90, h: 80, zIndex: 1, style: { 
+            { id: 't2', type: 'text', name: 'Título Calendário', content: 'CALENDÁRIO 2026', x: 10, y: 4, w: 80, h: 6, zIndex: 2, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Inter', color: '#111827', textTransform: 'uppercase', letterSpacing: 0, lineHeight: 1.2 } },
+            { id: 'c1', type: 'full_calendar', name: 'Calendário Anual', x: 5, y: 12, w: 90, h: 76, zIndex: 1, style: { 
+                monthsPerRow: 3,
+                gap: 8,
                 fullCalendar: {
-                    title: { fontSize: 8, fontWeight: 'bold', textAlign: 'center', color: '#333', fontFamily: 'Inter', textTransform: 'none', letterSpacing: 0 },
+                    title: { fontSize: 8, fontWeight: 'bold', textAlign: 'center', color: '#333', fontFamily: 'Inter', textTransform: 'uppercase', letterSpacing: 0 },
                     weekDays: { fontSize: 6, fontWeight: 'bold', textAlign: 'center', color: '#666', fontFamily: 'Inter', textTransform: 'none', letterSpacing: 0 },
                     days: { fontSize: 7, fontWeight: 'normal', textAlign: 'center', color: '#333', fontFamily: 'Inter', textTransform: 'none', letterSpacing: 0 },
                     grid: { borderColor: '#eee', borderWidth: 0.5, cellBackgroundColor: 'transparent', headerBackgroundColor: 'transparent', borders: { top: false, bottom: false, left: false, right: false, insideHorizontal: false, insideVertical: false, headerSeparator: true }, borderStyle: 'solid' }
                 }
+            } }
+        ]
+    },
+    {
+        id: 'tpl-calendario-anual-feriados',
+        name: 'Calendário Anual + Feriados',
+        elements: [
+            { id: 't2-f', type: 'text', name: 'Título Calendário', content: 'CALENDÁRIO 2026', x: 10, y: 3.5, w: 80, h: 5.5, zIndex: 2, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Inter', color: '#111827', textTransform: 'uppercase', letterSpacing: 0, lineHeight: 1.2 } },
+            { id: 'c1-f', type: 'full_calendar', name: 'Calendário Anual', x: 5, y: 11, w: 90, h: 58, zIndex: 1, style: { 
+                monthsPerRow: 3,
+                gap: 8,
+                fullCalendar: {
+                    title: { fontSize: 7.5, fontWeight: 'bold', textAlign: 'center', color: '#333', fontFamily: 'Inter', textTransform: 'uppercase', letterSpacing: 0 },
+                    weekDays: { fontSize: 5.5, fontWeight: 'bold', textAlign: 'center', color: '#666', fontFamily: 'Inter', textTransform: 'none', letterSpacing: 0 },
+                    days: { fontSize: 6.5, fontWeight: 'normal', textAlign: 'center', color: '#333', fontFamily: 'Inter', textTransform: 'none', letterSpacing: 0 },
+                    grid: { borderColor: '#eee', borderWidth: 0.5, cellBackgroundColor: 'transparent', headerBackgroundColor: 'transparent', borders: { top: false, bottom: false, left: false, right: false, insideHorizontal: false, insideVertical: false, headerSeparator: true }, borderStyle: 'solid' }
+                }
+            } },
+            { id: 'h1-f', type: 'holiday_list', name: 'Lista de Feriados', content: '01 de Janeiro - Confraternização Universal\n17 de Fevereiro - Carnaval\n03 de Abril - Paixão de Cristo\n05 de Abril - Páscoa\n21 de Abril - Tiradentes\n01 de Maio - Dia do Trabalho\n04 de Junho - Corpus Christi\n07 de Setembro - Independência do Brasil\n12 de Outubro - Nossa Senhora Aparecida\n02 de Novembro - Finados\n15 de Novembro - Proclamação da República\n20 de Novembro - Dia Nacional de Zumbi e da Consciência Negra\n25 de Dezembro - Natal', x: 5, y: 72, w: 90, h: 24, zIndex: 1, style: {
+                fontSize: 7.5,
+                fontWeight: 'normal',
+                fontFamily: 'Inter',
+                color: '#374151',
+                textAlign: 'left',
+                lineHeight: 1.4,
+                columnCount: 2,
+                columnGap: 24
             } }
         ]
     },
