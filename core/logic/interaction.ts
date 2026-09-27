@@ -168,7 +168,8 @@ export const calculateResize = (
     containerHeight: number,
     direction: string,
     rotation: number = 0,
-    lockHeight: boolean = false
+    lockHeight: boolean = false,
+    lockAspectRatio: boolean = false
 ) => {
     // 1. Convert initial percentage coordinates to pixels
     const initialX_px = (initialX / 100) * containerWidth;
@@ -194,38 +195,81 @@ export const calculateResize = (
     const minW_px = 2; // minimum 2 pixels
     const minH_px = 2; // minimum 2 pixels
 
-    let effectiveDirection = direction;
-    if (lockHeight) {
-        if (direction === 'w' || direction.includes('w') || direction.includes('n')) {
-            effectiveDirection = 'w';
-        } else if (direction === 'e' || direction.includes('e') || direction.includes('s')) {
-            effectiveDirection = 'e';
-        }
-    }
+    const isCorner = ['se', 'sw', 'ne', 'nw'].includes(direction);
 
-    // Horizontal in local coordinates
-    if (effectiveDirection.includes('e')) {
-        newW_px = Math.max(minW_px, initialW_px + dX_local_px);
-        const deltaW_px = newW_px - initialW_px;
-        deltaC_local_x_px += deltaW_px / 2;
-    }
-    if (effectiveDirection.includes('w')) {
-        newW_px = Math.max(minW_px, initialW_px - dX_local_px);
-        const deltaW_px = newW_px - initialW_px;
-        deltaC_local_x_px -= deltaW_px / 2;
-    }
-
-    // Vertical in local coordinates (disabled if lockHeight is true)
-    if (!lockHeight) {
-        if (effectiveDirection.includes('s')) {
-            newH_px = Math.max(minH_px, initialH_px + dY_local_px);
-            const deltaH_px = newH_px - initialH_px;
-            deltaC_local_y_px += deltaH_px / 2;
+    if (lockAspectRatio && isCorner) {
+        let scale = 1;
+        if (direction === 'se') {
+            const scaleX = (initialW_px + dX_local_px) / (initialW_px || 1);
+            const scaleY = (initialH_px + dY_local_px) / (initialH_px || 1);
+            scale = Math.abs(dX_local_px / (initialW_px || 1)) >= Math.abs(dY_local_px / (initialH_px || 1)) ? scaleX : scaleY;
+            scale = Math.max(0.02, scale);
+            newW_px = Math.max(minW_px, initialW_px * scale);
+            newH_px = Math.max(minH_px, initialH_px * scale);
+            deltaC_local_x_px = (newW_px - initialW_px) / 2;
+            deltaC_local_y_px = (newH_px - initialH_px) / 2;
+        } else if (direction === 'sw') {
+            const scaleX = (initialW_px - dX_local_px) / (initialW_px || 1);
+            const scaleY = (initialH_px + dY_local_px) / (initialH_px || 1);
+            scale = Math.abs(dX_local_px / (initialW_px || 1)) >= Math.abs(dY_local_px / (initialH_px || 1)) ? scaleX : scaleY;
+            scale = Math.max(0.02, scale);
+            newW_px = Math.max(minW_px, initialW_px * scale);
+            newH_px = Math.max(minH_px, initialH_px * scale);
+            deltaC_local_x_px = -(newW_px - initialW_px) / 2;
+            deltaC_local_y_px = (newH_px - initialH_px) / 2;
+        } else if (direction === 'ne') {
+            const scaleX = (initialW_px + dX_local_px) / (initialW_px || 1);
+            const scaleY = (initialH_px - dY_local_px) / (initialH_px || 1);
+            scale = Math.abs(dX_local_px / (initialW_px || 1)) >= Math.abs(dY_local_px / (initialH_px || 1)) ? scaleX : scaleY;
+            scale = Math.max(0.02, scale);
+            newW_px = Math.max(minW_px, initialW_px * scale);
+            newH_px = Math.max(minH_px, initialH_px * scale);
+            deltaC_local_x_px = (newW_px - initialW_px) / 2;
+            deltaC_local_y_px = -(newH_px - initialH_px) / 2;
+        } else if (direction === 'nw') {
+            const scaleX = (initialW_px - dX_local_px) / (initialW_px || 1);
+            const scaleY = (initialH_px - dY_local_px) / (initialH_px || 1);
+            scale = Math.abs(dX_local_px / (initialW_px || 1)) >= Math.abs(dY_local_px / (initialH_px || 1)) ? scaleX : scaleY;
+            scale = Math.max(0.02, scale);
+            newW_px = Math.max(minW_px, initialW_px * scale);
+            newH_px = Math.max(minH_px, initialH_px * scale);
+            deltaC_local_x_px = -(newW_px - initialW_px) / 2;
+            deltaC_local_y_px = -(newH_px - initialH_px) / 2;
         }
-        if (effectiveDirection.includes('n')) {
-            newH_px = Math.max(minH_px, initialH_px - dY_local_px);
-            const deltaH_px = newH_px - initialH_px;
-            deltaC_local_y_px -= deltaH_px / 2;
+    } else {
+        let effectiveDirection = direction;
+        if (lockHeight) {
+            if (direction === 'w' || direction.includes('w') || direction.includes('n')) {
+                effectiveDirection = 'w';
+            } else if (direction === 'e' || direction.includes('e') || direction.includes('s')) {
+                effectiveDirection = 'e';
+            }
+        }
+
+        // Horizontal in local coordinates
+        if (effectiveDirection.includes('e')) {
+            newW_px = Math.max(minW_px, initialW_px + dX_local_px);
+            const deltaW_px = newW_px - initialW_px;
+            deltaC_local_x_px += deltaW_px / 2;
+        }
+        if (effectiveDirection.includes('w')) {
+            newW_px = Math.max(minW_px, initialW_px - dX_local_px);
+            const deltaW_px = newW_px - initialW_px;
+            deltaC_local_x_px -= deltaW_px / 2;
+        }
+
+        // Vertical in local coordinates (disabled if lockHeight is true)
+        if (!lockHeight) {
+            if (effectiveDirection.includes('s')) {
+                newH_px = Math.max(minH_px, initialH_px + dY_local_px);
+                const deltaH_px = newH_px - initialH_px;
+                deltaC_local_y_px += deltaH_px / 2;
+            }
+            if (effectiveDirection.includes('n')) {
+                newH_px = Math.max(minH_px, initialH_px - dY_local_px);
+                const deltaH_px = newH_px - initialH_px;
+                deltaC_local_y_px -= deltaH_px / 2;
+            }
         }
     }
 

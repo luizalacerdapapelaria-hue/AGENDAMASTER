@@ -59,17 +59,19 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   // Page selection
   const [mockupMode, setMockupMode] = useState<MockupMode>('spread');
   const [leftPageNum, setLeftPageNum] = useState<number>(() => {
-    // If current editor page is even, put it on the left; if odd > 1, put page - 1 on left
-    if (currentPageInEditor % 2 === 0) return currentPageInEditor;
-    if (currentPageInEditor > 1) return currentPageInEditor - 1;
-    return 2; // Default left page
+    const total = Math.max(1, actualTotalPagesCount || 1);
+    if (currentPageInEditor <= 1) return 0; // 0 = Contracapa / Guarda (Page 1 is on the right)
+    const clamped = Math.min(total, currentPageInEditor);
+    return clamped % 2 === 0 ? clamped : clamped - 1;
   });
   const [rightPageNum, setRightPageNum] = useState<number>(() => {
-    if (currentPageInEditor % 2 !== 0) return currentPageInEditor;
-    return Math.min(actualTotalPagesCount || 10, currentPageInEditor + 1);
+    const total = Math.max(1, actualTotalPagesCount || 1);
+    if (currentPageInEditor <= 1) return 1; // Page 1 is always on the right (Frente / Ímpar)
+    const clamped = Math.min(total, currentPageInEditor);
+    if (clamped % 2 !== 0) return clamped;
+    return clamped + 1 <= total ? clamped + 1 : 0;
   });
   const [singlePageNum, setSinglePageNum] = useState<number>(() => Math.max(1, currentPageInEditor));
-  const [syncContinuousPages, setSyncContinuousPages] = useState<boolean>(true);
 
   // --- INTERACTIVE PAGE TURNING / FLIP MOTION STATE ---
   const [flipState, setFlipState] = useState<FlipState | null>(null);
@@ -99,8 +101,6 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   const [activeSettingsTab, setActiveSettingsTab] = useState<'pages' | '3d' | 'wireo' | 'environment' | 'props'>('pages');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [pageSelectorOpen, setPageSelectorOpen] = useState<boolean>(false);
-  const [targetSelectingSide, setTargetSelectingSide] = useState<'left' | 'right' | 'single'>('left');
 
   // --- MP4 VIDEO EXPORT STATE (FOR WHATSAPP) ---
   const [videoModalOpen, setVideoModalOpen] = useState<boolean>(false);
@@ -274,9 +274,17 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
   // Detect currently viewed month for visual active state
   const currentActiveMonth = useMemo(() => {
-    const currentPage = mockupMode === 'spread' ? leftPageNum : singlePageNum;
+    const currentPage =
+      mockupMode === 'spread'
+        ? rightPageNum > 0
+          ? rightPageNum
+          : leftPageNum
+        : singlePageNum;
     if (sectionPageMap.pageToMonthMap.has(currentPage)) {
       return sectionPageMap.pageToMonthMap.get(currentPage);
+    }
+    if (mockupMode === 'spread' && leftPageNum > 0 && sectionPageMap.pageToMonthMap.has(leftPageNum)) {
+      return sectionPageMap.pageToMonthMap.get(leftPageNum);
     }
     for (let i = sectionPageMap.months.length - 1; i >= 0; i--) {
       if (currentPage >= sectionPageMap.months[i].pageNum) {
@@ -284,7 +292,29 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       }
     }
     return undefined;
-  }, [mockupMode, leftPageNum, singlePageNum, sectionPageMap]);
+  }, [mockupMode, leftPageNum, rightPageNum, singlePageNum, sectionPageMap]);
+
+  // Compute physical book spread (Left = Even / Verso or 0 Contracapa, Right = Odd / Frente)
+  const getSpreadForPage = useCallback(
+    (targetPage: number, maxPages: number = totalPages): { left: number; right: number } => {
+      const safeTotal = Math.max(1, maxPages);
+      if (targetPage <= 1) {
+        return { left: 0, right: 1 };
+      }
+      const clamped = Math.min(safeTotal, targetPage);
+      if (clamped % 2 === 0) {
+        return {
+          left: clamped,
+          right: clamped + 1 <= safeTotal ? clamped + 1 : 0
+        };
+      }
+      return {
+        left: clamped - 1,
+        right: clamped
+      };
+    },
+    [totalPages]
+  );
 
   // Jump to specific section page cleanly
   const jumpToPage = useCallback((targetPage: number, label?: string) => {
@@ -296,13 +326,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     if (mockupMode === 'single') {
       setSinglePageNum(safePage);
     } else {
-      if (safePage >= totalPages) {
-        setLeftPageNum(Math.max(1, totalPages - 1));
-        setRightPageNum(totalPages);
-      } else {
-        setLeftPageNum(safePage);
-        setRightPageNum(safePage + 1);
-      }
+      const spread = getSpreadForPage(safePage, totalPages);
+      setLeftPageNum(spread.left);
+      setRightPageNum(spread.right);
     }
 
     if (label) {
@@ -310,12 +336,12 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     } else {
       showToast(`Página ${safePage} carregada!`);
     }
-  }, [mockupMode, totalPages]);
+  }, [mockupMode, totalPages, getSpreadForPage]);
 
   // Ensure valid page bounds
   useEffect(() => {
-    if (leftPageNum > totalPages) setLeftPageNum(Math.max(1, totalPages - 1));
-    if (rightPageNum > totalPages) setRightPageNum(totalPages);
+    if (leftPageNum > totalPages) setLeftPageNum(totalPages % 2 === 0 ? totalPages : Math.max(0, totalPages - 1));
+    if (rightPageNum > totalPages) setRightPageNum(totalPages % 2 !== 0 ? totalPages : 0);
     if (singlePageNum > totalPages) setSinglePageNum(totalPages);
   }, [totalPages, leftPageNum, rightPageNum, singlePageNum]);
 
@@ -323,9 +349,25 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   const flipDuration = flipSpeed === 'fast' ? 520 : flipSpeed === 'smooth' ? 950 : 720;
   const autoPlayInterval = flipSpeed === 'fast' ? 1400 : flipSpeed === 'smooth' ? 2600 : 2000;
 
+  // Clean endpaper / contracapa node when pageNum === 0 (facing Page 1 or after an even final page)
+  const renderEndpaperNode = useCallback(() => (
+    <div
+      className="w-full h-full bg-[#fafaf9] relative overflow-hidden flex items-center justify-center select-none"
+      style={{ width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm` }}
+    >
+      <div
+        className="pointer-events-none border border-stone-200/70 rounded-sm"
+        style={{
+          width: 'calc(100% - 24mm)',
+          height: 'calc(100% - 24mm)'
+        }}
+      />
+    </div>
+  ), [PAGE_WIDTH_MM, PAGE_HEIGHT_MM]);
+
   // Render & cache node helper
   const getPageNode = useCallback((pageNum: number) => {
-    if (pageNum < 1 || pageNum > totalPages) return null;
+    if (pageNum <= 0 || pageNum > totalPages) return renderEndpaperNode();
     if (nodeCacheRef.current.has(pageNum)) {
       return nodeCacheRef.current.get(pageNum);
     }
@@ -340,7 +382,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       console.warn('Erro ao renderizar página no mockup:', pageNum, e);
       return null;
     }
-  }, [renderPrintLayout, totalPages]);
+  }, [renderPrintLayout, totalPages, renderEndpaperNode]);
 
   // Invalidate node cache when config changes
   useEffect(() => {
@@ -392,18 +434,18 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     if (flipState) return;
 
     if (mockupMode === 'spread') {
-      if (rightPageNum >= totalPages) {
+      if (rightPageNum <= 0 || rightPageNum >= totalPages) {
         setIsAutoPlaying(false);
         showToast('Você chegou ao final da agenda!');
         return;
       }
 
       const targetLeft = rightPageNum + 1;
-      const targetRight = Math.min(totalPages, rightPageNum + 2);
+      const targetRight = rightPageNum + 2 <= totalPages ? rightPageNum + 2 : 0;
       const leafFrontPage = rightPageNum;
-      const leafBackPage = Math.min(totalPages, rightPageNum + 1);
+      const leafBackPage = targetLeft;
       const underLeftPage = leftPageNum;
-      const underRightPage = Math.min(totalPages, rightPageNum + 2);
+      const underRightPage = targetRight;
 
       const nextState: FlipState = {
         direction: 'next',
@@ -458,15 +500,15 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     if (flipState) return;
 
     if (mockupMode === 'spread') {
-      if (leftPageNum <= 1) {
+      if (leftPageNum <= 0) {
         showToast('Você já está no início da agenda!');
         return;
       }
 
-      const targetLeft = Math.max(1, leftPageNum - 2);
-      const targetRight = leftPageNum - 1;
+      const targetLeft = leftPageNum - 2 >= 2 ? leftPageNum - 2 : 0;
+      const targetRight = Math.max(1, leftPageNum - 1);
       const leafBackPage = leftPageNum;
-      const leafFrontPage = Math.max(1, leftPageNum - 1);
+      const leafFrontPage = targetRight;
       const underLeftPage = targetLeft;
       const underRightPage = rightPageNum;
 
@@ -518,30 +560,13 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     }
   }, [flipState, mockupMode, leftPageNum, rightPageNum, singlePageNum, flipDuration, playPageFlipSound]);
 
-  // Handle continuous spread changes
-  const handleSetLeftPage = (num: number) => {
-    const validNum = Math.max(1, Math.min(totalPages, num));
-    setLeftPageNum(validNum);
-    if (syncContinuousPages) {
-      setRightPageNum(Math.min(totalPages, validNum + 1));
-    }
-  };
-
-  const handleNextSpread = () => {
-    triggerFlipNext();
-  };
-
-  const handlePrevSpread = () => {
-    triggerFlipPrev();
-  };
-
   // Auto-play page flipping continuous showcase
   useEffect(() => {
     if (!isAutoPlaying) return;
 
     const timer = setInterval(() => {
       if (mockupMode === 'spread') {
-        if (rightPageNum >= totalPages) {
+        if (rightPageNum <= 0 || rightPageNum >= totalPages) {
           setIsAutoPlaying(false);
           showToast('Folheamento completo! Fim da agenda.');
           return;
@@ -585,13 +610,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     if (mockupMode === 'single') {
       setSinglePageNum(currentPageInEditor);
     } else {
-      if (currentPageInEditor % 2 === 0) {
-        setLeftPageNum(currentPageInEditor);
-        setRightPageNum(Math.min(totalPages, currentPageInEditor + 1));
-      } else {
-        setLeftPageNum(Math.max(1, currentPageInEditor - 1));
-        setRightPageNum(currentPageInEditor);
-      }
+      const spread = getSpreadForPage(currentPageInEditor, totalPages);
+      setLeftPageNum(spread.left);
+      setRightPageNum(spread.right);
     }
     showToast(`Página ${currentPageInEditor} carregada no mockup!`);
   };
@@ -619,6 +640,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
   // Render nodes for selected pages (without page numbers for a clean mockup)
   const leftPageNode = useMemo(() => {
+    if (leftPageNum <= 0 || leftPageNum > totalPages) {
+      return renderEndpaperNode();
+    }
     try {
       const nodes = renderPrintLayout(leftPageNum, leftPageNum, undefined, false, true);
       return nodes && nodes.length > 0 ? nodes[0] : null;
@@ -626,9 +650,12 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       console.warn('Erro ao renderizar página esquerda do mockup:', e);
       return null;
     }
-  }, [renderPrintLayout, leftPageNum]);
+  }, [renderPrintLayout, leftPageNum, totalPages, renderEndpaperNode]);
 
   const rightPageNode = useMemo(() => {
+    if (rightPageNum <= 0 || rightPageNum > totalPages) {
+      return renderEndpaperNode();
+    }
     try {
       const nodes = renderPrintLayout(rightPageNum, rightPageNum, undefined, false, true);
       return nodes && nodes.length > 0 ? nodes[0] : null;
@@ -636,7 +663,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       console.warn('Erro ao renderizar página direita do mockup:', e);
       return null;
     }
-  }, [renderPrintLayout, rightPageNum]);
+  }, [renderPrintLayout, rightPageNum, totalPages, renderEndpaperNode]);
 
   const singlePageNode = useMemo(() => {
     try {
@@ -982,25 +1009,31 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     const seenKeys = new Set<string>();
 
     const addStep = (rawPage: number, customLabel?: string) => {
-      const safeLeft = Math.max(1, Math.min(totalPages, rawPage));
-      const safeRight = Math.min(totalPages, safeLeft + 1);
-      const key = mockupMode === 'spread' ? `${safeLeft}-${safeRight}` : `${safeLeft}`;
+      const safeSingle = Math.max(1, Math.min(totalPages, rawPage));
+      const spread = getSpreadForPage(safeSingle, totalPages);
+      const safeLeft = spread.left;
+      const safeRight = spread.right;
+      const labelPage = safeRight > 0 ? safeRight : safeLeft > 0 ? safeLeft : safeSingle;
+      const key = mockupMode === 'spread' ? `${safeLeft}-${safeRight}` : `${safeSingle}`;
       if (seenKeys.has(key)) return;
       seenKeys.add(key);
       steps.push({
         leftPage: safeLeft,
         rightPage: safeRight,
-        singlePage: safeLeft,
-        label: customLabel || getPageLabel(safeLeft)
+        singlePage: safeSingle,
+        label: customLabel || getPageLabel(labelPage)
       });
     };
 
     if (videoPagePreset === 'smart_showcase') {
-      // 1. Cover / Intro pages
+      // 1. Cover / Intro pages (Page 1 on right, then Page 2 & 3 if multiple intro pages)
       addStep(1, 'Páginas Iniciais');
       const introCount = config.introPages?.length || 0;
-      if (introCount > 2) {
-        addStep(3, 'Calendário & Dados');
+      if (introCount >= 2) {
+        addStep(2, 'Calendário & Dados');
+      }
+      if (introCount >= 4) {
+        addStep(4, 'Páginas Iniciais');
       }
       // 2. First Daily Page
       if (sectionPageMap.firstDaily > 1) {
@@ -1029,7 +1062,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
         }
       }
     } else if (videoPagePreset === 'from_current') {
-      const startPage = mockupMode === 'spread' ? leftPageNum : singlePageNum;
+      const startPage = mockupMode === 'spread' ? (rightPageNum > 0 ? rightPageNum : leftPageNum) : singlePageNum;
       const stepIncrement = mockupMode === 'spread' ? 2 : 1;
       const maxSteps = Math.max(2, Math.min(18, videoFromCurrentCount));
       for (let i = 0; i < maxSteps; i++) {
@@ -1040,8 +1073,8 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     } else if (videoPagePreset === 'all_months') {
       addStep(1, 'Páginas Iniciais');
       const introCount = config.introPages?.length || 0;
-      if (introCount > 2) {
-        addStep(3, 'Calendário Anual');
+      if (introCount >= 2) {
+        addStep(2, 'Calendário Anual');
       }
       sectionPageMap.months.forEach((m) => {
         addStep(m.pageNum, m.name);
@@ -1059,8 +1092,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
     // Ensure at least 2 steps so there is at least 1 page flip animation
     if (steps.length === 1 && totalPages > 1) {
-      const nextP = Math.min(totalPages, steps[0].leftPage + (mockupMode === 'spread' ? 2 : 1));
-      if (nextP !== steps[0].leftPage) {
+      const currentAnchor = mockupMode === 'spread' ? (steps[0].rightPage || steps[0].leftPage) : steps[0].singlePage;
+      const nextP = Math.min(totalPages, currentAnchor + (mockupMode === 'spread' ? 2 : 1));
+      if (nextP !== currentAnchor) {
         addStep(nextP);
       }
     }
@@ -1073,11 +1107,13 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     config.introPages,
     sectionPageMap,
     leftPageNum,
+    rightPageNum,
     singlePageNum,
     videoFromCurrentCount,
     videoRangeStart,
     videoRangeEnd,
-    getPageLabel
+    getPageLabel,
+    getSpreadForPage
   ]);
 
   const previewStepsCount = useMemo(() => buildVideoSteps().length, [buildVideoSteps]);
@@ -1111,10 +1147,10 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       const uniquePageNums = new Set<number>();
       steps.forEach((s) => {
         if (mockupMode === 'spread') {
-          uniquePageNums.add(s.leftPage);
-          uniquePageNums.add(s.rightPage);
+          if (s.leftPage > 0 && s.leftPage <= totalPages) uniquePageNums.add(s.leftPage);
+          if (s.rightPage > 0 && s.rightPage <= totalPages) uniquePageNums.add(s.rightPage);
         } else {
-          uniquePageNums.add(s.singlePage);
+          if (s.singlePage > 0 && s.singlePage <= totalPages) uniquePageNums.add(s.singlePage);
         }
       });
 
@@ -1415,7 +1451,12 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                 </label>
                 <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
                   <button
-                    onClick={() => setMockupMode('spread')}
+                    onClick={() => {
+                      const spread = getSpreadForPage(singlePageNum, totalPages);
+                      setLeftPageNum(spread.left);
+                      setRightPageNum(spread.right);
+                      setMockupMode('spread');
+                    }}
                     className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       mockupMode === 'spread' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                     }`}
@@ -1424,7 +1465,10 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                     <span>Agenda Aberta</span>
                   </button>
                   <button
-                    onClick={() => setMockupMode('single')}
+                    onClick={() => {
+                      setSinglePageNum(rightPageNum > 0 ? rightPageNum : Math.max(1, leftPageNum));
+                      setMockupMode('single');
+                    }}
                     className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       mockupMode === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                     }`}
@@ -1446,7 +1490,12 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                         <span className="text-xs font-black text-white uppercase tracking-wider">Folhear Agenda 3D</span>
                       </div>
                       <span className="text-[11px] font-bold text-amber-300 font-mono bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-full">
-                        {leftPageNum} & {rightPageNum} / {totalPages}
+                        {leftPageNum === 0
+                          ? `Início (Pág. ${rightPageNum})`
+                          : rightPageNum === 0
+                          ? `Pág. ${leftPageNum} (Fim)`
+                          : `${leftPageNum} & ${rightPageNum}`}{' '}
+                        / {totalPages}
                       </span>
                     </div>
 
@@ -1454,7 +1503,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={triggerFlipPrev}
-                        disabled={leftPageNum <= 1 || !!flipState}
+                        disabled={leftPageNum <= 0 || !!flipState}
                         className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-all border border-slate-700 disabled:opacity-30 cursor-pointer active:scale-95"
                       >
                         <ChevronLeft className="w-4 h-4 text-amber-400" />
@@ -1463,7 +1512,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
                       <button
                         onClick={triggerFlipNext}
-                        disabled={rightPageNum >= totalPages || !!flipState}
+                        disabled={rightPageNum <= 0 || rightPageNum >= totalPages || !!flipState}
                         className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-all border border-slate-700 disabled:opacity-30 cursor-pointer active:scale-95"
                       >
                         <span>Folhear Próxima</span>
@@ -1488,18 +1537,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       ) : (
                         <>
                           <Play className="w-4 h-4 fill-current" />
-                          <span>Iniciar Folheamento Automático (Showcase)</span>
+                          <span>Iniciar Folheamento Automático</span>
                         </>
                       )}
-                    </button>
-
-                    {/* Export MP4 Video for WhatsApp */}
-                    <button
-                      onClick={() => setVideoModalOpen(true)}
-                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/25 transition-all cursor-pointer active:scale-95"
-                    >
-                      <Video className="w-4 h-4" />
-                      <span>Baixar Vídeo MP4 (Enviar no WhatsApp)</span>
                     </button>
 
                     {/* Speed & Sound Controls */}
@@ -1535,80 +1575,6 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
                     <div className="text-[10px] text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800/80 leading-relaxed">
                       💡 <strong>Dica Interativa:</strong> Você pode folhear clicando diretamente nas páginas, usando os botões flutuantes na tela ou pelas setas (← / →) do teclado!
-                    </div>
-
-                    <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={syncContinuousPages}
-                        onChange={(e) => setSyncContinuousPages(e.target.checked)}
-                        className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span>Manter páginas contínuas (lado a lado)</span>
-                    </label>
-                  </div>
-
-                  {/* Individual Left Page Selector */}
-                  <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-                        Página Esquerda (Verso):
-                      </label>
-                      <span className="text-[11px] font-mono text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-800/60">
-                        Pág. {leftPageNum}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min="1"
-                        max={totalPages}
-                        value={leftPageNum}
-                        onChange={(e) => handleSetLeftPage(parseInt(e.target.value))}
-                        className="flex-1 accent-indigo-500 cursor-pointer"
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        max={totalPages}
-                        value={leftPageNum}
-                        onChange={(e) => handleSetLeftPage(parseInt(e.target.value) || 1)}
-                        className="w-14 px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-center text-white"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Individual Right Page Selector */}
-                  <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-                        Página Direita (Frente):
-                      </label>
-                      <span className="text-[11px] font-mono text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60">
-                        Pág. {rightPageNum}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min="1"
-                        max={totalPages}
-                        value={rightPageNum}
-                        onChange={(e) => setRightPageNum(Math.max(1, Math.min(totalPages, parseInt(e.target.value))))}
-                        className="flex-1 accent-purple-500 cursor-pointer"
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        max={totalPages}
-                        value={rightPageNum}
-                        onChange={(e) => setRightPageNum(Math.max(1, Math.min(totalPages, parseInt(e.target.value) || 1)))}
-                        className="w-14 px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-center text-white"
-                      />
                     </div>
                   </div>
                 </div>
@@ -1657,23 +1623,14 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                     {isAutoPlaying ? (
                       <>
                         <Pause className="w-4 h-4" />
-                        <span>Pausar Folheamento</span>
+                        <span>Pausar Folheamento Automático</span>
                       </>
                     ) : (
                       <>
                         <Play className="w-4 h-4 fill-current" />
-                        <span>Folhear Automaticamente</span>
+                        <span>Iniciar Folheamento Automático</span>
                       </>
                     )}
-                  </button>
-
-                  {/* Export MP4 Video for WhatsApp */}
-                  <button
-                    onClick={() => setVideoModalOpen(true)}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/25 transition-all cursor-pointer active:scale-95"
-                  >
-                    <Video className="w-4 h-4" />
-                    <span>Baixar Vídeo MP4 (WhatsApp)</span>
                   </button>
 
                   <div className="flex items-center gap-2 pt-1">
@@ -1714,7 +1671,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                   <button
                     onClick={() => jumpToPage(sectionPageMap.cover, 'Capa / Iniciais')}
                     className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      (mockupMode === 'spread' ? leftPageNum === 1 : singlePageNum === 1)
+                      (mockupMode === 'spread' ? (rightPageNum === 1 || leftPageNum === 1) : singlePageNum === 1)
                         ? 'bg-indigo-600/30 border-indigo-400 text-white ring-1 ring-indigo-400/40 shadow-sm'
                         : 'bg-slate-950/70 hover:bg-slate-800/90 border-slate-800 text-slate-300 hover:text-white'
                     }`}
@@ -1731,7 +1688,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                   <button
                     onClick={() => jumpToPage(sectionPageMap.firstDaily, 'Início do Miolo')}
                     className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      (mockupMode === 'spread' ? leftPageNum === sectionPageMap.firstDaily : singlePageNum === sectionPageMap.firstDaily)
+                      (mockupMode === 'spread' ? (rightPageNum === sectionPageMap.firstDaily || leftPageNum === sectionPageMap.firstDaily) : singlePageNum === sectionPageMap.firstDaily)
                         ? 'bg-indigo-600/30 border-indigo-400 text-white ring-1 ring-indigo-400/40 shadow-sm'
                         : 'bg-slate-950/70 hover:bg-slate-800/90 border-slate-800 text-slate-300 hover:text-white'
                     }`}
@@ -2297,7 +2254,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* Floating Previous Page Quick Button beside Left Page */}
                       <button
                         onClick={(e) => { e.stopPropagation(); triggerFlipPrev(); }}
-                        disabled={leftPageNum <= 1 || !!flipState}
+                        disabled={leftPageNum <= 0 || !!flipState}
                         className="no-print absolute -left-12 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
                         title="Folhear para a página anterior (Seta ←)"
                       >
@@ -2306,9 +2263,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
                       {/* --- LEFT PAGE (PÁGINA ESQUERDA) --- */}
                       <div 
-                        onClick={() => { if (!flipState && leftPageNum > 1) triggerFlipPrev(); }}
+                        onClick={() => { if (!flipState && leftPageNum > 0) triggerFlipPrev(); }}
                         className={`relative bg-white rounded-l-xl overflow-hidden box-border group/leftpage ${
-                          !flipState && leftPageNum > 1 ? 'cursor-pointer' : ''
+                          !flipState && leftPageNum > 0 ? 'cursor-pointer' : ''
                         }`}
                         style={{
                           width: `${DISPLAY_PAGE_W}px`,
@@ -2384,9 +2341,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
                       {/* --- RIGHT PAGE (PÁGINA DIREITA) --- */}
                       <div 
-                        onClick={() => { if (!flipState && rightPageNum < totalPages) triggerFlipNext(); }}
+                        onClick={() => { if (!flipState && rightPageNum > 0 && rightPageNum < totalPages) triggerFlipNext(); }}
                         className={`relative bg-white rounded-r-xl overflow-hidden box-border group/rightpage ${
-                          !flipState && rightPageNum < totalPages ? 'cursor-pointer' : ''
+                          !flipState && rightPageNum > 0 && rightPageNum < totalPages ? 'cursor-pointer' : ''
                         }`}
                         style={{
                           width: `${DISPLAY_PAGE_W}px`,
@@ -2474,7 +2431,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* Floating Next Page Quick Button beside Right Page */}
                       <button
                         onClick={(e) => { e.stopPropagation(); triggerFlipNext(); }}
-                        disabled={rightPageNum >= totalPages || !!flipState}
+                        disabled={rightPageNum <= 0 || rightPageNum >= totalPages || !!flipState}
                         className="no-print absolute -right-12 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
                         title="Folhear para a próxima página (Seta →)"
                       >
@@ -3239,116 +3196,6 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
               </div>
 
             </div>
-          </div>
-
-          {/* VIEWPORT FLOATING PAGE FLIP & AUTO-PLAY CONTROL BAR */}
-          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-700/80 shadow-2xl">
-            {/* Previous Page Button */}
-            <button
-              onClick={triggerFlipPrev}
-              disabled={mockupMode === 'spread' ? leftPageNum <= 1 || !!flipState : singlePageNum <= 1 || !!flipState}
-              className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800 disabled:opacity-30 cursor-pointer transition-all active:scale-90"
-              title="Folhear página anterior (Seta ←)"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            {/* Auto-Play Flip Showcase Toggle */}
-            <button
-              onClick={() => setIsAutoPlaying(prev => !prev)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95 ${
-                isAutoPlaying
-                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 animate-pulse shadow-amber-500/30'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
-              }`}
-              title={isAutoPlaying ? "Pausar folheamento automático (Espaço)" : "Iniciar folheamento contínuo das páginas (Espaço)"}
-            >
-              {isAutoPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-              <span>{isAutoPlaying ? 'Pausar' : 'Folhear Agenda'}</span>
-            </button>
-
-            {/* Next Page Button */}
-            <button
-              onClick={triggerFlipNext}
-              disabled={mockupMode === 'spread' ? rightPageNum >= totalPages || !!flipState : singlePageNum >= totalPages || !!flipState}
-              className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800 disabled:opacity-30 cursor-pointer transition-all active:scale-90"
-              title="Folhear próxima página (Seta →)"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-
-            <div className="h-4 w-px bg-slate-700 mx-0.5" />
-
-            {/* Page Counter Indicator */}
-            <span className="text-xs font-bold font-mono text-amber-300 px-1">
-              {mockupMode === 'spread' ? `${leftPageNum}-${rightPageNum} / ${totalPages}` : `${singlePageNum} / ${totalPages}`}
-            </span>
-
-            {/* Quick Section / Month Select Dropdown */}
-            <select
-              value=""
-              onChange={(e) => {
-                const val = parseInt(e.target.value);
-                if (!isNaN(val)) {
-                  const foundMonth = sectionPageMap.months.find(m => m.pageNum === val);
-                  jumpToPage(val, foundMonth ? foundMonth.name : val === 1 ? 'Capa / Iniciais' : val === sectionPageMap.firstDaily ? 'Início do Miolo' : undefined);
-                }
-              }}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold py-1 px-2 rounded-lg border border-slate-700 focus:border-indigo-500 outline-none cursor-pointer transition-colors max-w-[130px] sm:max-w-none truncate"
-              title="Pular diretamente para um mês ou seção da agenda"
-            >
-              <option value="" disabled>Pular para mês...</option>
-              <option value={sectionPageMap.cover}>📖 Capa & Iniciais (pág. 1)</option>
-              <option value={sectionPageMap.firstDaily}>📅 Início do Miolo (pág. {sectionPageMap.firstDaily})</option>
-              {sectionPageMap.months.map((m) => (
-                <option key={`vp-m-${m.index}`} value={m.pageNum}>
-                  {m.name} (pág. {m.pageNum})
-                </option>
-              ))}
-            </select>
-
-            <div className="h-4 w-px bg-slate-700 mx-0.5" />
-
-            {/* Speed Selector */}
-            <div className="hidden sm:flex items-center gap-1">
-              {(['fast', 'normal', 'smooth'] as const).map((spd) => (
-                <button
-                  key={`vp-spd-${spd}`}
-                  onClick={() => setFlipSpeed(spd)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-colors ${
-                    flipSpeed === spd
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
-                  }`}
-                  title={`Velocidade de folheamento: ${spd === 'fast' ? 'Rápida' : spd === 'normal' ? 'Normal' : 'Suave'}`}
-                >
-                  {spd === 'fast' ? '0.5s' : spd === 'normal' ? '0.7s' : '1.0s'}
-                </button>
-              ))}
-            </div>
-
-            <div className="h-4 w-px bg-slate-700 mx-0.5 hidden sm:block" />
-
-            {/* Sound Toggle */}
-            <button
-              onClick={() => setSoundEnabled(prev => !prev)}
-              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${soundEnabled ? 'text-amber-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-800'}`}
-              title={soundEnabled ? "Som de folheamento ativado" : "Som de folheamento desativado"}
-            >
-              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            </button>
-
-            <div className="h-4 w-px bg-slate-700 mx-0.5" />
-
-            {/* Quick Open MP4 Video Modal */}
-            <button
-              onClick={() => setVideoModalOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25 transition-all cursor-pointer active:scale-95"
-              title="Gerar e baixar vídeo MP4 passando as páginas para WhatsApp"
-            >
-              <Video className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Vídeo MP4</span>
-            </button>
           </div>
 
           {/* OFFSCREEN STAGING CONTAINER FOR HIGH-SPEED VIDEO PAGE TEXTURE CAPTURE */}

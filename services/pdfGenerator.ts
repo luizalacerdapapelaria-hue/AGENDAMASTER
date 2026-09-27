@@ -325,22 +325,36 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
                         textVal = textVal.charAt(0).toUpperCase() + textVal.slice(1).toLowerCase();
                     }
 
-                    const cellPaddingMm = (typeof tStyle.cellPadding === 'number' ? tStyle.cellPadding : 4) * 0.264583;
-                    const availW = Math.max(1, cellW - (cellPaddingMm * 2));
+                    const rawFontSize = tStyle.fontSize || 10;
+                    const rawLineHeight = tStyle.lineHeight || 1.2;
+                    const rawPadPx = typeof tStyle.cellPadding === 'number' ? tStyle.cellPadding : 4;
+                    const rawPadMm = rawPadPx * 0.264583;
+                    const neededRowMm = (rawFontSize * 0.352 * rawLineHeight) + (rawPadMm * 2);
+                    const isCompactRow = rowH < neededRowMm + 0.5;
+
+                    const maxFontPt = Math.max(4.5, ((rowH - 0.3) / 0.352) * 0.82);
+                    const cellFontSize = isCompactRow ? Math.min(rawFontSize, maxFontPt) : rawFontSize;
+                    const effectiveLineHeight = isCompactRow ? (rowH < rawFontSize * 0.352 * 1.25 ? 1.0 : Math.min(rawLineHeight, 1.1)) : rawLineHeight;
+                    const lineHeightMm = (cellFontSize * 0.352) * effectiveLineHeight;
+
+                    const availVertMm = Math.max(0, rowH - lineHeightMm - 0.2);
+                    const cellPaddingVertMm = isCompactRow ? Math.min(rawPadMm, availVertMm / 2) : rawPadMm;
+                    const cellPaddingHorizMm = (isCompactRow && rowH < 4) ? Math.min(rawPadMm, 0.6) : rawPadMm;
+                    const availW = Math.max(1, cellW - (cellPaddingHorizMm * 2));
                     
                     const cellFont = getFont(tStyle.fontFamily, tStyle.fontWeight);
                     const fontStyleStr = tStyle.fontStyle === 'italic' ? (cellFont.style === 'bold' ? 'bolditalic' : 'italic') : cellFont.style;
                     doc.setFont(cellFont.font, fontStyleStr);
-                    const cellFontSize = tStyle.fontSize || 10;
                     doc.setFontSize(cellFontSize);
                     
                     const textRgb = hexToRgb(tStyle.color || '#000000') || { r: 0, g: 0, b: 0 };
                     doc.setTextColor(textRgb.r, textRgb.g, textRgb.b);
 
                     const textWrap = tStyle.textWrap || 'wrap';
+                    const isSingleLineCompact = isCompactRow && rowH < lineHeightMm * 1.9 && !textVal.includes('\n');
                     let lines: string[] = [];
 
-                    if (textWrap === 'nowrap' || textWrap === 'clip') {
+                    if (textWrap === 'nowrap' || textWrap === 'clip' || isSingleLineCompact) {
                         const firstLine = textVal.split('\n')[0] || '';
                         lines = [firstLine];
                     } else if (textWrap === 'ellipsis') {
@@ -355,24 +369,24 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
                         lines = doc.splitTextToSize(textVal, availW);
                     }
 
-                    const lineHeightMm = (cellFontSize * 0.352) * (tStyle.lineHeight || 1.2);
                     const totalTextH = lines.length * lineHeightMm;
+                    const effectiveVa = (isCompactRow && (!tStyle.verticalAlign || tStyle.verticalAlign === 'top')) ? 'middle' : tStyle.verticalAlign;
                     
-                    let textY = curY + cellPaddingMm + (cellFontSize * 0.352 * 0.8);
-                    if (tStyle.verticalAlign === 'middle' || (tStyle.verticalAlign as any) === 'center') {
-                        textY = curY + (rowH / 2) - (totalTextH / 2) + (cellFontSize * 0.352 * 0.8);
-                    } else if (tStyle.verticalAlign === 'bottom') {
-                        textY = curY + rowH - cellPaddingMm - totalTextH + (cellFontSize * 0.352 * 0.8);
+                    let textY = curY + cellPaddingVertMm + (cellFontSize * 0.352 * 0.8);
+                    if (effectiveVa === 'middle' || (effectiveVa as any) === 'center') {
+                        textY = curY + (rowH / 2) - (totalTextH / 2) + (cellFontSize * 0.352 * 0.78);
+                    } else if (effectiveVa === 'bottom') {
+                        textY = curY + rowH - cellPaddingVertMm - totalTextH + (cellFontSize * 0.352 * 0.8);
                     }
 
                     let textAlign: 'left' | 'center' | 'right' = 'left';
-                    let textX = curX + cellPaddingMm;
+                    let textX = curX + cellPaddingHorizMm;
                     if (tStyle.textAlign === 'center') {
                         textAlign = 'center';
                         textX = curX + (cellW / 2);
                     } else if (tStyle.textAlign === 'right') {
                         textAlign = 'right';
-                        textX = curX + cellW - cellPaddingMm;
+                        textX = curX + cellW - cellPaddingHorizMm;
                     }
 
                     lines.forEach((line: string, lIdx: number) => {

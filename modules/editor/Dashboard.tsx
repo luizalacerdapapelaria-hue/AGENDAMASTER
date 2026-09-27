@@ -21,7 +21,9 @@ import { detectInstalledFonts, getCachedInstalledFonts } from '../../core/logic/
 import { PdfImportModal } from './components/PdfImportModal';
 import { VectorShapeGalleryModal } from './components/VectorShapeGalleryModal';
 import { FooterTrackerGalleryModal, FOOTER_TRACKER_PRESETS, FooterTrackerPreset } from './components/FooterTrackerGalleryModal';
-import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition } from './components/elements/vectorShapesData';
+import { StylesManagerPanel, ElementQuickStylesBar, StyleTabType } from './components/StylesManagerPanel';
+import { getProjectStyles, applyColorStyleToElement } from '../../core/logic/styleSystem';
+import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBounds } from './components/elements/vectorShapesData';
 import { FooterTrackerConfig, FooterTrackerType, FooterTrackerSection } from '../../types';
 import * as icons from 'lucide-react';
 
@@ -346,7 +348,7 @@ const setVisualBounds = (el: any, updates: { x?: number; y?: number; w?: number;
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 import { useGesture } from '@use-gesture/react';
 
 const RULER_SIZE = 24;
@@ -887,6 +889,7 @@ const PageBackground: React.FC<PageBackgroundProps> = ({ bg, style, pageNumber }
 export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLogout, onConfigure }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState<'none' | 'sidebar' | 'properties' | 'layers' | 'elements'>('none');
+  const stylesDragControls = useDragControls();
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -1222,6 +1225,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [pendingImageElementId, setPendingImageElementId] = useState<string | null>(null);
   const [showAlignment, setShowAlignment] = useState(false);
   const [alignmentReference, setAlignmentReference] = useState<'selection' | 'margins' | 'page'>('margins');
+  const [showStylesPanel, setShowStylesPanel] = useState(false);
+  const [stylesPanelTab, setStylesPanelTab] = useState<StyleTabType>('color');
 
   // Interaction States
   const [isDragging, setIsDragging] = useState(false);
@@ -3244,7 +3249,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               }
           }
 
-          const minCellH = Math.max(16 * scaleFactor, Math.ceil(maxCellFontSize * defaultLineHeight + maxCellPadding * 2));
+          const minBasePx = rows > 30 ? 8 : (rows > 18 ? 12 : 16);
+          const minCellH = Math.max(minBasePx * scaleFactor, Math.ceil(maxCellFontSize * defaultLineHeight + maxCellPadding * 2));
           const rowH = Math.max(minCellH, Math.ceil(maxRowLines * maxCellFontSize * defaultLineHeight + maxCellPadding * 2));
           totalRowsH += rowH;
       }
@@ -3329,8 +3335,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       naturalWPx = sizePx;
       naturalHPx = sizePx;
     } else if (el.type === 'vector_shape') {
-      naturalWPx = (el.w / 100) * containerWPx;
-      naturalHPx = (el.h / 100) * containerHPx;
+      const shapeDef = getVectorShapeById(el.style.shapeType || 'frame_thin_notched');
+      const bounds = getSvgPathBounds(shapeDef.path);
+      const naturalRatio = bounds.width / bounds.height;
+      const currentWPx = (el.w / 100) * containerWPx;
+      naturalWPx = currentWPx;
+      naturalHPx = (currentWPx * (containerWPx / containerHPx)) / (naturalRatio || 1);
     } else if (el.type === 'icon') {
       const iconSz = (typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : 24) * scaleFactor;
       naturalWPx = iconSz + 4 * scaleFactor;
@@ -3424,7 +3434,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (newX < 0) newX = 0;
         if (newX + newW > 100) newX = Math.max(0, 100 - newW);
         if (newY < 0) newY = 0;
-        if (newY + newH > 100) newY = Math.max(0, 100 - newH);
+        if (el.type === 'table') {
+            if (newY + newH > 100) newH = Math.max(10, 100 - newY);
+        } else {
+            if (newY + newH > 100) newY = Math.max(0, 100 - newH);
+        }
     }
 
     newX = Math.round(newX * 10) / 10;
@@ -5098,14 +5112,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     fontWeight: 'normal',
                     color: '#4b5563',
                     textAlign: 'left',
-                    verticalAlign: 'top',
+                    verticalAlign: isScheduleTable ? 'middle' : 'top',
                     textTransform: 'none',
                     letterSpacing: 0,
-                    backgroundColor: 'transparent'
+                    backgroundColor: 'transparent',
+                    cellPadding: isScheduleTable ? 3 : 4
                 },
                 rowStyles: {},
                 colStyles: isScheduleTable ? {
-                    0: { fontWeight: 'bold' }
+                    0: { fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle' }
                 } : {},
                 borders: {
                     top: true, bottom: true, left: true, right: true,
@@ -5120,14 +5135,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const usableW_MM = Math.max(50, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
             const usableH_MM = Math.max(50, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
             
-            const w_mm = shapeDef.defaultW_MM || 25;
-            const h_mm = shapeDef.defaultH_MM || 25;
+            const bounds = getSvgPathBounds(shapeDef.path);
+            const naturalRatio = bounds.width / bounds.height;
+            const w_mm = shapeDef.defaultW_MM || 35;
+            const h_mm = w_mm / (naturalRatio || 1);
 
             newElement.w = Number(Math.min(90, Math.max(8, (w_mm / usableW_MM) * 100)).toFixed(2));
             newElement.h = Number(Math.min(90, Math.max(5, (h_mm / usableH_MM) * 100)).toFixed(2));
-            newElement.style.borderWidth = (styleOverride as any)?.borderWidth !== undefined ? (styleOverride as any).borderWidth : 1;
-            newElement.style.borderColor = (styleOverride as any)?.borderColor || shapeDef.defaultStroke || '#6366f1';
-            newElement.style.backgroundColor = (styleOverride as any)?.backgroundColor || shapeDef.defaultFill || '#ede9fe';
+            newElement.style.borderWidth = (styleOverride as any)?.borderWidth !== undefined ? (styleOverride as any).borderWidth : 1.2;
+            newElement.style.borderColor = (styleOverride as any)?.borderColor || shapeDef.defaultStroke || '#18181b';
+            newElement.style.backgroundColor = (styleOverride as any)?.backgroundColor || shapeDef.defaultFill || 'transparent';
             newElement.style.shapeType = targetShapeType;
         }
         if (type === 'image') {
@@ -5159,7 +5176,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     setSelectedIds([newElement.id]);
     setVariantModal(null);
 
-    if (type !== 'mini_calendar' && type !== 'full_calendar' && type !== 'vector_shape' && type !== 'footer_tracker') {
+    if (type !== 'mini_calendar' && type !== 'full_calendar' && type !== 'footer_tracker') {
         setTimeout(() => {
             autoFitElementToContent(newElement.id);
         }, 40);
@@ -5191,8 +5208,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       } else {
           const usableW_MM = Math.max(50, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
           const usableH_MM = Math.max(50, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+          const bounds = getSvgPathBounds(shapeDef.path);
+          const naturalRatio = bounds.width / bounds.height;
           const w_mm = shapeDef.defaultW_MM || 35;
-          const h_mm = shapeDef.defaultH_MM || 35;
+          const h_mm = w_mm / (naturalRatio || 1);
           const calcW = Number(Math.min(90, Math.max(8, (w_mm / usableW_MM) * 100)).toFixed(2));
           const calcH = Number(Math.min(90, Math.max(5, (h_mm / usableH_MM) * 100)).toFixed(2));
 
@@ -5823,7 +5842,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (newTableStyle.rowHeight && (tableUpdate.rows !== undefined || tableUpdate.rowHeight !== undefined)) {
           const totalHeightPx = newTableStyle.rows * newTableStyle.rowHeight;
           const currentPageHeight = getCurrentPageHeight();
-          newH = (totalHeightPx / currentPageHeight) * 100;
+          newH = Math.min(100 - Math.max(0, element.y), (totalHeightPx / currentPageHeight) * 100);
       }
 
       const updatedElement = { 
@@ -5833,9 +5852,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       };
       
       updateActiveElements(prevList => prevList.map(e => e.id === id ? updatedElement : e));
-      setTimeout(() => {
-          autoFitElementToContent(id);
-      }, 30);
   };
 
   const applyScheduleToTable = (elementId: string, startHour: number, endHour: number, intervalMinutes: number = 60, skipLine: boolean = false) => {
@@ -5909,26 +5925,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (col0.fontWeight === undefined && !currentTable.textStyle?.fontWeight) {
           col0.fontWeight = 'bold';
       }
+      col0.verticalAlign = 'middle';
       delete (col0 as any).fontSize;
+      delete (col0 as any).cellPadding;
+      delete (col0 as any).lineHeight;
 
-      // Adjust height if needed so rows don't collapse into unreadable slits
+      // Adjust height if needed so rows fit well within the available page space below element.y
       const currentPageHeight = getCurrentPageHeight();
-      const minRowHeightPx = 20;
+      const desiredRowHeightPx = totalRows > 32 ? 12 : (totalRows > 20 ? 16 : 20);
       const currentH = element.h || 30;
       const currentHeightPx = (currentH / 100) * currentPageHeight;
-      const neededHeightPx = totalRows * (currentTable.rowHeight || minRowHeightPx);
+      const neededHeightPx = totalRows * (currentTable.rowHeight || desiredRowHeightPx);
+      const maxAvailH = Math.max(20, 98 - Math.max(0, element.y));
       let targetH = currentH;
       if (currentTable.rowHeight || currentHeightPx < neededHeightPx) {
-          targetH = Math.min(95, Math.max(currentH, (neededHeightPx / currentPageHeight) * 100));
+          targetH = Math.min(maxAvailH, Math.max(currentH, (neededHeightPx / currentPageHeight) * 100));
+      }
+
+      const actualTableHeightPx = (targetH / 100) * currentPageHeight;
+      const approxRowHeightPx = actualTableHeightPx / Math.max(1, totalRows);
+
+      // Adapt textStyle fontSize, cellPadding, lineHeight, and verticalAlign so compact schedule rows are always legible
+      const existingTextStyle = currentTable.textStyle || {};
+      let adaptiveFontSize = existingTextStyle.fontSize || 10;
+      let adaptivePadding = existingTextStyle.cellPadding !== undefined ? existingTextStyle.cellPadding : 3;
+      let adaptiveLineHeight = existingTextStyle.lineHeight || 1.2;
+
+      if (approxRowHeightPx < 11) {
+          adaptiveFontSize = Math.max(6, Math.min(adaptiveFontSize, Math.floor((approxRowHeightPx - 1) * 0.82 * 2) / 2));
+          adaptivePadding = 0;
+          adaptiveLineHeight = 1.0;
+      } else if (approxRowHeightPx < 16) {
+          adaptiveFontSize = Math.max(7, Math.min(adaptiveFontSize, 8.5));
+          adaptivePadding = 1;
+          adaptiveLineHeight = 1.05;
+      } else {
+          if (adaptiveFontSize < 9.5) adaptiveFontSize = 10;
+          if (adaptivePadding < 2) adaptivePadding = 3;
+          adaptiveLineHeight = 1.2;
       }
 
       updateTableConfig(elementId, {
           rows: totalRows,
           cols,
-          h: targetH,
+          h: Number(targetH.toFixed(2)),
           columnWidths: colWidths,
           rowHeights: Array(totalRows).fill(100 / totalRows),
           cellContent: updatedCellContent,
+          textStyle: {
+              ...existingTextStyle,
+              fontSize: adaptiveFontSize,
+              cellPadding: adaptivePadding,
+              lineHeight: adaptiveLineHeight,
+              verticalAlign: existingTextStyle.verticalAlign === 'bottom' ? 'bottom' : 'middle'
+          },
           scheduleConfig: {
               startHour,
               endHour,
@@ -5943,9 +5993,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
       setScheduleAppliedFeedback(true);
       setTimeout(() => setScheduleAppliedFeedback(false), 2000);
-      setTimeout(() => {
-          autoFitElementToContent(elementId);
-      }, 35);
   };
 
   const addTableRow = (id: string, index: number, position: 'before' | 'after') => {
@@ -6912,51 +6959,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 (element.style.lineSpacing && (initial.h / 100 * unscaledEditorHeight) <= element.style.lineSpacing)
             );
 
+            const isCorner = ['nw', 'ne', 'se', 'sw'].includes(resizeDir);
+            const textTypes = ['text', 'quote', 'holiday', 'holiday_list', 'day_number', 'month_name', 'month_number', 'day_name', 'year', 'verse', 'date_placeholder', 'icon', 'moon', 'permanent_day_header'];
+
+            const shouldLockAspect = isCorner && (
+                element.type === 'vector_shape' || 
+                element.type === 'circle' || 
+                element.type === 'image' || 
+                element.type === 'icon' || 
+                element.type === 'moon' || 
+                element.type === 'mini_calendar' ||
+                textTypes.includes(element.type)
+            );
+
             const { x, y, w, h } = calculateResize(
                 deltaX, deltaY, 
                 initial.x, initial.y, initial.w, initial.h, 
                 editorRect.width, editorRect.height, 
                 resizeDir,
                 rotation,
-                isSingleLine
+                isSingleLine,
+                shouldLockAspect
             );
             
             let finalH = isSingleLine ? initial.h : h;
             let finalW = w;
             
-            let newElementConfig = { ...element, x, y, w, h: finalH };
+            let newElementConfig = { ...element, x, y, w: finalW, h: finalH };
 
-            const isCorner = ['nw', 'ne', 'se', 'sw'].includes(resizeDir);
-            const textTypes = ['text', 'quote', 'holiday', 'holiday_list', 'day_number', 'month_name', 'month_number', 'day_name', 'year', 'verse', 'date_placeholder', 'icon', 'moon', 'permanent_day_header'];
-
-            if (element.type === 'circle' || (element.type === 'mini_calendar' && isCorner)) {
-                const currentW_px = (w / 100) * editorRect.width;
-                const currentH_px = (h / 100) * editorRect.height;
-                const initialW_px = (initial.w / 100) * editorRect.width;
-                const initialH_px = (initial.h / 100) * editorRect.height;
-
-                const changeW = Math.abs(currentW_px - initialW_px);
-                const changeH = Math.abs(currentH_px - initialH_px);
-
-                const targetSize_px = Math.max(15, changeW >= changeH ? currentW_px : currentH_px);
-                finalW = (targetSize_px / editorRect.width) * 100;
-                finalH = (targetSize_px / editorRect.height) * 100;
-            } else if ((element.type === 'vector_shape' || element.type === 'image' || textTypes.includes(element.type)) && isCorner) {
-                const currentW_px = (w / 100) * editorRect.width;
-                const currentH_px = (h / 100) * editorRect.height;
-                const initialW_px = (initial.w / 100) * editorRect.width;
-                const initialH_px = (initial.h / 100) * editorRect.height;
-
-                const changeW = Math.abs(currentW_px - initialW_px);
-                const changeH = Math.abs(currentH_px - initialH_px);
-
-                const scaleX = currentW_px / (initialW_px || 1);
-                const scaleY = currentH_px / (initialH_px || 1);
-                const cornerScale = Math.max(0.05, changeW >= changeH ? scaleX : scaleY);
-
-                finalW = Math.max(0.5, initial.w * cornerScale);
-                finalH = Math.max(0.5, initial.h * cornerScale);
-            } else if (element.type === 'lines') {
+            if (element.type === 'lines') {
                 if (!element.style.showTimes && (!element.style.rowCount || element.style.rowCount === 0) && !isSingleLine) {
                     const heightPx = (h / 100 * unscaledEditorHeight);
                     const spacing = element.style.lineSpacing || 24;
@@ -7032,8 +7063,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             if (textTypes.includes(element.type) && isCorner && initial.fontSize) {
                 const newFontSize = Math.max(4, Math.round(initial.fontSize * scale));
                 newElementConfig.style = { ...newElementConfig.style, fontSize: newFontSize };
-            } else if (element.type === 'table' && initial.tableFontSize) {
-                const tableScale = isCorner ? (finalW / (initial.w || 1)) : (h / (initial.h || 1));
+            } else if (element.type === 'table' && isCorner && initial.tableFontSize) {
+                const tableScale = finalW / (initial.w || 1);
                 const newFontSize = Math.max(4, Math.round(initial.tableFontSize * tableScale));
                 newElementConfig.style = { 
                     ...newElementConfig.style, 
@@ -11251,6 +11282,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 <div className="h-5 w-px bg-gray-200 mx-1"></div>
 
+                <button
+                  onClick={() => setShowStylesPanel(!showStylesPanel)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                    showStylesPanel
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-200'
+                      : 'bg-indigo-50/70 text-indigo-700 border-indigo-200/80 hover:bg-indigo-100'
+                  }`}
+                  title="Estilos Globais de Cor, Caractere e Parágrafo"
+                >
+                  <icons.Palette className="w-4 h-4" />
+                  <span className="hidden xl:inline">Estilos</span>
+                </button>
+
                 <button onClick={() => setShowAlignment(!showAlignment)} className={`p-1.5 rounded-md ${showAlignment ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Ferramentas de Alinhamento"><BoxSelect className="w-5 h-5" /></button>
                 <button onClick={() => setShowLayers(!showLayers)} className={`p-1.5 rounded-md ${showLayers ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Painel de Camadas"><Layers className="w-5 h-5" /></button>
                 <button onClick={() => setShowMargins(!showMargins)} className={`p-1.5 rounded-md ${showMargins ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Mostrar Margens de Sangria"><ScanLine className="w-5 h-5" /></button>
@@ -12330,6 +12374,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     {nudgeUnit}
                                 </button>
                             </div>
+
+                            <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
+
+                            <button
+                                type="button"
+                                onClick={() => setShowStylesPanel(!showStylesPanel)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer border ${
+                                    showStylesPanel
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                        : 'bg-indigo-50/70 text-indigo-700 border-indigo-200/80 hover:bg-indigo-100'
+                                }`}
+                                title="Abrir Painel de Estilos (Cores, Caracteres e Parágrafos)"
+                            >
+                                <icons.Palette className="w-3.5 h-3.5" />
+                                <span>Estilos</span>
+                            </button>
                         </div>
 
                         {config.layoutType === '1_per_page_weekend_shared' && editMode === 'daily' && (
@@ -12626,13 +12686,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             )}
                         </AnimatePresence>
 
+                        {typeof document !== 'undefined' && createPortal(
+                            <AnimatePresence>
+                                {showStylesPanel && activeTab === 'editor' && (
+                                    <motion.div
+                                        initial={isMobile ? { y: '100%' } : { opacity: 0, scale: 0.96, y: -8 }}
+                                        animate={isMobile ? { y: 0 } : { opacity: 1, scale: 1, y: 0 }}
+                                        exit={isMobile ? { y: '100%' } : { opacity: 0, scale: 0.96, y: -8 }}
+                                        drag={!isMobile}
+                                        dragControls={stylesDragControls}
+                                        dragListener={false}
+                                        dragMomentum={false}
+                                        style={{ zIndex: 9995 }}
+                                        className={
+                                            isMobile
+                                                ? "fixed inset-x-0 bottom-0 z-[9995] bg-white rounded-t-3xl shadow-2xl h-[78vh] flex flex-col overflow-hidden no-print"
+                                                : `fixed top-16 z-[9995] bg-white rounded-2xl shadow-[0_25px_60px_-12px_rgba(30,27,75,0.45)] border-2 border-indigo-200 flex flex-col overflow-hidden no-print ${
+                                                    showProperties ? 'right-[298px]' : 'right-4'
+                                                  } w-[350px] h-[calc(100vh-88px)] max-h-[680px]`
+                                        }
+                                    >
+                                        <StylesManagerPanel
+                                            config={config}
+                                            selectedElements={activeList.filter(el => selectedIds.includes(el.id))}
+                                            activePageElements={activeList}
+                                            availableFonts={AVAILABLE_FONTS}
+                                            systemFonts={allSystemFonts}
+                                            customFonts={customFonts}
+                                            initialTab={stylesPanelTab}
+                                            onUpdateConfig={(updater) => setConfig(prev => updater(prev))}
+                                            onUpdateSelectedElements={(updater) => {
+                                                updateActiveElements(prevList =>
+                                                    prevList.map(el => (selectedIds.includes(el.id) ? updater(el) : el))
+                                                );
+                                            }}
+                                            onSelectElementIds={(ids) => setSelectedIds(ids)}
+                                            onClose={() => setShowStylesPanel(false)}
+                                            onToast={(msg) => setToastMessage(msg)}
+                                            onHeaderPointerDown={!isMobile ? (e) => stylesDragControls.start(e) : undefined}
+                                        />
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>,
+                            document.body
+                        )}
+
                         <AnimatePresence>
                             {((!isMobile && showProperties) || (isMobile && mobileDrawer === 'properties')) && activeTab === 'editor' && (
                                 <motion.aside 
                                     initial={isMobile ? { y: '100%' } : { opacity: 0, x: 20 }}
                                     animate={isMobile ? { y: 0 } : { opacity: 1, x: 0 }}
                                     exit={isMobile ? { y: '100%' } : { opacity: 0, x: 20 }}
-                                    className={isMobile ? "fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col no-print" : "absolute right-0 top-0 bottom-0 w-72 bg-white border-l border-gray-200 flex flex-col h-full z-45 no-print shadow-sm"}
+                                    className={isMobile ? "fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col no-print" : "absolute right-0 top-0 bottom-0 w-72 bg-white border-l border-gray-200 flex flex-col h-full z-40 no-print shadow-sm"}
                                 >
                                     <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50 shrink-0">
                                         <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-widest flex items-center gap-2"><icons.Settings2 className="w-4 h-4" /> Ajustes</h3>
@@ -12647,6 +12752,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 <label className="block text-[10px] font-bold text-gray-500 uppercase">Nome da Camada</label>
                                                 <input type="text" value={selectedElement.name || selectedElement.type} onChange={(e) => updateElementName(selectedElement.id, e.target.value)} className="w-full text-xs p-2 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
                                             </div>
+
+                                            <ElementQuickStylesBar
+                                                config={config}
+                                                selectedElement={selectedElement}
+                                                onApplyStyle={(updater) => {
+                                                    updateActiveElements(prevList =>
+                                                        prevList.map(el => (selectedIds.includes(el.id) ? updater(el) : el))
+                                                    );
+                                                }}
+                                                onOpenStylesPanel={(tab) => {
+                                                    setStylesPanelTab(tab);
+                                                    setShowStylesPanel(true);
+                                                }}
+                                            />
 
                                             <div className="pt-3 border-t border-gray-100 space-y-3">
                                                 <div className="space-y-2">
@@ -15539,7 +15658,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                                         <Columns className="w-3 h-3 text-indigo-600" /> Espaço entre as 2 Colunas:
                                                                                                     </span>
                                                                                                     <span className="text-[10px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
-                                                                                                        {existingHoliday.style.columnGap ?? 24}px ({(((existingHoliday.style.columnGap ?? 24) * 0.264583)).toFixed(1)} mm)
+                                                                                                        {existingHoliday.style.columnGap ?? 24}px ({(Number(existingHoliday.style.columnGap ?? 24) * 0.264583).toFixed(1)} mm)
                                                                                                     </span>
                                                                                                 </div>
                                                                                                 <div className="flex items-center gap-2">
@@ -16751,7 +16870,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                     <span className="text-[9px] text-indigo-700/80">Distância horizontal entre as colunas</span>
                                                                                 </div>
                                                                                 <span className="text-xs font-bold text-indigo-600 px-2 py-0.5 bg-white rounded border border-indigo-200">
-                                                                                    {selectedElement.style.columnGap ?? 24}px ({(((selectedElement.style.columnGap ?? 24) * 0.264583)).toFixed(1)} mm)
+                                                                                    {selectedElement.style.columnGap ?? 24}px ({(Number(selectedElement.style.columnGap ?? 24) * 0.264583).toFixed(1)} mm)
                                                                                 </span>
                                                                             </div>
 
@@ -17561,18 +17680,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     </div>
                                                                     <div className="grid grid-cols-6 gap-1.5">
                                                                         {[
-                                                                            { id: 'geo_rectangle', label: 'Retângulo', path: 'M 6,14 L 94,14 L 94,86 L 6,86 Z' },
-                                                                            { id: 'geo_rounded_rect', label: 'Arredondado', path: 'M 18,12 L 82,12 C 88,12 94,18 94,24 L 94,76 C 94,82 88,88 82,88 L 18,88 C 12,88 6,82 6,76 L 6,24 C 6,18 12,12 18,12 Z' },
-                                                                            { id: 'geo_circle', label: 'Círculo', path: 'M 50,8 A 42,42 0 1,0 50,92 A 42,42 0 1,0 50,8 Z' },
-                                                                            { id: 'geo_triangle', label: 'Triângulo', path: 'M 50,10 L 90,88 L 10,88 Z' },
-                                                                            { id: 'geo_star_5', label: 'Estrela', path: 'M 50,8 L 62.4,32.8 L 92,36.8 L 70.3,57.1 L 75.8,86.2 L 50,72.2 L 24.2,86.2 L 29.7,57.1 L 8,36.8 L 37.6,32.8 Z' },
-                                                                            { id: 'geo_heart', label: 'Coração', path: 'M 50,88 C 46,84 10,58 10,32 C 10,18 21,8 35,8 C 43,8 47,12 50,17 C 53,12 57,8 65,8 C 79,8 90,18 90,32 C 90,58 54,84 50,88 Z' },
-                                                                            { id: 'geo_diamond', label: 'Losango', path: 'M 50,8 L 92,50 L 50,92 L 8,50 Z' },
-                                                                            { id: 'geo_hexagon', label: 'Hexágono', path: 'M 50,8 L 90,28 L 90,72 L 50,92 L 10,72 L 10,28 Z' },
-                                                                            { id: 'geo_arch', label: 'Arco', path: 'M 12,90 L 12,48 C 12,24 28,10 50,10 C 72,10 88,24 88,48 L 88,90 Z' },
-                                                                            { id: 'geo_cross', label: 'Cruz', path: 'M 36,10 L 64,10 L 64,36 L 90,36 L 90,64 L 64,64 L 64,90 L 36,90 L 36,64 L 10,64 L 10,36 L 36,36 Z' },
-                                                                            { id: 'geo_semicircle', label: 'Meio Círculo', path: 'M 10,82 A 40,40 0 0,1 90,82 Z' },
-                                                                            { id: 'geo_pill', label: 'Pílula', path: 'M 28,18 L 72,18 C 86,18 86,82 72,82 L 28,82 C 14,82 14,18 28,18 Z' },
+                                                                            { id: 'geo_rectangle', label: 'Retângulo', path: 'M 6,14 L 94,14 L 94,86 L 6,86 Z', isCircle: false },
+                                                                            { id: 'geo_rounded_rect', label: 'Arredondado', path: 'M 18,12 L 82,12 C 88,12 94,18 94,24 L 94,76 C 94,82 88,88 82,88 L 18,88 C 12,88 6,82 6,76 L 6,24 C 6,18 12,12 18,12 Z', isCircle: false },
+                                                                            { id: 'geo_circle', label: 'Círculo', path: 'M 50,8 A 42,42 0 1,0 50,92 A 42,42 0 1,0 50,8 Z', isCircle: true },
+                                                                            { id: 'geo_triangle', label: 'Triângulo', path: 'M 50,10 L 90,88 L 10,88 Z', isCircle: false },
+                                                                            { id: 'geo_star_5', label: 'Estrela', path: 'M 50,8 L 62.4,32.8 L 92,36.8 L 70.3,57.1 L 75.8,86.2 L 50,72.2 L 24.2,86.2 L 29.7,57.1 L 8,36.8 L 37.6,32.8 Z', isCircle: false },
+                                                                            { id: 'geo_heart', label: 'Coração', path: 'M 50,88 C 46,84 10,58 10,32 C 10,18 21,8 35,8 C 43,8 47,12 50,17 C 53,12 57,8 65,8 C 79,8 90,18 90,32 C 90,58 54,84 50,88 Z', isCircle: false },
+                                                                            { id: 'geo_diamond', label: 'Losango', path: 'M 50,8 L 92,50 L 50,92 L 8,50 Z', isCircle: false },
+                                                                            { id: 'geo_hexagon', label: 'Hexágono', path: 'M 50,8 L 90,28 L 90,72 L 50,92 L 10,72 L 10,28 Z', isCircle: false },
+                                                                            { id: 'geo_arch', label: 'Arco', path: 'M 12,90 L 12,48 C 12,24 28,10 50,10 C 72,10 88,24 88,48 L 88,90 Z', isCircle: false },
+                                                                            { id: 'geo_cross', label: 'Cruz', path: 'M 36,10 L 64,10 L 64,36 L 90,36 L 90,64 L 64,64 L 64,90 L 36,90 L 36,64 L 10,64 L 10,36 L 36,36 Z', isCircle: false },
+                                                                            { id: 'geo_semicircle', label: 'Meio Círculo', path: 'M 10,82 A 40,40 0 0,1 90,82 Z', isCircle: false },
+                                                                            { id: 'geo_pill', label: 'Pílula', path: 'M 28,18 L 72,18 C 86,18 86,82 72,82 L 28,82 C 14,82 14,18 28,18 Z', isCircle: false },
                                                                         ].map(geo => {
                                                                             const isCurrent = (selectedElement.style.shapeType || 'frame_thin_notched') === geo.id;
                                                                             return (
@@ -17949,6 +18068,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         </div>
                                     ) : (
                                         <div className="p-4 space-y-4">
+                                            {/* Card de Acesso Rápido aos Estilos Globais (ou Seleção Múltipla) */}
+                                            <div className="p-3 bg-gradient-to-br from-indigo-50/80 via-purple-50/40 to-white border border-indigo-200/80 rounded-xl space-y-2.5 shadow-2xs">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-2xs">
+                                                            <icons.Palette className="w-3.5 h-3.5" />
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="text-[11px] font-black text-indigo-950 uppercase leading-none">
+                                                                {selectedIds.length > 1 ? `Estilos (${selectedIds.length} selecionados)` : 'Estilos do Projeto'}
+                                                            </h4>
+                                                            <p className="text-[9px] text-indigo-700/80 font-semibold mt-0.5">
+                                                                Cores, Caracteres e Parágrafos
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowStylesPanel(prev => !prev)}
+                                                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer shadow-2xs"
+                                                    >
+                                                        {showStylesPanel ? 'Fechar' : 'Abrir Painel'}
+                                                    </button>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                                    {getProjectStyles(config).colorStyles.map(cs => (
+                                                        <button
+                                                            key={cs.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (selectedIds.length > 0) {
+                                                                    updateActiveElements(prevList =>
+                                                                        prevList.map(el =>
+                                                                            selectedIds.includes(el.id)
+                                                                                ? applyColorStyleToElement(el, cs, 'color')
+                                                                                : el
+                                                                        )
+                                                                    );
+                                                                    setToastMessage(`Cor "${cs.name}" aplicada em ${selectedIds.length} elemento(s)!`);
+                                                                } else {
+                                                                    setStylesPanelTab('color');
+                                                                    setShowStylesPanel(true);
+                                                                }
+                                                            }}
+                                                            className="flex items-center gap-1 px-1.5 py-0.5 bg-white hover:bg-indigo-50 border border-gray-200 hover:border-indigo-300 rounded-md text-[9px] font-bold text-gray-700 transition-all cursor-pointer"
+                                                            title={selectedIds.length > 0 ? `Aplicar cor "${cs.name}" nos ${selectedIds.length} elementos selecionados` : `Editar estilo de cor "${cs.name}"`}
+                                                        >
+                                                            <span
+                                                                className="w-2.5 h-2.5 rounded-full border border-black/15 shrink-0"
+                                                                style={{ backgroundColor: cs.color }}
+                                                            />
+                                                            <span className="truncate max-w-[68px]">{cs.name}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
                                             <div className="flex items-center gap-2 mb-2 p-2 bg-indigo-50 border border-indigo-100 rounded-lg">
                                                 <Palmtree className="w-5 h-5 text-indigo-600" />
                                                 <div>

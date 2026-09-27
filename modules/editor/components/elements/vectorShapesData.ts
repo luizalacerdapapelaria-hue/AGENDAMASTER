@@ -1,3 +1,100 @@
+export interface VectorShapeBounds {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+const boundsCache = new Map<string, VectorShapeBounds>();
+
+export function getSvgPathBounds(d: string): VectorShapeBounds {
+    if (!d) return { x: 0, y: 0, width: 100, height: 100 };
+    const cached = boundsCache.get(d);
+    if (cached) return cached;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const tokens = d.match(/([a-df-z])|([-+]?[0-9]*\.?[0-9]+(?:e[-+]?[0-9]+)?)/gi) || [];
+    let curX = 0, curY = 0;
+    let i = 0;
+    let cmd = "";
+
+    const update = (x: number, y: number) => {
+        if (!isNaN(x) && isFinite(x)) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+        }
+        if (!isNaN(y) && isFinite(y)) {
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+    };
+
+    while (i < tokens.length) {
+        const token = tokens[i];
+        if (/^[a-df-z]$/i.test(token)) {
+            cmd = token;
+            i++;
+            continue;
+        }
+        const upper = cmd.toUpperCase();
+
+        if (upper === "M" || upper === "L" || upper === "T") {
+            const x = parseFloat(tokens[i++]);
+            const y = parseFloat(tokens[i++]);
+            curX = x; curY = y;
+            update(curX, curY);
+        } else if (upper === "H") {
+            curX = parseFloat(tokens[i++]);
+            update(curX, curY);
+        } else if (upper === "V") {
+            curY = parseFloat(tokens[i++]);
+            update(curX, curY);
+        } else if (upper === "C") {
+            const x1 = parseFloat(tokens[i++]), y1 = parseFloat(tokens[i++]);
+            const x2 = parseFloat(tokens[i++]), y2 = parseFloat(tokens[i++]);
+            const x = parseFloat(tokens[i++]), y = parseFloat(tokens[i++]);
+            update(x1, y1); update(x2, y2);
+            curX = x; curY = y;
+            update(curX, curY);
+        } else if (upper === "S" || upper === "Q") {
+            const x1 = parseFloat(tokens[i++]), y1 = parseFloat(tokens[i++]);
+            const x = parseFloat(tokens[i++]), y = parseFloat(tokens[i++]);
+            update(x1, y1);
+            curX = x; curY = y;
+            update(curX, curY);
+        } else if (upper === "A") {
+            tokens[i++]; // rx
+            tokens[i++]; // ry
+            tokens[i++]; // rot
+            tokens[i++]; // large
+            tokens[i++]; // sweep
+            const x = parseFloat(tokens[i++]);
+            const y = parseFloat(tokens[i++]);
+            curX = x; curY = y;
+            update(curX, curY);
+        } else {
+            i++;
+        }
+    }
+
+    if (minX === Infinity || maxX === -Infinity || minY === Infinity || maxY === -Infinity) {
+        const fallback = { x: 0, y: 0, width: 100, height: 100 };
+        boundsCache.set(d, fallback);
+        return fallback;
+    }
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const res = { 
+        x: minX, 
+        y: minY, 
+        width: width > 0.01 ? width : 1, 
+        height: height > 0.01 ? height : 1 
+    };
+    boundsCache.set(d, res);
+    return res;
+}
+
 export type VectorShapeCategory = 
     | 'geometric'
     | 'frames'

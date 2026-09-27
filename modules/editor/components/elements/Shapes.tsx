@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { BaseElementProps } from './types';
-import { getVectorShapeById } from './vectorShapesData';
+import { getVectorShapeById, getSvgPathBounds } from './vectorShapesData';
 
 export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, style, pageHeight, pageWidth }) => {
     
@@ -254,7 +254,10 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : (shapeDef.defaultBorderWidth || 1.2);
         const opacity = style.opacity ?? 1;
         const borderRadius = style.borderRadius || 0;
-        const isPreserveAspect = style.preserveAspectRatio !== false;
+        
+        // Ajuste exato às extremidades do elemento (como Caixa e Círculo)
+        const bounds = getSvgPathBounds(shapeDef.path);
+        const tightViewBox = `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`;
 
         const isGradient = style.backgroundType === 'gradient';
         const gradientId = `grad-${element.id}`;
@@ -316,8 +319,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                     {items.map((_, idx) => (
                         <div key={idx} className="flex-1 w-full h-full flex items-center justify-center min-w-0 min-h-0 overflow-visible">
                             <svg 
-                                viewBox={shapeDef.viewBox || "0 0 100 100"} 
-                                preserveAspectRatio={isPreserveAspect ? "xMidYMid meet" : "none"} 
+                                viewBox={tightViewBox} 
+                                preserveAspectRatio="none" 
                                 className="w-full h-full overflow-visible"
                             >
                                 <defs>
@@ -334,6 +337,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                                     strokeOpacity={strokeOpacity}
                                     strokeWidth={strokeWidth} 
                                     strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
+                                    vectorEffect="non-scaling-stroke"
                                 />
                             </svg>
                         </div>
@@ -344,20 +348,25 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
 
         return (
             <div className="w-full h-full" style={{ opacity, filter: dropShadowFilter !== 'none' ? dropShadowFilter : undefined }}>
-                <svg viewBox={shapeDef.viewBox || "0 0 100 100"} preserveAspectRatio={isPreserveAspect ? "xMidYMid meet" : "none"} className="w-full h-full overflow-visible">
+                <svg 
+                    viewBox={shapeType === 'rectangle' ? "0 0 100 100" : tightViewBox} 
+                    preserveAspectRatio="none" 
+                    className="w-full h-full overflow-visible"
+                >
                     <defs>
                         {renderGradient()}
                     </defs>
                     {shapeType === 'rectangle' ? (
                         <rect 
-                            x="5" y="5" width="90" height="90"
-                            rx={borderRadius / 2} ry={borderRadius / 2}
+                            x="0" y="0" width="100%" height="100%"
+                            rx={borderRadius} ry={borderRadius}
                             fill={fillColor} 
                             fillOpacity={fillOpacity}
                             stroke={strokeColor} 
                             strokeOpacity={strokeOpacity}
                             strokeWidth={strokeWidth} 
                             strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
+                            vectorEffect="non-scaling-stroke"
                         />
                     ) : (
                         <path 
@@ -371,6 +380,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             strokeOpacity={strokeOpacity}
                             strokeWidth={strokeWidth} 
                             strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
+                            vectorEffect="non-scaling-stroke"
                         />
                     )}
                 </svg>

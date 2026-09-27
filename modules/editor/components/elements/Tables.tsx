@@ -25,7 +25,7 @@ const filterDefined = (obj: any) => {
     return res;
 };
 
-const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementId, onTableCellChange, onTableCellFocus, isActive }: any) => {
+const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementId, onTableCellChange, onTableCellFocus, isActive, isCompactSingleLine }: any) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
@@ -42,14 +42,14 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
     // Word Wrap / Overflow Formatting Rules (Word Style)
     let wrapClasses = 'whitespace-pre-wrap break-words overflow-hidden';
     let wrapInlineStyles: React.CSSProperties = {
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        overflowWrap: 'break-word',
+        whiteSpace: isCompactSingleLine ? 'nowrap' : 'pre-wrap',
+        wordBreak: isCompactSingleLine ? 'normal' : 'break-word',
+        overflowWrap: isCompactSingleLine ? 'normal' : 'break-word',
         textOverflow: 'clip',
         overflow: 'hidden'
     };
 
-    if (textWrap === 'nowrap' || textWrap === 'clip') {
+    if (textWrap === 'nowrap' || textWrap === 'clip' || isCompactSingleLine) {
         wrapClasses = 'whitespace-nowrap overflow-hidden text-clip';
         wrapInlineStyles = {
             whiteSpace: 'nowrap',
@@ -142,7 +142,7 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                         fontSize: 'inherit', 
                         fontWeight: 'inherit', 
                         fontStyle: style.fontStyle || 'normal',
-                        lineHeight: style.lineHeight || 1.25,
+                        lineHeight: style.lineHeight || 1.2,
                         color: 'inherit', 
                         textAlign: style.textAlign || 'inherit', 
                         width: '100%',
@@ -165,7 +165,7 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                         fontSize: 'inherit',
                         fontWeight: 'inherit',
                         fontStyle: style.fontStyle || 'normal',
-                        lineHeight: style.lineHeight || 1.25,
+                        lineHeight: style.lineHeight || 1.2,
                         color: 'inherit',
                         textAlign: style.textAlign || 'inherit',
                         padding: 0,
@@ -181,12 +181,30 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
     );
 });
 
-export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, style, onTableResizeStart, onTableRowResizeStart, onTableCellChange, onTableCellFocus, activeTableCell }) => {
+export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, style, pageHeight, onTableResizeStart, onTableRowResizeStart, onTableCellChange, onTableCellFocus, activeTableCell }) => {
+    const tableContainerRef = useRef<HTMLDivElement>(null);
+    const [measuredTableHeight, setMeasuredTableHeight] = useState<number>(0);
+
+    useLayoutEffect(() => {
+        const el = tableContainerRef.current;
+        if (!el) return;
+        const updateHeight = () => {
+            const h = el.clientHeight;
+            if (h > 0) setMeasuredTableHeight(h);
+        };
+        updateHeight();
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [element.h, pageHeight, style.table?.rows]);
+
     const rows = style.table?.rows || 10;
     const columns = style.table?.cols || 2;
     const hasHeader = style.table?.headerRow;
     const columnWidths = style.table?.columnWidths || Array(columns).fill(100 / columns);
     const rowHeights = style.table?.rowHeights || Array(rows).fill(100 / rows);
+    const estimatedTableHeightPx = ((element.h || 50) / 100) * ((pageHeight || 567) * 0.85);
+    const effectiveTableHeightPx = measuredTableHeight > 0 ? measuredTableHeight : estimatedTableHeightPx;
     
     const globalTextStyle = {
         fontFamily: style.table?.textStyle?.fontFamily || style.fontFamily || 'Inter',
@@ -252,6 +270,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
 
     return (
         <div 
+            ref={tableContainerRef}
             className="w-full h-full relative select-none"
             style={{
                 borderRadius: borderRadius > 0 ? `${borderRadius}px` : undefined,
@@ -304,6 +323,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
             {Array(rows).fill(0).map((_, r) => {
                 const rowHPercent = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
                 const rowHeightStyle = `${rowHPercent}%`;
+                const rowHeightPx = Math.max(2, (rowHPercent / 100) * effectiveTableHeightPx);
                 
                 return (
                     <div 
@@ -320,9 +340,29 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             const tStyle = { ...globalTextStyle, ...filterDefined(rowStyles[r]), ...filterDefined(colStyles[c]), ...cellCustomStyle };
                             const va = (tStyle.verticalAlign as string) || 'top';
                             
+                            const rawFontSize = typeof tStyle.fontSize === 'number' ? tStyle.fontSize : (parseFloat(String(tStyle.fontSize)) || 10);
+                            const rawPadding = tStyle.cellPadding !== undefined ? Number(tStyle.cellPadding) : 4;
+                            const rawLineHeight = Number(tStyle.lineHeight) || 1.2;
+
+                            // Detect compact rows (e.g. 30-min schedule with skipped lines = 45-46 rows)
+                            const neededSingleLineH = (rawFontSize * rawLineHeight) + (rawPadding * 2);
+                            const isCompactRow = rowHeightPx < neededSingleLineH + 2;
+
+                            const effectiveLineHeight = isCompactRow
+                                ? (rowHeightPx < rawFontSize * 1.25 ? 1.0 : Math.min(rawLineHeight, 1.1))
+                                : rawLineHeight;
+                            const maxFittingFont = Math.max(4.5, Math.floor((rowHeightPx - 1) * 0.82 * 2) / 2);
+                            const effectiveFontSize = isCompactRow ? Math.min(rawFontSize, maxFittingFont) : rawFontSize;
+
+                            const singleLineTextH = effectiveFontSize * effectiveLineHeight;
+                            const availVertSpace = Math.max(0, rowHeightPx - singleLineTextH - 0.5);
+                            const padY = isCompactRow ? Math.max(0, Math.min(rawPadding, Math.floor(availVertSpace / 2))) : rawPadding;
+                            const padX = isCompactRow && rowHeightPx < 14 ? Math.min(rawPadding, 2) : rawPadding;
+
+                            const effectiveVa = (isCompactRow && va === 'top') ? 'middle' : va;
                             let justifyContent = 'flex-start';
-                            if (va === 'middle' || va === 'center') justifyContent = 'center';
-                            if (va === 'bottom') justifyContent = 'flex-end';
+                            if (effectiveVa === 'middle' || effectiveVa === 'center') justifyContent = 'center';
+                            if (effectiveVa === 'bottom') justifyContent = 'flex-end';
                             
                             const customBg = tStyle.backgroundColor;
                             let defaultBg = 'transparent';
@@ -336,8 +376,6 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             }
                             const cellBg = (customBg && customBg !== 'transparent') ? customBg : defaultBg;
 
-                            const cellPadding = tStyle.cellPadding !== undefined ? tStyle.cellPadding : 4;
-
                             const cellStyle: React.CSSProperties = { 
                                 width: `${columnWidths[c]}%`, 
                                 height: '100%', 
@@ -347,22 +385,23 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 justifyContent: justifyContent, 
                                 alignItems: 'stretch', 
                                 fontFamily: tStyle.fontFamily, 
-                                fontSize: typeof tStyle.fontSize === 'number' ? `${tStyle.fontSize}px` : (tStyle.fontSize || '10px'), 
+                                fontSize: `${effectiveFontSize}px`, 
                                 fontWeight: tStyle.fontWeight, 
                                 fontStyle: tStyle.fontStyle || 'normal',
-                                lineHeight: tStyle.lineHeight || 1.25,
+                                lineHeight: effectiveLineHeight,
                                 color: tStyle.color, 
                                 textAlign: tStyle.textAlign as any, 
-                                verticalAlign: va as any, 
+                                verticalAlign: effectiveVa as any, 
                                 textTransform: tStyle.textTransform as any, 
                                 letterSpacing: `${tStyle.letterSpacing}px`,
                                 textWrap: tStyle.textWrap as any,
-                                padding: `${cellPadding}px`,
+                                padding: `${padY}px ${padX}px`,
                                 boxSizing: 'border-box',
                                 overflow: 'hidden'
                             };
 
                             const isActive = activeTableCell?.elementId === element.id && activeTableCell?.r === r && activeTableCell?.c === c;
+                            const isCompactSingleLine = isCompactRow && rowHeightPx < effectiveFontSize * 2.1 && !String(content).includes('\n');
 
                             return (
                                 <TableCell 
@@ -375,6 +414,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                     isHeaderCell={isHeaderCell} 
                                     style={cellStyle} 
                                     isActive={isActive} 
+                                    isCompactSingleLine={isCompactSingleLine}
                                     onTableCellChange={onTableCellChange} 
                                     onTableCellFocus={onTableCellFocus} 
                                 />

@@ -121,6 +121,48 @@ export interface TextStyleConfig {
     textWrap?: 'wrap' | 'nowrap' | 'clip' | 'ellipsis'; // Novo: Quebra/Corte de texto estilo Word
     textOrientation?: 'horizontal' | 'vertical-up' | 'vertical-down'; // Novo: Orientação do texto
     cellPadding?: number; // Novo: Margem interna da célula (px)
+    colorStyleId?: string;
+    fillColorStyleId?: string;
+    characterStyleId?: string;
+    paragraphStyleId?: string;
+}
+
+export interface ColorStylePreset {
+    id: string;
+    name: string;
+    color: string;
+}
+
+export interface CharacterStylePreset {
+    id: string;
+    name: string;
+    fontFamily?: string;
+    fontSize?: number;
+    fontWeight?: string;
+    fontStyle?: 'normal' | 'italic';
+    letterSpacing?: number;
+    textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize' | 'sentence';
+    color?: string;
+    colorStyleId?: string;
+}
+
+export interface ParagraphStylePreset {
+    id: string;
+    name: string;
+    textAlign?: 'left' | 'center' | 'right' | 'justify';
+    verticalAlign?: 'top' | 'middle' | 'bottom';
+    lineHeight?: number;
+    textWrap?: 'wrap' | 'nowrap' | 'clip' | 'ellipsis';
+    cellPadding?: number;
+    columnCount?: number;
+    columnGap?: number;
+    characterStyleId?: string;
+}
+
+export interface ProjectStylesConfig {
+    colorStyles: ColorStylePreset[];
+    characterStyles: CharacterStylePreset[];
+    paragraphStyles: ParagraphStylePreset[];
 }
 
 export interface LayoutElement {
@@ -135,6 +177,13 @@ export interface LayoutElement {
   h: number; // Altura em %
   zIndex: number;
   style: {
+    // Vínculos com Estilos Globais (Cor, Caractere e Parágrafo)
+    colorStyleId?: string; // Estilo de cor vinculado à cor principal / texto / linhas
+    fillColorStyleId?: string; // Estilo de cor vinculado ao fundo / preenchimento
+    borderColorStyleId?: string; // Estilo de cor vinculado à borda / grade
+    characterStyleId?: string; // Estilo de caractere vinculado
+    paragraphStyleId?: string; // Estilo de parágrafo vinculado
+
     fontFamily?: string;
     fontSize?: number;
     fontWeight?: string;
@@ -188,7 +237,9 @@ export interface LayoutElement {
     nameFormat?: 'full' | 'short' | 'initial' | string; // Formato de nome/abreviação (Completo, 3 letras, 1 letra)
     fillOpacity?: number; // Transparência do preenchimento (0 a 1)
     strokeOpacity?: number; // Transparência da borda (0 a 1)
-    preserveAspectRatio?: boolean; // Manter proporção no SVG
+    preserveAspectRatio?: boolean; // Manter proporção no SVG (false = dinâmico como Caixa, true = proporcional como Círculo)
+    isCircular?: boolean; // Comportamento dinâmico simétrico/circular (como Círculo)
+    dynamicStretch?: boolean; // Ajuste elástico dinâmico preenchendo 100% da área (como Caixa)
     shapeType?: 
       | 'rectangle' | 'circle' | 'triangle' | 'star' | 'heart' | 'arrow' | 'diamond' | 'hexagon' | 'octagon' | 'pentagon' | 'parallelogram' | 'trapezoid' | 'cloud' | 'shield'
       | 'rounded_rect' | 'washi_tape' | 'ribbon_banner' | 'banner_flag' | 'bookmark_tag' | 'postage_stamp' | 'sticky_note' | 'speech_bubble' | 'thought_cloud' | 'paperclip' | 'pushpin' | 'scalloped_tag'
@@ -464,6 +515,7 @@ export interface AgendaConfig {
   elementsWeeklyRight?: LayoutElement[]; // Template para página direita do planner semanal
   introPages: IntroPage[]; // Lista de páginas iniciais (DADOS, CALENDARIOS, ETC)
   monthlyIntroPages?: IntroPage[]; // Páginas introdutórias que começam toda mês (após o divisor de cada mês)
+  styles?: ProjectStylesConfig; // Sistema de estilos vinculados (Cor, Caractere e Parágrafo)
 }
 
 export type PdfImportDestination = 

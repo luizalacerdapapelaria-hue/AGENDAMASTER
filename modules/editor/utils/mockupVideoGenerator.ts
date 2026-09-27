@@ -287,13 +287,19 @@ export function renderMockupVideoFrame(
     // --- DRAW STATIC LEFT PAGE ---
     ctx.save();
     drawRoundedRectPath(ctx, -pageW, -pageH / 2, pageW, pageH, [cornerR, 0, 0, cornerR]);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = underLeftPageNum <= 0 ? '#fafaf9' : '#ffffff';
     ctx.fill();
     ctx.clip();
 
-    const leftTex = pageTextures.get(underLeftPageNum);
+    const leftTex = underLeftPageNum > 0 ? pageTextures.get(underLeftPageNum) : undefined;
     if (leftTex) {
       ctx.drawImage(leftTex, -pageW, -pageH / 2, pageW, pageH);
+    } else if (underLeftPageNum <= 0) {
+      // Subtle luxury endpaper border for contracapa / guarda
+      const pad = pageW * 0.08;
+      ctx.strokeStyle = 'rgba(214, 211, 209, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-pageW + pad, -pageH / 2 + pad, pageW - pad * 2, pageH - pad * 2);
     }
 
     // Spine curvature shadow on right edge of left page
@@ -321,13 +327,18 @@ export function renderMockupVideoFrame(
     // --- DRAW STATIC RIGHT PAGE ---
     ctx.save();
     drawRoundedRectPath(ctx, 0, -pageH / 2, pageW, pageH, [0, cornerR, cornerR, 0]);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = underRightPageNum <= 0 ? '#fafaf9' : '#ffffff';
     ctx.fill();
     ctx.clip();
 
-    const rightTex = pageTextures.get(underRightPageNum);
+    const rightTex = underRightPageNum > 0 ? pageTextures.get(underRightPageNum) : undefined;
     if (rightTex) {
       ctx.drawImage(rightTex, 0, -pageH / 2, pageW, pageH);
+    } else if (underRightPageNum <= 0) {
+      const pad = pageW * 0.08;
+      ctx.strokeStyle = 'rgba(214, 211, 209, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pad, -pageH / 2 + pad, pageW - pad * 2, pageH - pad * 2);
     }
 
     // Spine curvature shadow on left edge of right page
@@ -660,7 +671,11 @@ export function renderMockupVideoFrame(
     const activeStep = state.flipProgress > 0.55 && state.nextStep ? state.nextStep : state.currentStep;
     const pageText =
       mockupMode === 'spread'
-        ? `Páginas ${activeStep.leftPage} e ${activeStep.rightPage}`
+        ? activeStep.leftPage <= 0
+          ? `Página ${activeStep.rightPage}`
+          : activeStep.rightPage <= 0
+          ? `Página ${activeStep.leftPage}`
+          : `Páginas ${activeStep.leftPage} e ${activeStep.rightPage}`
         : `Página ${activeStep.singlePage}`;
     const fullBadgeText = activeStep.label ? `${activeStep.label}  •  ${pageText}` : pageText;
 

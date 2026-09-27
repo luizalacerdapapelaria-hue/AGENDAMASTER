@@ -691,18 +691,147 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     if (onClose) onClose();
   };
 
-  // Add system font manually or by name
-  const handleSelectFontByName = (familyName: string) => {
+  // Local state for directly queried PC fonts (A-Z) and cached FontData handles
+  const [extraPcFonts, setExtraPcFonts] = useState<string[]>([]);
+  const [scanningPcFonts, setScanningPcFonts] = useState<boolean>(false);
+  const localFontDataMapRef = useRef<Map<string, any>>(new Map());
+
+  // Unified, deduplicated A-Z list of all computer fonts
+  const allAvailablePcFonts = useMemo(() => {
+    const combined = new Set<string>([
+      ...(systemFonts || []),
+      ...(localFonts || []),
+      ...(customFonts || []),
+      ...(manualFonts || []),
+      ...extraPcFonts
+    ]);
+    return Array.from(combined)
+      .map(f => f.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  }, [systemFonts, localFonts, customFonts, manualFonts, extraPcFonts]);
+
+  // Scan all PC fonts (A-Z) and cache FontData objects for binary OpenType glyph extraction
+  const handleScanAllPcFonts = async () => {
+    setScanningPcFonts(true);
+    try {
+      if (onLoadLocalFonts) {
+        await onLoadLocalFonts();
+      }
+      const winAny = typeof window !== 'undefined' ? (window as any) : null;
+      if (winAny && typeof winAny.queryLocalFonts === 'function') {
+        try {
+          const fontDataList = await winAny.queryLocalFonts();
+          if (Array.isArray(fontDataList) && fontDataList.length > 0) {
+            const families: string[] = [];
+            fontDataList.forEach((fd: any) => {
+              if (fd && fd.family) {
+                families.push(fd.family);
+                const key = fd.family.toLowerCase();
+                // Prefer Regular style when multiple weights exist for the same family
+                const existing = localFontDataMapRef.current.get(key);
+                if (!existing || (fd.style && /regular|normal|book|roman/i.test(fd.style))) {
+                  localFontDataMapRef.current.set(key, fd);
+                }
+              }
+            });
+            setExtraPcFonts(Array.from(new Set(families)));
+            const totalUnique = new Set([...allAvailablePcFonts, ...families]).size;
+            showToast(`✨ ${totalUnique} fontes do computador carregadas (de A a Z)!`);
+            setScanningPcFonts(false);
+            return;
+          }
+        } catch (err) {
+          console.warn('[OpenType] Permissão ou leitura de queryLocalFonts:', err);
+        }
+      }
+      const detected = await detectInstalledFonts();
+      if (detected && detected.length > 0) {
+        setExtraPcFonts(detected);
+        showToast(`✨ ${detected.length} fontes do computador carregadas (de A a Z)!`);
+      } else {
+        showToast('Fontes do computador atualizadas!');
+      }
+    } catch (e) {
+      showToast('Erro ao buscar fontes do computador.');
+    } finally {
+      setScanningPcFonts(false);
+    }
+  };
+
+  // Select and decode a PC font by family name (loads real TTF/OTF buffer when available for full swashes/glyphs)
+  const handleSelectFontByName = async (familyName: string) => {
     const existingIdx = fonts.findIndex(f => f.family.toLowerCase() === familyName.toLowerCase());
     if (existingIdx >= 0) {
       setActiveFontIndex(existingIdx);
+      setSelectedGlyph(null);
       return;
     }
 
-    const sysItem = createSystemFontItem(familyName);
-    setFonts(prev => [...prev, sysItem]);
-    setActiveFontIndex(fonts.length);
-    if (onRegisterFont) onRegisterFont(familyName);
+    setLoadingFont(true);
+    try {
+      let parsedItem: ActiveFontItem | null = null;
+      const key = familyName.toLowerCase();
+      let fontHandle = localFontDataMapRef.current.get(key);
+
+      // If not cached yet, query local fonts once to grab the binary FontData handle
+      const winAny = typeof window !== 'undefined' ? (window as any) : null;
+      if (!fontHandle && winAny && typeof winAny.queryLocalFonts === 'function') {
+        try {
+          const allHandles = await winAny.queryLocalFonts();
+          if (Array.isArray(allHandles)) {
+            allHandles.forEach((fd: any) => {
+              if (fd && fd.family) {
+                const k = fd.family.toLowerCase();
+                const ex = localFontDataMapRef.current.get(k);
+                if (!ex || (fd.style && /regular|normal|book|roman/i.test(fd.style))) {
+                  localFontDataMapRef.current.set(k, fd);
+                }
+              }
+            });
+            fontHandle = localFontDataMapRef.current.get(key);
+          }
+        } catch (_) {}
+      }
+
+      if (fontHandle && typeof fontHandle.blob === 'function') {
+        const blob: Blob = await fontHandle.blob();
+        const buffer = await blob.arrayBuffer();
+        parsedItem = await parseAndAddFont(familyName, familyName, 'local', buffer);
+      }
+
+      if (!parsedItem) {
+        parsedItem = createSystemFontItem(familyName);
+      }
+
+      setFonts(prev => {
+        const alreadyIdx = prev.findIndex(f => f.family.toLowerCase() === familyName.toLowerCase());
+        if (alreadyIdx >= 0) {
+          const updated = [...prev];
+          updated[alreadyIdx] = parsedItem!;
+          setActiveFontIndex(alreadyIdx);
+          return updated;
+        }
+        const next = [...prev, parsedItem!];
+        setActiveFontIndex(next.length - 1);
+        return next;
+      });
+
+      setSelectedGlyph(null);
+      if (onRegisterFont) onRegisterFont(familyName);
+      showToast(`Fonte "${familyName}" selecionada! (${parsedItem.font.glyphs.length} glifos)`);
+    } catch (e) {
+      const sysItem = createSystemFontItem(familyName);
+      setFonts(prev => {
+        const next = [...prev, sysItem];
+        setActiveFontIndex(next.length - 1);
+        return next;
+      });
+      setSelectedGlyph(null);
+      if (onRegisterFont) onRegisterFont(familyName);
+    } finally {
+      setLoadingFont(false);
+    }
   };
 
   return (
@@ -784,25 +913,33 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
             </label>
             <div className="relative flex-1 max-w-md">
               <select
-                value={activeFontIndex}
+                value={String(activeFontIndex)}
                 onChange={(e) => {
-                  const idx = parseInt(e.target.value);
-                  setActiveFontIndex(idx);
-                  setSelectedGlyph(null);
+                  const val = e.target.value;
+                  if (val.startsWith('sys:')) {
+                    const sysFontName = val.slice(4);
+                    handleSelectFontByName(sysFontName);
+                  } else {
+                    const idx = parseInt(val, 10);
+                    if (!isNaN(idx)) {
+                      setActiveFontIndex(idx);
+                      setSelectedGlyph(null);
+                    }
+                  }
                 }}
                 className="w-full pl-3 pr-8 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none appearance-none cursor-pointer"
               >
-                <optgroup label="✨ Fontes Especiais com Swashes">
+                <optgroup label="✨ Fontes Carregadas / Com Swashes">
                   {fonts.map((f, i) => (
-                    <option key={`font-${i}`} value={i}>
-                      {f.name} {f.source === 'uploaded' ? '(Enviada)' : ''}
+                    <option key={`font-${i}`} value={String(i)}>
+                      {f.name} {f.source === 'uploaded' ? '(Enviada)' : f.source === 'local' ? '(Do PC)' : ''}
                     </option>
                   ))}
                 </optgroup>
-                {systemFonts && systemFonts.length > 0 && (
-                  <optgroup label="💻 Fontes do Computador">
-                    {systemFonts.slice(0, 40).map(sysFont => (
-                      <option key={`sys-${sysFont}`} value={-1} onClick={() => handleSelectFontByName(sysFont)}>
+                {allAvailablePcFonts.length > 0 && (
+                  <optgroup label={`💻 Fontes do Computador (${allAvailablePcFonts.length} fontes de A a Z)`}>
+                    {allAvailablePcFonts.map(sysFont => (
+                      <option key={`sys-${sysFont}`} value={`sys:${sysFont}`}>
                         {sysFont}
                       </option>
                     ))}
@@ -834,22 +971,20 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
             </button>
 
             {/* Load PC Fonts Button */}
-            {onLoadLocalFonts && (
-              <button
-                type="button"
-                onClick={() => onLoadLocalFonts()}
-                disabled={localFontsLoading}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-xl transition-all cursor-pointer shrink-0 disabled:opacity-50"
-                title="Carregar fontes instaladas no seu computador"
-              >
-                {localFontsLoading ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-                ) : (
-                  <Monitor className="w-3.5 h-3.5 text-indigo-400" />
-                )}
-                <span className="hidden lg:inline">Buscar Fontes do PC</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleScanAllPcFonts}
+              disabled={localFontsLoading || scanningPcFonts}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-xl transition-all cursor-pointer shrink-0 disabled:opacity-50"
+              title="Carregar todas as fontes instaladas no seu computador (A a Z)"
+            >
+              {(localFontsLoading || scanningPcFonts) ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+              ) : (
+                <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+              )}
+              <span className="hidden lg:inline">Buscar Fontes do PC</span>
+            </button>
           </div>
 
           {/* Quick info tag */}
