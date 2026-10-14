@@ -44,7 +44,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
     if (el.type === 'day_number' && day) text = day.dayOfMonth.toString();
     if (el.type === 'day_name' && day) text = getDayName(day.dayOfWeek);
     if (el.type === 'month_name' && day) text = getMonthName(day.month);
-    if (el.type === 'year' && day) text = day.year.toString();
+    if (el.type === 'year' && day) text = (day.year + (style.yearOffset || 0)).toString();
     if (el.type === 'quote') text = quote || '';
     if (el.type === 'verse') text = verse || '';
     if (el.type === 'holiday' && day) text = day.holiday || '';
@@ -235,7 +235,8 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             doc.setFont(fontConfig.font, 'bold');
             
             const showYear = el.style.fullCalendar?.showYearInTitle ?? true;
-            const titleText = showYear ? `${getMonthName(m)} ${day.year}` : getMonthName(m);
+            const targetYear = day.year + (style.yearOffset || 0);
+            const titleText = showYear ? `${getMonthName(m)} ${targetYear}` : getMonthName(m);
             
             doc.text(titleText, mx + cellW/2, my + 4, { align: 'center' });
             

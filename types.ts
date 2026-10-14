@@ -11,6 +11,29 @@ export interface Holiday {
   type: 'national' | 'optional' | 'religious' | 'municipal' | string;
 }
 
+export type SpecialDateType = 'vacation' | 'wedding_countdown' | 'countdown' | 'birthday' | 'custom_event' | 'reminder';
+
+export interface SpecialDateItem {
+  id: string;
+  type: SpecialDateType;
+  title: string;              // ex: "Férias da Cliente", "Casamento Luiza & Lucas", "Aniversário da Ana"
+  date: string;               // ISO 'YYYY-MM-DD'
+  endDate?: string;           // ISO 'YYYY-MM-DD' (opcional para períodos como férias 20/02 a 28/02)
+  icon?: string;              // Emoji ou identificador (🏖️, 💍, 🎂, ✈️, 🎓, ⭐, 📌, ❤️, 🌴, 👶, etc.)
+  color?: string;             // Cor do texto/destaque (default: #4f46e5)
+  bgColor?: string;           // Cor de fundo do badge/tarja
+  showBadge?: boolean;        // Se exibe como badge/tarja destacada na página do miolo
+  badgePosition?: 'top' | 'bottom' | 'header_right' | 'integrated';
+  
+  // Específico para Contagem Regressiva (Casamento, Concurso, etc.):
+  isCountdown?: boolean;
+  countdownDaysBefore?: number;   // Quantos dias antes do evento a contagem começa (ex: 30, 60, 100, 365)
+  countdownFrequency?: 'daily' | 'every_5' | 'every_10' | 'last_30_daily'; // Frequência da contagem
+  countdownMessage?: string;      // Template da mensagem: ex: "Faltam {dias} dias para o casamento 💍"
+  countdownFinalMessage?: string; // Mensagem no dia do evento: ex: "Hoje é o grande dia: Nosso Casamento! 💍❤️"
+  countdownOneDayMessage?: string;// Mensagem na véspera: ex: "Falta 1 dia! É amanhã! 💍✨"
+}
+
 export interface DayData {
   date: Date;
   dayOfWeek: number; // 0-6
@@ -21,6 +44,10 @@ export interface DayData {
   moonPhase?: string;
   quote?: string;
   verse?: string;
+  specialEvents?: SpecialDateItem[];
+  countdowns?: { item: SpecialDateItem; daysRemaining: number; text: string }[];
+  specialEventText?: string;
+  specialDatesList?: SpecialDateItem[];
 }
 
 // Tipos de elementos que podem ser arrastados para a página
@@ -38,6 +65,7 @@ export type ElementType =
   | 'quote' 
   | 'moon' 
   | 'holiday' 
+  | 'special_event' // Informações importantes / Datas Especiais / Contagem Regressiva no miolo
   | 'habit_tracker' 
   | 'note_grid'
   | 'mini_calendar'
@@ -189,8 +217,17 @@ export interface LayoutElement {
     fontWeight?: string;
     color?: string; // Cor do texto ou contorno (Stroke para vetores)
     backgroundColor?: string; // Preenchimento (Fill para vetores)
+    fillColor?: string; // Alias para backgroundColor / preenchimento
     fontStyle?: 'normal' | 'italic'; // Novo
     lineHeight?: number; // Novo
+    title?: string;
+    stepHour?: number;
+    showCheckboxes?: boolean;
+    checkboxStyle?: 'round' | 'square' | 'circle' | string;
+    timeFontSize?: number;
+    timeFontWeight?: string;
+    timeColor?: string;
+    timeColumnWidth?: number;
     
     // Configurações Avançadas de Caixa
     backgroundType?: 'solid' | 'gradient';
@@ -235,6 +272,8 @@ export interface LayoutElement {
     simulateMaxSpace?: boolean; // Novo: Simular maior ocupação de espaço para testes de layout
     variant?: string;
     nameFormat?: 'full' | 'short' | 'initial' | string; // Formato de nome/abreviação (Completo, 3 letras, 1 letra)
+    dateTemplate?: string; // Template dinâmico para datas compostas (ex: "{{DD}} de {{MMMM}} de {{YYYY}}")
+    originalPdfText?: string; // Texto original extraído do PDF para referência ou reversão para texto estático
     fillOpacity?: number; // Transparência do preenchimento (0 a 1)
     strokeOpacity?: number; // Transparência da borda (0 a 1)
     preserveAspectRatio?: boolean; // Manter proporção no SVG (false = dinâmico como Caixa, true = proporcional como Círculo)
@@ -285,6 +324,9 @@ export interface LayoutElement {
         insideBorderWidth?: number; // Espessura das linhas internas
         borderStyle?: 'solid' | 'dashed' | 'dotted';
         headerRow: boolean;
+        headerBackgroundColor?: string;
+        headerTextColor?: string;
+        alternateRowColor?: string;
         rowHeight?: number; // Altura mínima da linha em px (no editor)
         borderRadius?: number; // Arredondamento das bordas
         zebraRows?: boolean; // Opção de linhas intercaladas
@@ -454,6 +496,27 @@ export type PageSize = 'A4' | 'A5' | 'Letter' | 'Custom';
 export type PageOrientation = 'portrait' | 'landscape';
 export type ProjectType = 'agenda' | 'planner' | 'notebook' | 'devotional';
 
+export interface MonthlyDividerStyle {
+  layout?: 'classic' | 'modern' | 'minimalist' | 'geometric' | 'custom';
+  borderStyle?: 'none' | 'double' | 'solid' | 'dashed';
+  borderColor?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  accentColor?: string;
+  showYear?: boolean;
+  showDividerLines?: boolean;
+  includeMiniCalendar?: boolean;
+  titleText?: string;
+  titleFont?: string;
+  titleColor?: string;
+  elements?: LayoutElement[];
+  background?: BackgroundConfig;
+  versoBackground?: BackgroundConfig;
+  versoQuoteStyle?: TextStyleConfig;
+  versoQuotePosition?: { x: number; y: number; w: number; h: number };
+  versoElements?: LayoutElement[];
+}
+
 export interface AgendaConfig {
   name?: string; // Nome do projeto
   projectType?: ProjectType; // Novo: Tipo de projeto
@@ -475,23 +538,7 @@ export interface AgendaConfig {
   includeMonthlyIntroPages?: boolean; // Nova: incluir páginas mensais
   fillerPageContent?: 'notes' | 'habit_tracker' | 'quote' | 'blank' | string; // Conteúdo da página de transição (ou ID de introPage)
   monthlyDividerVersoContent?: 'blank' | 'notes' | 'habit_tracker' | 'quote' | 'monthly_intro_first' | string; // Verso das divisórias de meses
-  monthlyDividerStyle?: {
-    layout?: 'classic' | 'modern' | 'minimalist' | 'geometric' | 'custom';
-    borderStyle?: 'none' | 'double' | 'solid' | 'dashed';
-    borderColor?: string;
-    backgroundColor?: string;
-    textColor?: string;
-    accentColor?: string;
-    showYear?: boolean;
-    showDividerLines?: boolean;
-    titleText?: string;
-    elements?: LayoutElement[];
-    background?: BackgroundConfig;
-    versoBackground?: BackgroundConfig;
-    versoQuoteStyle?: TextStyleConfig;
-    versoQuotePosition?: { x: number; y: number; w: number; h: number };
-    versoElements?: LayoutElement[];
-  };
+  monthlyDividerStyle?: MonthlyDividerStyle;
   margins: PageMargins;
   initialMargins?: PageMargins; // Margens originais definidas no setup inicial (para manter espelhamento inteligente mesmo após importar PDF 1:1)
   bindingMargins?: PageMargins; // Margens de encadernação (interna/externa) usadas para cálculo de espelhamento e recuo de espiral
@@ -516,6 +563,9 @@ export interface AgendaConfig {
   introPages: IntroPage[]; // Lista de páginas iniciais (DADOS, CALENDARIOS, ETC)
   monthlyIntroPages?: IntroPage[]; // Páginas introdutórias que começam toda mês (após o divisor de cada mês)
   styles?: ProjectStylesConfig; // Sistema de estilos vinculados (Cor, Caractere e Parágrafo)
+  specialDates?: SpecialDateItem[]; // Datas Especiais, Férias da Cliente, Contagem Regressiva para Casamento
+  showSpecialDateBadges?: boolean; // Exibir badges elegantes nas páginas dos dias com eventos especiais
+  specialDateBadgePosition?: 'top' | 'bottom'; // Posição dos badges automáticos nas páginas
 }
 
 export type PdfImportDestination = 
@@ -545,5 +595,6 @@ export enum AppState {
   INITIAL_SETUP,
   DASHBOARD,
   PREVIEW,
-  LANDING
+  LANDING,
+  QUIZ
 }

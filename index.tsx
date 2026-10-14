@@ -102,22 +102,16 @@ if (typeof window !== 'undefined') {
   const CURRENT_SYSTEM_VERSION = 'agendamaster-v1.1.2';
   const lastSavedVersion = localStorage.getItem('agendamaster_system_version');
   
-  if (lastSavedVersion !== CURRENT_SYSTEM_VERSION) {
+  if (!lastSavedVersion) {
+    try {
+      localStorage.setItem('agendamaster_system_version', CURRENT_SYSTEM_VERSION);
+    } catch (_) {}
+  } else if (lastSavedVersion !== CURRENT_SYSTEM_VERSION) {
     console.warn('[Self-Heal] Nova atualização do sistema detectada. Limpando caches obsoletos para evitar travamentos...');
-    (window as any).clearAppCache(false).then(() => {
-      try {
-        localStorage.setItem('agendamaster_system_version', CURRENT_SYSTEM_VERSION);
-      } catch (_) {}
-      console.log('[Self-Heal] Caches limpos com sucesso. Forçando recarga da página...');
-      setTimeout(() => {
-        window.location.reload();
-      }, 300);
-    }).catch(() => {
-      try {
-        localStorage.setItem('agendamaster_system_version', CURRENT_SYSTEM_VERSION);
-      } catch (_) {}
-      window.location.reload();
-    });
+    try {
+      localStorage.setItem('agendamaster_system_version', CURRENT_SYSTEM_VERSION);
+    } catch (_) {}
+    (window as any).clearAppCache(false).catch(() => {});
   }
 
   const clearStaleSession = () => {
@@ -147,6 +141,15 @@ if (typeof window !== 'undefined') {
     const msg = (reason?.message || (typeof reason === 'string' ? reason : '') || '').toLowerCase();
     
     if (
+      msg.includes('[vite]') ||
+      msg.includes('send was called before connect') ||
+      msg.includes('websocket')
+    ) {
+      event.preventDefault();
+      return;
+    }
+
+    if (
       msg.includes('refresh_token') || 
       msg.includes('refresh token') || 
       msg.includes('not found') || 
@@ -157,13 +160,20 @@ if (typeof window !== 'undefined') {
       console.warn('[Auth Global] Capturada falha de refresh token em promessa não tratada:', msg);
       event.preventDefault();
       clearStaleSession();
-      // Force page reload to ensure App starts pristine
-      window.location.reload();
     }
   });
 
   window.addEventListener('error', (event) => {
     const msg = (event.message || '').toLowerCase();
+    if (
+      msg.includes('[vite]') ||
+      msg.includes('send was called before connect') ||
+      msg.includes('websocket')
+    ) {
+      event.preventDefault();
+      return;
+    }
+
     if (
       msg.includes('refresh_token') || 
       msg.includes('refresh token') || 
@@ -175,7 +185,6 @@ if (typeof window !== 'undefined') {
       console.warn('[Auth Global] Erro síncrono de autenticação capturado:', msg);
       event.preventDefault();
       clearStaleSession();
-      window.location.reload();
     }
   });
 }

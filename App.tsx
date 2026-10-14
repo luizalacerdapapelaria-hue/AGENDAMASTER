@@ -6,10 +6,11 @@ import { Welcome } from './modules/auth/Welcome';
 import { Dashboard } from './modules/editor/Dashboard';
 import { InitialSetup } from './modules/editor/InitialSetup';
 import { LandingPage } from './modules/landing/LandingPage';
+import { QuizPage } from './modules/quiz/QuizPage';
 import { UpdateNotifier } from './modules/editor/components/UpdateNotifier';
 import { User, AppState, AgendaConfig } from './types';
 import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from './services/supabase';
-import { Wrench, Sparkles, Layout, LogIn, ChevronDown, ChevronUp, UserCheck, Settings, Globe } from 'lucide-react';
+import { Wrench, Sparkles, Layout, LogIn, ChevronDown, ChevronUp, UserCheck, Settings, Globe, HelpCircle, RotateCcw, Gift } from 'lucide-react';
 
 const App: React.FC = () => {
   const isElectron = typeof window !== 'undefined' && (
@@ -33,6 +34,25 @@ const App: React.FC = () => {
       ) {
         return AppState.LANDING;
       }
+      if (
+        path === '/quiz' || 
+        path.endsWith('/quiz') || 
+        path.includes('/quiz') ||
+        path === '/diagnostico' ||
+        path === '/raspadinha' ||
+        path.endsWith('/raspadinha') ||
+        path === '/desconto' ||
+        path.endsWith('/desconto') ||
+        path === '/oferta' ||
+        path.endsWith('/oferta') ||
+        pageParam === 'quiz' || 
+        pageParam === 'diagnostico' ||
+        pageParam === 'raspadinha' ||
+        pageParam === 'desconto' ||
+        pageParam === 'oferta'
+      ) {
+        return AppState.QUIZ;
+      }
       if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
         return AppState.LOGIN;
       }
@@ -48,7 +68,7 @@ const App: React.FC = () => {
   const [initialConfig, setInitialConfig] = useState<Partial<AgendaConfig> | undefined>(undefined);
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
-    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v1.1.2/Agenda.Master.Setup.1.1.2.exe';
+    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.0/Agenda.Master.Setup.2.0.0.exe';
   });
 
   const verifiedEmailRef = React.useRef<string | null>(null);
@@ -59,6 +79,8 @@ const App: React.FC = () => {
     if (typeof window !== 'undefined' && window.history && !isElectron) {
       if (targetState === AppState.LANDING) {
         window.history.pushState({ state: 'landing' }, '', '/agendamaster');
+      } else if (targetState === AppState.QUIZ) {
+        window.history.pushState({ state: 'quiz' }, '', '/quiz');
       } else if (targetState === AppState.LOGIN) {
         window.history.pushState({ state: 'acesso' }, '', '/acesso');
       } else if (targetState === AppState.WELCOME) {
@@ -77,6 +99,22 @@ const App: React.FC = () => {
 
       if (path === '/agendamaster' || path.endsWith('/agendamaster') || pageParam === 'agendamaster' || pageParam === 'landing') {
         setAppState(AppState.LANDING);
+      } else if (
+        path === '/quiz' || 
+        path.endsWith('/quiz') || 
+        path === '/diagnostico' || 
+        path === '/raspadinha' || 
+        path.endsWith('/raspadinha') || 
+        path === '/desconto' || 
+        path.endsWith('/desconto') || 
+        path === '/oferta' || 
+        path.endsWith('/oferta') || 
+        pageParam === 'quiz' || 
+        pageParam === 'diagnostico' || 
+        pageParam === 'raspadinha' || 
+        pageParam === 'desconto'
+      ) {
+        setAppState(AppState.QUIZ);
       } else if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
         setAppState(AppState.LOGIN);
       } else if (path === '/welcome' || pageParam === 'welcome') {
@@ -93,28 +131,36 @@ const App: React.FC = () => {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
       const msg = reason?.message || String(reason || '');
+      const lower = msg.toLowerCase();
       if (
-        msg.toLowerCase().includes('failed to fetch') || 
-        msg.toLowerCase().includes('fetch') ||
-        msg.toLowerCase().includes('network') ||
-        msg.toLowerCase().includes('cors') ||
-        msg.toLowerCase().includes('load')
+        lower.includes('[vite]') ||
+        lower.includes('send was called before connect') ||
+        lower.includes('websocket') ||
+        lower.includes('failed to fetch') || 
+        lower.includes('fetch') ||
+        lower.includes('network') ||
+        lower.includes('cors') ||
+        lower.includes('load')
       ) {
-        console.warn('[Global Rejection Handler]: Intercepted and handled a harmless network exception:', msg);
+        console.warn('[Global Rejection Handler]: Intercepted and handled a harmless network/HMR exception:', msg);
         event.preventDefault(); // Prevents browser from treating this as an uncaught exception
       }
     };
 
     const handleGlobalError = (event: ErrorEvent) => {
       const msg = event.message || '';
+      const lower = msg.toLowerCase();
       if (
-        msg.toLowerCase().includes('failed to fetch') || 
-        msg.toLowerCase().includes('fetch') ||
-        msg.toLowerCase().includes('network') ||
-        msg.toLowerCase().includes('cors') ||
-        msg.toLowerCase().includes('load')
+        lower.includes('[vite]') ||
+        lower.includes('send was called before connect') ||
+        lower.includes('websocket') ||
+        lower.includes('failed to fetch') || 
+        lower.includes('fetch') ||
+        lower.includes('network') ||
+        lower.includes('cors') ||
+        lower.includes('load')
       ) {
-        console.warn('[Global Error Handler]: Intercepted and handled a harmless network error:', msg);
+        console.warn('[Global Error Handler]: Intercepted and handled a harmless network/HMR error:', msg);
         event.preventDefault(); // Prevents browser from treating this as a fatal crash
       }
     };
@@ -445,6 +491,16 @@ const App: React.FC = () => {
         <LandingPage 
             onNavigate={(state) => navigateToState(state)} 
             exeUrl={exeUrl} 
+            checkoutUrl="https://pay.herospark.com/agenda-master-545764"
+            originalOfferUrl="https://pay.herospark.com/agenda-master-523399"
+        />
+      )}
+
+      {appState === AppState.QUIZ && (
+        <QuizPage 
+            onNavigate={(state) => navigateToState(state)} 
+            originalOfferUrl="https://pay.herospark.com/agenda-master-523399"
+            offerUrl="https://pay.herospark.com/agenda-master-545764"
         />
       )}
 
@@ -476,6 +532,59 @@ const App: React.FC = () => {
 
                 {/* Navigation Actions buttons */}
                 <div className="grid grid-cols-1 gap-2">
+                  <button
+                    onClick={() => setDevState(AppState.QUIZ)}
+                    className={`w-full flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-semibold uppercase tracking-wider transition-all ${
+                      appState === AppState.QUIZ 
+                        ? 'bg-slate-800 border-amber-500 text-amber-300 shadow-sm' 
+                        : 'bg-slate-800/40 border-slate-700 hover:bg-slate-800 hover:border-slate-650 text-slate-200'
+                    }`}
+                  >
+                    <HelpCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="leading-tight">Quiz & Vídeo (50% OFF)</p>
+                      <span className="text-[9px] text-slate-400 font-normal normal-case">Funil de conscientização de anúncios</span>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem('agendamaster_quiz_offer_expires_at');
+                        localStorage.setItem('agendamaster_dev_unlimited_offer', 'true');
+                      } catch {}
+                      setDevState(AppState.QUIZ);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-[10px] font-bold transition-all -mt-1 mb-1"
+                    title="Reseta o cronômetro do quiz e força a exibição do desconto de 50%"
+                  >
+                    <RotateCcw className="w-3 h-3 text-amber-400" />
+                    <span>Resetar Trava do Quiz (Ver 50% OFF Ativo)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem('agendamaster_quiz_offer_expires_at');
+                        localStorage.removeItem('agendamaster_quiz_scratched');
+                        localStorage.setItem('agendamaster_dev_unlimited_offer', 'true');
+                      } catch {}
+                      if (typeof window !== 'undefined' && window.history) {
+                        window.history.pushState({ state: 'scratch' }, '', '/raspadinha');
+                      }
+                      setDevState(AppState.QUIZ);
+                      window.dispatchEvent(new CustomEvent('agendamaster-set-stage', { detail: 'scratch' }));
+                    }}
+                    className="w-full flex items-center gap-2 p-2 rounded-xl border text-left text-xs font-semibold uppercase tracking-wider transition-all bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+                    title="Abre diretamente a tela com a raspadinha dourada interativa pronta para raspar"
+                  >
+                    <Gift className="w-4 h-4 text-amber-400 flex-shrink-0 animate-bounce" />
+                    <div className="flex-1">
+                      <p className="leading-tight text-[11px]">Ver Raspadinha Direta</p>
+                      <span className="text-[9px] text-stone-400 font-normal normal-case">Dourada & pronta para raspar</span>
+                    </div>
+                  </button>
+
                   <button
                     onClick={() => setDevState(AppState.LANDING)}
                     className={`w-full flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-semibold uppercase tracking-wider transition-all ${

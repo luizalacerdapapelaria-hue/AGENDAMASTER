@@ -15,6 +15,8 @@ export const isDevelopmentEnvironment = typeof window !== 'undefined' && (
   window.location.hostname === 'localhost' ||
   window.location.hostname === '127.0.0.1' ||
   window.location.hostname.includes('ais-dev') ||
+  window.location.hostname.includes('ais-pre') ||
+  window.location.hostname.includes('run.app') ||
   window.location.hostname.includes('webcontainer-api') ||
   window.location.hostname.includes('stackblitz')
 );
@@ -24,6 +26,7 @@ export const isTutorOrAllowedEmail = (emailStr: string): boolean => {
   if (!emailStr) return false;
   const norm = emailStr.trim().toLowerCase();
   return (
+    norm === 'luizalacerdamachado@gmail.com' ||
     norm === 'luizalacerdapapelaria@gmail.com' ||
     norm === 'luizalacerdaatelie@gmail.com'
   );

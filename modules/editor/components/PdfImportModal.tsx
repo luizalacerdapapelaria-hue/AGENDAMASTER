@@ -5,9 +5,47 @@ import {
   Trash2, AlertCircle, CheckSquare, Square, ZoomIn, ZoomOut, Type, Minus,
   Palette, Sliders, CheckCircle2, Layout, Maximize2, BookOpen, Calendar, ArrowRightLeft, BookmarkPlus
 } from 'lucide-react';
-import { LayoutElement, PdfImportDestination, PdfImportBatchItem } from '../../../types';
+import { LayoutElement, ElementType, PdfImportDestination, PdfImportBatchItem } from '../../../types';
 export type { PdfImportDestination, PdfImportBatchItem };
-import { extractPdfObjects, getPdfPageCount, PdfPageExtractionResult, PdfExtractionOptions } from '../../../core/logic/pdfExtractor';
+import {
+  extractPdfObjects,
+  getPdfPageCount,
+  PdfPageExtractionResult,
+  PdfExtractionOptions,
+  convertElementBetweenStaticAndDynamic,
+  reapplyDynamicDetectionToElements,
+} from '../../../core/logic/pdfExtractor';
+
+const DYNAMIC_VARIABLE_TYPES: ElementType[] = [
+  'day_number',
+  'day_name',
+  'month_name',
+  'month_number',
+  'year',
+  'date_placeholder',
+];
+
+const isDynamicVariableElement = (type: string): boolean =>
+  DYNAMIC_VARIABLE_TYPES.includes(type as ElementType);
+
+const getDynamicBadgeLabel = (el: LayoutElement): string => {
+  switch (el.type) {
+    case 'day_number':
+      return el.style?.dayIndex && el.style.dayIndex > 0 ? `⚡ Dia +${el.style.dayIndex}` : '⚡ Dia';
+    case 'day_name':
+      return el.style?.dayIndex && el.style.dayIndex > 0 ? `⚡ Semana +${el.style.dayIndex}` : '⚡ Semana';
+    case 'month_name':
+      return '⚡ Mês';
+    case 'month_number':
+      return '⚡ Nº Mês';
+    case 'year':
+      return '⚡ Ano';
+    case 'date_placeholder':
+      return '⚡ Data Completa';
+    default:
+      return '';
+  }
+};
 
 export interface PdfPageBatchConfig {
   pageNumber: number;
@@ -81,6 +119,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   // Ajustes de Proporção e Margens
   const [matchPageDimensions, setMatchPageDimensions] = useState<boolean>(true);
   const [zeroMargins, setZeroMargins] = useState<boolean>(true);
+  const [autoDetectDynamic, setAutoDetectDynamic] = useState<boolean>(true);
 
   // Resultado da extração
   const [extractionResult, setExtractionResult] = useState<PdfPageExtractionResult | null>(null);
@@ -106,7 +145,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   const runExtraction = useCallback(async (
     targetFile: File,
     pageNum: number,
-    mode: 'pure_vector' | 'art_whiteout' | 'bg_only' = 'pure_vector'
+    mode: 'pure_vector' | 'art_whiteout' | 'bg_only' = 'pure_vector',
+    detectDynamic: boolean = autoDetectDynamic
   ) => {
     try {
       setLoading(true);
@@ -120,7 +160,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
         extractShapes: true,
         renderBackgroundCanvas: isArtMode,
         applyTextWhiteout: mode === 'art_whiteout',
-        textColorDefault: '#1f2937'
+        textColorDefault: '#1f2937',
+        autoDetectDynamicVariables: detectDynamic,
       };
 
       const result = await extractPdfObjects(targetFile, options);
@@ -144,8 +185,14 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   const handleModeChange = (newMode: 'pure_vector' | 'art_whiteout' | 'bg_only') => {
     setImportMode(newMode);
     if (file) {
-      runExtraction(file, currentPage, newMode);
+      runExtraction(file, currentPage, newMode, autoDetectDynamic);
     }
+  };
+
+  // Alterna detecção automática de variáveis dinâmicas (Datas, Dias, Meses, Anos)
+  const handleToggleAutoDetectDynamic = (enabled: boolean) => {
+    setAutoDetectDynamic(enabled);
+    setElements(prev => reapplyDynamicDetectionToElements(prev, enabled));
   };
 
   // Atualiza destino e ajusta categoria e nome sugerido automaticamente
@@ -399,7 +446,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
             extractShapes: true,
             renderBackgroundCanvas: isArtMode,
             applyTextWhiteout: importMode === 'art_whiteout',
-            textColorDefault: '#1f2937'
+            textColorDefault: '#1f2937',
+            autoDetectDynamicVariables: autoDetectDynamic,
           });
         } catch (err: any) {
           setLoading(false);
@@ -478,7 +526,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
             extractShapes: true,
             renderBackgroundCanvas: isArtMode,
             applyTextWhiteout: importMode === 'art_whiteout',
-            textColorDefault: '#1f2937'
+            textColorDefault: '#1f2937',
+            autoDetectDynamicVariables: autoDetectDynamic,
           });
         }
 
@@ -542,6 +591,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   };
 
   // Estatísticas de elementos
+  const dynamicCount = elements.filter(e => isDynamicVariableElement(e.type)).length;
   const textCount = elements.filter(e => e.type === 'text').length;
   const lineCount = elements.filter(e => e.type === 'lines').length;
   const shapeCount = elements.filter(e => ['box', 'circle'].includes(e.type)).length;
@@ -968,11 +1018,13 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                             className={`group cursor-pointer transition-shadow ${
                               isSelected
                                 ? 'ring-2 ring-indigo-600 shadow-md'
+                                : isDynamicVariableElement(el.type)
+                                ? 'ring-1 ring-emerald-500/70 bg-emerald-500/5 hover:ring-2 hover:ring-emerald-600'
                                 : 'hover:ring-1 hover:ring-indigo-300'
                             }`}
                           >
-                            {el.type === 'text' ? (
-                              isEditingText === el.id ? (
+                            {(el.type === 'text' || isDynamicVariableElement(el.type)) ? (
+                              isEditingText === el.id && el.type === 'text' ? (
                                 <input
                                   type="text"
                                   autoFocus
@@ -999,10 +1051,21 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                                     color: el.style.color || '#1f2937',
                                     lineHeight: 1.22,
                                     whiteSpace: 'nowrap',
+                                    justifyContent:
+                                      el.style.textAlign === 'center'
+                                        ? 'center'
+                                        : el.style.textAlign === 'right'
+                                        ? 'flex-end'
+                                        : 'flex-start',
                                   }}
-                                  className="w-full h-full flex items-center px-0.5 pointer-events-none"
+                                  className="w-full h-full flex items-center px-0.5 pointer-events-none relative"
                                 >
-                                  {el.content}
+                                  {el.content || el.style.originalPdfText}
+                                  {isDynamicVariableElement(el.type) && !isSelected && (
+                                    <span className="absolute -top-3.5 right-0 bg-emerald-600 text-white text-[7px] font-bold px-1 py-0.2 rounded shadow-xs whitespace-nowrap pointer-events-none">
+                                      {getDynamicBadgeLabel(el)}
+                                    </span>
+                                  )}
                                 </div>
                               )
                             ) : el.type === 'lines' ? (
@@ -1037,8 +1100,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                             )}
 
                             {isSelected && (
-                              <div className="absolute -top-5 left-0 bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow flex items-center gap-1 whitespace-nowrap pointer-events-none z-50">
-                                {el.type === 'text' ? <Type className="w-2.5 h-2.5" /> : el.type === 'lines' ? <Minus className="w-2.5 h-2.5" /> : <Square className="w-2.5 h-2.5" />}
+                              <div className={`absolute -top-5 left-0 ${isDynamicVariableElement(el.type) ? 'bg-emerald-600' : 'bg-indigo-600'} text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow flex items-center gap-1 whitespace-nowrap pointer-events-none z-50`}>
+                                {isDynamicVariableElement(el.type) ? <Calendar className="w-2.5 h-2.5" /> : el.type === 'text' ? <Type className="w-2.5 h-2.5" /> : el.type === 'lines' ? <Minus className="w-2.5 h-2.5" /> : <Square className="w-2.5 h-2.5" />}
                                 <span>{el.name}</span>
                               </div>
                             )}
@@ -1069,7 +1132,12 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
 
               {/* Resumo de Elementos Encontrados */}
               <div className="p-3 bg-indigo-50/40 border-b border-indigo-100 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-3 text-gray-600 text-[11px]">
+                <div className="flex flex-wrap items-center gap-2.5 text-gray-600 text-[11px]">
+                  {dynamicCount > 0 && (
+                    <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold border border-emerald-200">
+                      ⚡ {dynamicCount} var. dinâmicas
+                    </span>
+                  )}
                   <span>📝 <strong>{textCount}</strong> textos</span>
                   {lineCount > 0 && <span>📏 <strong>{lineCount}</strong> linhas</span>}
                   <span>🎨 <strong>{shapeCount}</strong> formas</span>
@@ -1078,7 +1146,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer shrink-0"
                 >
                   {selectedIds.size === elements.length ? 'Desmarcar' : 'Marcar Todos'}
                 </button>
@@ -1705,41 +1773,160 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                           </span>
                         </div>
                       </label>
+
+                      <label className="flex items-start gap-2 cursor-pointer pt-1.5 border-t border-indigo-100/80">
+                        <input
+                          type="checkbox"
+                          checked={autoDetectDynamic}
+                          onChange={(e) => handleToggleAutoDetectDynamic(e.target.checked)}
+                          className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                        />
+                        <div className="text-[10px] text-gray-700 leading-tight">
+                          <span className="font-bold text-emerald-900 flex items-center gap-1">
+                            <span>⚡ Converter Datas, Dias e Meses em Variáveis Dinâmicas</span>
+                            {dynamicCount > 0 && (
+                              <span className="bg-emerald-600 text-white text-[8px] px-1.5 py-0.2 rounded-full">
+                                {dynamicCount} detectadas
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-gray-500 text-[9px] mt-0.5 block">
+                            Identifica automaticamente números de dia, dias da semana, meses, anos e datas por extenso do PDF para que mudem sozinhos em cada dia/mês da agenda.
+                          </span>
+                        </div>
+                      </label>
                     </div>
                   </div>
                 </div>
 
                 {/* 2. Inspetor do Elemento Selecionado */}
-                {selectedElementId && (
+                {selectedElementId && (() => {
+                  const selEl = elements.find(e => e.id === selectedElementId);
+                  if (!selEl) return null;
+                  const isTextOrDynamic = selEl.type === 'text' || isDynamicVariableElement(selEl.type);
+                  return (
                   <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2.5 text-xs">
                     <div className="flex items-center justify-between font-bold text-gray-900 text-[11px]">
                       <span>Editar Elemento Selecionado</span>
-                      <span className="text-[10px] text-indigo-600 font-mono bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                        {elements.find(e => e.id === selectedElementId)?.type}
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                        isDynamicVariableElement(selEl.type)
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold'
+                          : 'bg-white text-indigo-600 border-gray-200'
+                      }`}>
+                        {isDynamicVariableElement(selEl.type) ? getDynamicBadgeLabel(selEl) : selEl.type}
                       </span>
                     </div>
 
-                    {elements.find(e => e.id === selectedElementId)?.type === 'text' && (
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] text-gray-600 block">Texto:</label>
-                        <input
-                          type="text"
-                          value={elements.find(e => e.id === selectedElementId)?.content || ''}
-                          onChange={(e) => updateElement(selectedElementId, { content: e.target.value })}
-                          className="w-full text-xs px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
-                        />
+                    {isTextOrDynamic && (
+                      <div className="space-y-2">
+                        {/* Seletor de Comportamento: Texto Fixo vs Variável Dinâmica da Agenda */}
+                        <div className="p-2 bg-white border border-emerald-200 rounded-lg space-y-1.5">
+                          <label className="text-[10px] font-bold text-emerald-900 flex items-center justify-between">
+                            <span>⚡ Comportamento na Agenda:</span>
+                            {selEl.style?.originalPdfText && (
+                              <span className="text-[9px] font-normal text-gray-400 truncate max-w-[140px]" title={selEl.style.originalPdfText}>
+                                PDF: "{selEl.style.originalPdfText}"
+                              </span>
+                            )}
+                          </label>
+                          <select
+                            value={selEl.type}
+                            onChange={(e) => {
+                              const newType = e.target.value as any;
+                              const converted = convertElementBetweenStaticAndDynamic(selEl, newType);
+                              setElements(prev => prev.map(item => item.id === selEl.id ? converted : item));
+                            }}
+                            className="w-full text-[11px] font-semibold px-2 py-1.5 bg-emerald-50/50 border border-emerald-300 rounded-md text-gray-800 focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
+                          >
+                            <option value="text">📝 Texto Fixo / Estático (Não muda)</option>
+                            <option value="day_number">📅 Número do Dia (01 a 31 - Dinâmico)</option>
+                            <option value="day_name">🗓️ Dia da Semana (Segunda, Terça... - Dinâmico)</option>
+                            <option value="month_name">📆 Nome do Mês (Janeiro a Dezembro - Dinâmico)</option>
+                            <option value="month_number">🔢 Número do Mês (01 a 12 - Dinâmico)</option>
+                            <option value="year">🎯 Ano da Agenda (2025, 2026... - Dinâmico)</option>
+                            <option value="date_placeholder">✨ Data Composta / Completa (Ex: 15 de Janeiro - Dinâmico)</option>
+                          </select>
+
+                          {isDynamicVariableElement(selEl.type) && (
+                            <div className="grid grid-cols-2 gap-1.5 pt-1">
+                              {(selEl.type === 'day_name' || selEl.type === 'month_name') && (
+                                <div>
+                                  <label className="text-[9px] text-gray-500 block mb-0.5">Formato:</label>
+                                  <select
+                                    value={selEl.style.nameFormat || 'full'}
+                                    onChange={(e) => updateElement(selEl.id, { style: { nameFormat: e.target.value } })}
+                                    className="w-full text-[10px] px-1.5 py-1 bg-white border border-gray-300 rounded outline-none"
+                                  >
+                                    <option value="full">Completo</option>
+                                    {selEl.type === 'day_name' && <option value="no_feira">Sem "-feira" (Segunda)</option>}
+                                    <option value="short">Abreviado (3 letras)</option>
+                                    <option value="initial">Inicial (1 letra)</option>
+                                  </select>
+                                </div>
+                              )}
+
+                              {(selEl.type === 'day_number' || selEl.type === 'day_name' || selEl.type === 'date_placeholder') && (
+                                <div>
+                                  <label className="text-[9px] text-gray-500 block mb-0.5">Dia na Página:</label>
+                                  <select
+                                    value={selEl.style.dayIndex || 0}
+                                    onChange={(e) => updateElement(selEl.id, { style: { dayIndex: Number(e.target.value) } })}
+                                    className="w-full text-[10px] px-1.5 py-1 bg-white border border-gray-300 rounded outline-none"
+                                  >
+                                    <option value={0}>1º Dia da Página (Padrão)</option>
+                                    <option value={1}>2º Dia (+1 dia / 2DPP)</option>
+                                    <option value={2}>3º Dia (+2 dias)</option>
+                                    <option value={3}>4º Dia (+3 dias)</option>
+                                    <option value={4}>5º Dia (+4 dias)</option>
+                                    <option value={5}>6º Dia (+5 dias)</option>
+                                    <option value={6}>7º Dia (+6 dias)</option>
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {selEl.type === 'text' && (
+                          <div>
+                            <label className="text-[10px] text-gray-600 block">Texto:</label>
+                            <input
+                              type="text"
+                              value={selEl.content || ''}
+                              onChange={(e) => updateElement(selectedElementId, { content: e.target.value })}
+                              className="w-full text-xs px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
+                            />
+                          </div>
+                        )}
+
+                        {selEl.type === 'date_placeholder' && (
+                          <div>
+                            <label className="text-[10px] text-gray-600 block">Template Dinâmico:</label>
+                            <input
+                              type="text"
+                              value={selEl.style.dateTemplate || '{{DD}} de {{MMMM}}'}
+                              onChange={(e) => updateElement(selectedElementId, { style: { variant: 'custom_template', dateTemplate: e.target.value } })}
+                              placeholder="Ex: {{DD}} de {{MMMM}} de {{YYYY}}"
+                              className="w-full text-[11px] font-mono px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-emerald-500 outline-none"
+                            />
+                            <span className="text-[9px] text-gray-400 block mt-0.5">
+                              Tags: {'{{DD}}'}, {'{{D}}'}, {'{{MM}}'}, {'{{MMM}}'}, {'{{MMMM}}'}, {'{{YYYY}}'}, {'{{ dddd }}'}
+                            </span>
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-2 pt-1">
                           <label className="text-[10px] text-gray-600">Tam (pt):</label>
                           <input
                             type="number"
-                            value={elements.find(e => e.id === selectedElementId)?.style.fontSize || 12}
+                            value={selEl.style.fontSize || 12}
                             onChange={(e) => updateElement(selectedElementId, { style: { fontSize: Number(e.target.value) } })}
                             className="w-14 text-xs px-1.5 py-0.5 bg-white border border-gray-300 rounded text-center"
                           />
                           <label className="text-[10px] text-gray-600 ml-1">Cor:</label>
                           <input
                             type="color"
-                            value={elements.find(e => e.id === selectedElementId)?.style.color || '#1f2937'}
+                            value={selEl.style.color || '#1f2937'}
                             onChange={(e) => updateElement(selectedElementId, { style: { color: e.target.value } })}
                             className="w-6 h-6 p-0 border border-gray-300 rounded cursor-pointer"
                           />
@@ -1749,7 +1936,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              const currBg = elements.find(e => e.id === selectedElementId)?.style.backgroundColor;
+                              const currBg = selEl.style.backgroundColor;
                               const isWhite = currBg === '#ffffff' || currBg === 'rgb(255, 255, 255)';
                               updateElement(selectedElementId, {
                                 style: {
@@ -1760,12 +1947,12 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                               });
                             }}
                             className={`text-[10px] px-2 py-0.5 rounded border transition-colors cursor-pointer font-medium ${
-                              elements.find(e => e.id === selectedElementId)?.style.backgroundColor === '#ffffff'
+                              selEl.style.backgroundColor === '#ffffff'
                                 ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold'
                                 : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
                             }`}
                           >
-                            {elements.find(e => e.id === selectedElementId)?.style.backgroundColor === '#ffffff' ? 'Ativada (Cobre Fundo)' : 'Transparente'}
+                            {selEl.style.backgroundColor === '#ffffff' ? 'Ativada (Cobre Fundo)' : 'Transparente'}
                           </button>
                         </div>
                       </div>
@@ -1911,7 +2098,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                       </div>
                     )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* 3. Lista de Todos os Elementos da Página */}
                 <div className="space-y-1.5">
@@ -1955,7 +2143,9 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                                 )}
                               </button>
 
-                              {el.type === 'text' ? (
+                              {isDynamicVariableElement(el.type) ? (
+                                <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              ) : el.type === 'text' ? (
                                 <Type className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                               ) : el.type === 'lines' ? (
                                 <Minus className="w-3.5 h-3.5 text-blue-500 shrink-0" />
@@ -1972,8 +2162,13 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                               )}
 
                               <span className="truncate text-[11px]" title={el.content || el.name}>
-                                {el.content || el.name}
+                                {isDynamicVariableElement(el.type) ? `${el.name} ("${el.style.originalPdfText || el.content}")` : (el.content || el.name)}
                               </span>
+                              {isDynamicVariableElement(el.type) && (
+                                <span className="ml-auto text-[9px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded shrink-0">
+                                  {getDynamicBadgeLabel(el)}
+                                </span>
+                              )}
                             </div>
 
                             <button

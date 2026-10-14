@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType } from '../../types';
-import { FileText, BookOpen, ArrowRight, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap, Sparkles } from 'lucide-react';
+import { FileText, BookOpen, ArrowRight, ArrowLeft, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap, Sparkles, DollarSign, Clock, Wallet, Heart, CheckSquare, Grid3X3, ListTodo, Square, Check } from 'lucide-react';
 import { importProject } from '../../core/logic/fileSystem';
 import { isProjectYearRestricted, generateHolidayListFullText, HolidayDateFormat } from '../../core/backend/calendar';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
+import { DAILY_CLASSIC, DAILY_FINANCIAL, DAILY_APPOINTMENT_PRO, DAILY_PLANNER_COMMON, APPOINTMENT_2DPP_TOP, APPOINTMENT_2DPP_BOTTOM } from './templates/dailyTemplates';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
+import { buildStandardAgendaConfig } from './templates/standardAgendaTemplate';
+import { LAYOUT_LIBRARY, LayoutLibraryItem, resolveLayoutLibraryConfig } from './templates/layoutLibrary';
 
 interface InitialSetupProps {
   onComplete: (config: Partial<AgendaConfig>) => void;
@@ -22,6 +25,188 @@ const PAGE_SIZES: Record<PageSize, { name: string, w: number, h: number }> = {
     'Custom': { name: 'Personalizado', w: 148, h: 210 }
 };
 
+export interface ObjectiveModelOption {
+  id: string;
+  title: string;
+  subtitle: string;
+  tag: string;
+  iconName: 'calendar' | 'dollar' | 'clock' | 'sparkles' | 'columns' | 'check' | 'wallet' | 'book' | 'lines' | 'dots' | 'grid' | 'square';
+  libraryItemId?: string;
+  defaultLayout: PageLayoutType;
+  defaultName: string;
+  notebookElements?: LayoutElement[];
+  isPureBlank?: boolean;
+}
+
+export const AGENDA_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
+  {
+    id: 'agenda_diaria',
+    title: 'Agenda Diária',
+    subtitle: 'Planejamento diário completo com horários (07h às 20h), prioridades e compromissos.',
+    tag: 'Mais Utilizada',
+    iconName: 'calendar',
+    libraryItemId: 'agenda-padrao-completa',
+    defaultLayout: '1_per_page',
+    defaultName: 'Minha Agenda Diária'
+  },
+  {
+    id: 'agenda_em_branco',
+    title: 'Começar com Layout em Branco',
+    subtitle: 'Página 100% limpa em branco com margens prontas para você desenhar seu próprio miolo do zero.',
+    tag: 'Folha em Branco',
+    iconName: 'square',
+    libraryItemId: 'layout-em-branco',
+    defaultLayout: '1_per_page',
+    defaultName: 'Minha Agenda em Branco',
+    isPureBlank: true
+  },
+  {
+    id: 'agenda_financeira',
+    title: 'Agenda Financeira',
+    subtitle: 'Fluxo de caixa diário, entradas, saídas, formas de pagamento e fechamento diário.',
+    tag: 'Caixa & Finanças',
+    iconName: 'dollar',
+    libraryItemId: 'planner-financeiro',
+    defaultLayout: '1_per_page',
+    defaultName: 'Minha Agenda Financeira'
+  },
+  {
+    id: 'agenda_agendamento',
+    title: 'Agendamento & Clientes',
+    subtitle: 'Horários detalhados para atendimento de clientes, serviços, valores e status de pagamento.',
+    tag: 'Salões & Clínicas',
+    iconName: 'clock',
+    libraryItemId: 'agenda-agendamento-profissional',
+    defaultLayout: '1_per_page',
+    defaultName: 'Agenda de Agendamentos'
+  },
+  {
+    id: 'agenda_permanente',
+    title: 'Agenda Permanente',
+    subtitle: 'Sem datas pré-fixadas no miolo, ideal para começar e usar em qualquer época do ano.',
+    tag: 'Não Datada',
+    iconName: 'sparkles',
+    libraryItemId: 'agenda-padrao-completa',
+    defaultLayout: '1_per_page',
+    defaultName: 'Minha Agenda Permanente'
+  }
+];
+
+export const PLANNER_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
+  {
+    id: 'planner_semanal',
+    title: 'Planner Semanal',
+    subtitle: 'Visão dos 7 dias da semana aberta em duas páginas com rastreador de hábitos e metas.',
+    tag: 'Semanal Completo',
+    iconName: 'columns',
+    libraryItemId: 'planner-semanal-vertical',
+    defaultLayout: 'weekly_vertical',
+    defaultName: 'Meu Planner Semanal'
+  },
+  {
+    id: 'planner_em_branco',
+    title: 'Começar com Layout em Branco',
+    subtitle: 'Páginas em branco sem grades ou blocos pré-definidos para você desenhar seu próprio planner do zero.',
+    tag: 'Folha em Branco',
+    iconName: 'square',
+    libraryItemId: 'planner-em-branco',
+    defaultLayout: 'weekly_vertical',
+    defaultName: 'Meu Planner em Branco',
+    isPureBlank: true
+  },
+  {
+    id: 'planner_diario',
+    title: 'Planner Diário de Foco',
+    subtitle: 'Alta produtividade com blocos de tempo (time blocking), prioridades e checklists.',
+    tag: 'Produtividade',
+    iconName: 'check',
+    libraryItemId: 'planner-diario-comum',
+    defaultLayout: '1_per_page',
+    defaultName: 'Meu Planner Diário'
+  },
+  {
+    id: 'planner_financeiro',
+    title: 'Planner Financeiro',
+    subtitle: 'Planejamento e controle de receitas, despesas, orçamentos e metas financeiras.',
+    tag: 'Finanças Pessoais',
+    iconName: 'wallet',
+    libraryItemId: 'planner-financeiro-pessoal',
+    defaultLayout: '1_per_page',
+    defaultName: 'Meu Planner Financeiro'
+  },
+  {
+    id: 'planner_estudos',
+    title: 'Planner de Estudos & Rotina',
+    subtitle: 'Cronograma de matérias, métodos de estudo, leituras e rotina de hábitos diários.',
+    tag: 'Estudos & Concursos',
+    iconName: 'book',
+    libraryItemId: 'planner-estudos',
+    defaultLayout: '1_per_page',
+    defaultName: 'Meu Planner de Estudos'
+  }
+];
+
+export const NOTEBOOK_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
+  {
+    id: 'notebook_pautado',
+    title: 'Caderno Pautado',
+    subtitle: 'Linhas horizontais clássicas espaçadas para escrita confortável, anotações e resumos.',
+    tag: 'Linhas Clássicas',
+    iconName: 'lines',
+    defaultLayout: 'notebook',
+    defaultName: 'Meu Caderno Pautado',
+    notebookElements: NOTEBOOK_TEMPLATES[0].elements as LayoutElement[]
+  },
+  {
+    id: 'notebook_pontilhado',
+    title: 'Caderno Pontilhado',
+    subtitle: 'Grade de micropontos discretos para Bullet Journal, anotações livres e esboços.',
+    tag: 'Bullet Journal',
+    iconName: 'dots',
+    defaultLayout: 'notebook',
+    defaultName: 'Meu Caderno Pontilhado',
+    notebookElements: (NOTEBOOK_TEMPLATES.find(t => t.id === 'nb-pontilhado')?.elements || NOTEBOOK_TEMPLATES[0].elements) as LayoutElement[]
+  },
+  {
+    id: 'notebook_quadriculado',
+    title: 'Caderno Quadriculado',
+    subtitle: 'Grade quadriculada de 5mm para tabelas, cálculos, listas e geometria.',
+    tag: 'Grid 5mm',
+    iconName: 'grid',
+    defaultLayout: 'notebook',
+    defaultName: 'Meu Caderno Quadriculado',
+    notebookElements: [{ id: 'grid-nb', type: 'note_grid' as const, x: 10, y: 10, w: 80, h: 80, zIndex: 1, style: { variant: 'grid', color: '#e5e7eb' } }]
+  },
+  {
+    id: 'notebook_liso',
+    title: 'Caderno Liso (Em Branco)',
+    subtitle: 'Páginas em branco sem linhas para rascunhos livres, ideias e ilustrações.',
+    tag: 'Páginas em Branco',
+    iconName: 'square',
+    defaultLayout: 'notebook',
+    defaultName: 'Meu Caderno Liso',
+    notebookElements: []
+  }
+];
+
+export const renderObjectiveIcon = (iconName: ObjectiveModelOption['iconName']) => {
+  switch (iconName) {
+    case 'calendar': return <Calendar className="w-6 h-6 text-orange-400" />;
+    case 'dollar': return <DollarSign className="w-6 h-6 text-emerald-400" />;
+    case 'clock': return <Clock className="w-6 h-6 text-amber-400" />;
+    case 'sparkles': return <Sparkles className="w-6 h-6 text-rose-400" />;
+    case 'columns': return <Columns className="w-6 h-6 text-amber-400" />;
+    case 'check': return <CheckSquare className="w-6 h-6 text-orange-400" />;
+    case 'wallet': return <Wallet className="w-6 h-6 text-emerald-400" />;
+    case 'book': return <BookOpen className="w-6 h-6 text-purple-400" />;
+    case 'lines': return <FileText className="w-6 h-6 text-stone-300" />;
+    case 'dots': return <Grid3X3 className="w-6 h-6 text-stone-300" />;
+    case 'grid': return <Grid className="w-6 h-6 text-stone-300" />;
+    case 'square': return <Square className="w-6 h-6 text-amber-400" />;
+    default: return <Sparkles className="w-6 h-6 text-orange-400" />;
+  }
+};
+
 export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmail, defaultValues, onLogout, userPlan = 'pro' }) => {
   const [step, setStep] = useState<'type' | 'library' | 'template' | 'config'>(defaultValues ? 'config' : 'type');
   const [projectType, setProjectType] = useState<ProjectType | null>(defaultValues?.projectType || null);
@@ -29,6 +214,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   const [plannerStyle, setPlannerStyle] = useState<'blank' | 'lines' | 'dots' | 'grid' | 'timetable'>('lines');
   const [selectedIntroTemplate, setSelectedIntroTemplate] = useState<string | null>(null);
   const [selectedTemplateElements, setSelectedTemplateElements] = useState<LayoutElement[] | null>(null);
+  const [useStandardAgendaModel, setUseStandardAgendaModel] = useState<boolean>(!defaultValues);
+  const [selectedLibraryItemId, setSelectedLibraryItemId] = useState<string>('agenda-padrao-completa');
+  const [variationCategoryFilter, setVariationCategoryFilter] = useState<string>('all');
   const [isSelectionExplicit, setIsSelectionExplicit] = useState(false);
   const [projectName, setProjectName] = useState(defaultValues?.name || 'Meu Novo Projeto');
   const [year, setYear] = useState(defaultValues?.year || new Date().getFullYear() + 1);
@@ -99,10 +287,14 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       setSelectedIntroTemplate(null);
       if (type === 'agenda') {
           setLayoutType('1_per_page');
+          setSelectedLibraryItemId('agenda-padrao-completa');
+          setVariationCategoryFilter('all');
           setTemplateCategory('intro');
-          setStep('config');
+          setStep('template');
       } else if (type === 'planner') {
           setLayoutType('weekly_vertical');
+          setSelectedLibraryItemId('planner-semanal-vertical');
+          setVariationCategoryFilter('all');
           setTemplateCategory('planner');
           setStep('template');
       } else if (type === 'notebook') {
@@ -116,7 +308,99 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       }
   };
 
+  const handleStartBlankProject = (targetType: 'agenda' | 'planner' = 'agenda') => {
+      setProjectType(targetType);
+      setIsSelectionExplicit(true);
+      setSelectedTemplateElements([]);
+      setSelectedIntroTemplate(null);
+      if (targetType === 'planner') {
+          setSelectedLibraryItemId('planner-em-branco');
+          setLayoutType('weekly_vertical');
+          setProjectName('Meu Planner em Branco');
+      } else {
+          setSelectedLibraryItemId('layout-em-branco');
+          setLayoutType('1_per_page');
+          setProjectName('Minha Agenda em Branco');
+      }
+      setUseStandardAgendaModel(true);
+      setIncludeMonthlyDividers(false);
+      setIncludeMonthlyIntroPages(false);
+      setStep('config');
+  };
+
+  const handleSelectObjectiveModel = (option: ObjectiveModelOption) => {
+      setIsSelectionExplicit(true);
+      setSelectedIntroTemplate(null);
+
+      const isBlank = option.isPureBlank || option.libraryItemId === 'layout-em-branco' || option.libraryItemId === 'planner-em-branco' || (option.notebookElements && option.notebookElements.length === 0);
+
+      if (option.libraryItemId) {
+          setSelectedLibraryItemId(option.libraryItemId);
+          setUseStandardAgendaModel(true);
+          if (isBlank) {
+              setIncludeMonthlyDividers(false);
+              setIncludeMonthlyIntroPages(false);
+              setSelectedTemplateElements([]);
+          } else {
+              setIncludeMonthlyDividers(true);
+              setIncludeMonthlyIntroPages(true);
+          }
+      } else {
+          setUseStandardAgendaModel(false);
+      }
+
+      if (option.notebookElements) {
+          setSelectedTemplateElements(option.notebookElements);
+      } else {
+          setSelectedTemplateElements(isBlank ? [] : null);
+      }
+
+      setLayoutType(option.defaultLayout);
+      if (!defaultValues?.name || projectName === 'Meu Novo Projeto') {
+          setProjectName(option.defaultName);
+      }
+      setStep('config');
+  };
+
+  const getSelectedModelName = (): string => {
+      if (projectType === 'notebook') {
+          if (selectedTemplateElements && selectedTemplateElements.length === 0) return 'Caderno Liso (Em Branco)';
+          if (selectedTemplateElements?.some(el => el.type === 'note_grid' && (el.style as any)?.variant === 'dots')) return 'Caderno Pontilhado';
+          if (selectedTemplateElements?.some(el => el.type === 'note_grid' && (el.style as any)?.variant === 'grid')) return 'Caderno Quadriculado';
+          return 'Caderno Pautado';
+      }
+      const item = LAYOUT_LIBRARY.find(i => i.id === selectedLibraryItemId);
+      if (item) {
+          if (item.id === 'planner-financeiro') return 'Agenda Financeira';
+          if (item.id === 'agenda-padrao-completa') return 'Agenda Diária';
+          if (item.id === 'agenda-agendamento-profissional') return 'Agendamento & Clientes';
+          if (item.id === 'planner-semanal-vertical') return 'Planner Semanal';
+          if (item.id === 'planner-diario-comum') return 'Planner Diário de Foco';
+          if (item.id === 'planner-financeiro-pessoal') return 'Planner Financeiro';
+          if (item.id === 'planner-estudos') return 'Planner de Estudos & Rotina';
+          return item.name.replace(/•.*$/, '').trim();
+      }
+      if (projectType === 'agenda') return 'Agenda Diária';
+      if (projectType === 'planner') return 'Planner Semanal';
+      return 'Modelo Padrão';
+  };
+
+  const handleSelectPastelVariation = (item: LayoutLibraryItem) => {
+      setSelectedLibraryItemId(item.id);
+      setUseStandardAgendaModel(true);
+      setProjectType(item.projectGroup);
+      setLayoutType(item.modelOptions.layoutType || '1_per_page');
+      if (item.modelOptions.pageSize) {
+          setPageSize(item.modelOptions.pageSize);
+      }
+      setIncludeMonthlyDividers(true);
+      setIncludeMonthlyIntroPages(true);
+      setIsSelectionExplicit(true);
+      setStep('config');
+  };
+
   const handleTemplateSelect = (type: PageLayoutType, style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
+      setUseStandardAgendaModel(false);
       setLayoutType(type);
       setPlannerStyle(style);
       setIsSelectionExplicit(true);
@@ -275,6 +559,87 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           }
       }
 
+      // Se for agenda ou planner com Modelo Pastel Artístico Completo ativado
+      if (!(projectType === 'notebook' || projectType === 'devotional') && useStandardAgendaModel) {
+          const isPureBlankSelected = selectedLibraryItemId === 'layout-em-branco' || selectedLibraryItemId === 'planner-em-branco';
+          const stdConfig = resolveLayoutLibraryConfig(selectedLibraryItemId, year) || buildStandardAgendaConfig(year);
+          let finalElements = isPureBlankSelected ? [] : (stdConfig.elements ? [...stdConfig.elements] : []);
+          let finalWeeklyLeft = isPureBlankSelected ? (layoutType.startsWith('weekly') ? [] : undefined) : stdConfig.elementsWeeklyLeft;
+          let finalWeeklyRight = isPureBlankSelected ? (layoutType.startsWith('weekly') ? [] : undefined) : stdConfig.elementsWeeklyRight;
+
+          // Se for Planner e o layout selecionado na tela de configuração for ajustado pelo usuário:
+          if (projectType === 'planner' && !isPureBlankSelected) {
+              if (layoutType === 'weekly_vertical') {
+                  finalWeeklyLeft = WEEKLY_VERTICAL_LEFT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalWeeklyRight = WEEKLY_VERTICAL_RIGHT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalElements = [];
+              } else if (layoutType === 'weekly_horizontal') {
+                  finalWeeklyLeft = WEEKLY_HORIZONTAL_LEFT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalWeeklyRight = WEEKLY_HORIZONTAL_RIGHT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalElements = [];
+              } else if (layoutType === 'weekly_one_page_vertical') {
+                  finalElements = WEEKLY_ONE_PAGE_VERTICAL.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalWeeklyLeft = undefined;
+                  finalWeeklyRight = undefined;
+              } else if (layoutType === 'weekly_one_page_horizontal') {
+                  finalElements = WEEKLY_ONE_PAGE_HORIZONTAL.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalWeeklyLeft = undefined;
+                  finalWeeklyRight = undefined;
+              } else if (layoutType === '1_per_page') {
+                  finalElements = finalElements.length > 0 ? finalElements : DAILY_PLANNER_COMMON.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+                  finalWeeklyLeft = undefined;
+                  finalWeeklyRight = undefined;
+              }
+          }
+
+          const finalProjectType = projectType || (layoutType.startsWith('weekly') ? 'planner' : 'agenda');
+          onComplete({
+              name: projectName,
+              projectType: finalProjectType,
+              year,
+              startMonth,
+              durationMonths,
+              pageSize,
+              customPageSize: pageSize === 'Custom' ? { width: Math.max(20, customWidth || 148), height: Math.max(20, customHeight || 210) } : undefined,
+              orientation,
+              margins,
+              initialMargins: margins,
+              bindingMargins: margins,
+              mirrorEvenPages,
+              mirrorContentOnVerso,
+              customVerso,
+              versoAdvancesSequence,
+              elementsVerso: customVerso
+                ? (finalElements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) })))
+                : undefined,
+              layoutType,
+              includeHolidays: true,
+              includeMoonPhases: defaultValues?.includeMoonPhases ?? true,
+              includeQuotes: true,
+              includeVerses: true,
+              municipalHolidays,
+              elements: finalElements,
+              elementsSaturday: isPureBlankSelected ? [] : stdConfig.elementsSaturday,
+              elementsSunday: isPureBlankSelected ? [] : stdConfig.elementsSunday,
+              elementsTop: isPureBlankSelected ? [] : stdConfig.elementsTop,
+              elementsBottom: isPureBlankSelected ? [] : stdConfig.elementsBottom,
+              elementsWeeklyLeft: finalWeeklyLeft,
+              elementsWeeklyRight: finalWeeklyRight,
+              startMonthOnRightPage,
+              includeMonthlyDividers: isPureBlankSelected ? false : true,
+              includeMonthlyIntroPages: isPureBlankSelected ? false : true,
+              fillerPageContent,
+              monthlyDividerVersoContent: monthlyDividerVersoContent as any,
+              monthlyDividerStyle: isPureBlankSelected ? undefined : stdConfig.monthlyDividerStyle,
+              monthlyIntroPages: isPureBlankSelected ? [] : stdConfig.monthlyIntroPages,
+              introPages: isPureBlankSelected ? [] : (stdConfig.introPages || []),
+              background: defaultValues?.background,
+              backgrounds: defaultValues?.backgrounds,
+              backgroundRules: defaultValues?.backgroundRules
+          });
+          return;
+      }
+
       onComplete({
           name: projectName,
           projectType: projectType || 'agenda',
@@ -355,7 +720,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             <span>Sair do Aplicativo</span>
           </button>
         )}
-        <div className="max-w-4xl w-full flex flex-col gap-8 relative z-10">
+        <div className="max-w-5xl w-full flex flex-col gap-8 relative z-10">
           <div className="text-center space-y-2.5">
             <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 px-4 py-1.5 rounded-full text-xs font-bold text-orange-400 uppercase tracking-widest shadow-xs">
               <Sparkles className="w-3.5 h-3.5 text-orange-400" />
@@ -365,7 +730,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               O que você vai criar hoje?
             </h1>
             <p className="text-sm text-stone-400 font-medium max-w-lg mx-auto">
-              Escolha o tipo de projeto para começar a personalizar seu miolo no Agenda Master.
+              Escolha o tipo de projeto que deseja criar para começar a personalizar no Agenda Master.
             </p>
           </div>
 
@@ -373,57 +738,57 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             {/* Agenda */}
             <button 
               onClick={() => handleProjectTypeSelect('agenda')}
-              className="group bg-stone-900 p-8 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-orange-500/10 border-2 border-stone-800 hover:border-orange-500 transition-all flex flex-col items-center text-center gap-6 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-stone-900 p-7 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-orange-500/10 border-2 border-stone-800 hover:border-orange-500 transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-16 h-16 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-orange-400 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-orange-500 group-hover:to-amber-500 group-hover:text-white transition-all shadow-md">
-                <Calendar className="w-8 h-8 transition-colors" />
+              <div className="w-14 h-14 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-orange-400 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-orange-500 group-hover:to-amber-500 group-hover:text-white transition-all shadow-md">
+                <Calendar className="w-7 h-7 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-orange-400 transition-colors mb-2">
+                <h3 className="text-lg font-bold text-white group-hover:text-orange-400 transition-colors mb-1.5">
                   Agenda
                 </h3>
                 <p className="text-xs text-stone-400 leading-relaxed font-medium">Layouts diários. 1 ou 2 dias por página com horários ou pautado.</p>
               </div>
-              <div className="mt-auto px-5 py-2.5 bg-stone-800 border border-stone-700 rounded-full text-[11px] font-bold text-orange-400 group-hover:bg-orange-600 group-hover:text-white transition-all">
-                CRIAR AGENDA
+              <div className="mt-auto px-4 py-2 bg-stone-800 border border-stone-700 rounded-full text-[10px] font-bold text-orange-400 group-hover:bg-orange-600 group-hover:text-white transition-all uppercase">
+                Criar Agenda
               </div>
             </button>
 
             {/* Planner */}
             <button 
               onClick={() => handleProjectTypeSelect('planner')}
-              className="group bg-stone-900 p-8 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-amber-500/10 border-2 border-stone-800 hover:border-amber-500 transition-all flex flex-col items-center text-center gap-6 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-stone-900 p-7 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-amber-500/10 border-2 border-stone-800 hover:border-amber-500 transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-16 h-16 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-amber-400 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-amber-500 group-hover:to-orange-500 group-hover:text-white transition-all shadow-md">
-                <BookOpen className="w-8 h-8 transition-colors" />
+              <div className="w-14 h-14 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-amber-400 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-amber-500 group-hover:to-orange-500 group-hover:text-white transition-all shadow-md">
+                <BookOpen className="w-7 h-7 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-amber-400 transition-colors mb-2">
+                <h3 className="text-lg font-bold text-white group-hover:text-amber-400 transition-colors mb-1.5">
                   Planner
                 </h3>
                 <p className="text-xs text-stone-400 leading-relaxed font-medium">Visão semanal em duas páginas. Metas, hábitos e finanças.</p>
               </div>
-              <div className="mt-auto px-5 py-2.5 bg-stone-800 border border-stone-700 rounded-full text-[11px] font-bold text-amber-400 group-hover:bg-amber-600 group-hover:text-white transition-all">
-                CRIAR PLANNER
+              <div className="mt-auto px-4 py-2 bg-stone-800 border border-stone-700 rounded-full text-[10px] font-bold text-amber-400 group-hover:bg-amber-600 group-hover:text-white transition-all uppercase">
+                Criar Planner
               </div>
             </button>
 
             {/* Caderno */}
             <button 
               onClick={() => handleProjectTypeSelect('notebook')}
-              className="group bg-stone-900 p-8 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-orange-500/10 border-2 border-stone-800 hover:border-orange-500 transition-all flex flex-col items-center text-center gap-6 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-stone-900 p-7 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-orange-500/10 border-2 border-stone-800 hover:border-orange-500 transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-16 h-16 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-stone-300 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-stone-700 group-hover:to-stone-900 group-hover:text-white transition-all shadow-md">
-                <PenTool className="w-8 h-8 transition-colors" />
+              <div className="w-14 h-14 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-stone-300 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-stone-700 group-hover:to-stone-900 group-hover:text-white transition-all shadow-md">
+                <PenTool className="w-7 h-7 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-stone-300 transition-colors mb-2">
+                <h3 className="text-lg font-bold text-white group-hover:text-stone-300 transition-colors mb-1.5">
                   Caderno
                 </h3>
                 <p className="text-xs text-stone-400 leading-relaxed font-medium">Pautados, quadriculados, pontilhados ou em branco.</p>
               </div>
-              <div className="mt-auto px-5 py-2.5 bg-stone-800 border border-stone-700 rounded-full text-[11px] font-bold text-stone-300 group-hover:bg-stone-700 group-hover:text-white transition-all">
-                CRIAR CADERNO
+              <div className="mt-auto px-4 py-2 bg-stone-800 border border-stone-700 rounded-full text-[10px] font-bold text-stone-300 group-hover:bg-stone-700 group-hover:text-white transition-all uppercase">
+                Criar Caderno
               </div>
             </button>
           </div>
@@ -452,189 +817,127 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   if (step === 'template') {
     const isPlanner = projectType === 'planner';
     const isAgenda = projectType === 'agenda';
-    const isNotebook = projectType === 'notebook';
-    const isDevotional = projectType === 'devotional';
+
+    const getObjectiveOptions = (): ObjectiveModelOption[] => {
+      if (isAgenda) return AGENDA_OBJECTIVE_OPTIONS;
+      if (isPlanner) return PLANNER_OBJECTIVE_OPTIONS;
+      return NOTEBOOK_OBJECTIVE_OPTIONS;
+    };
+
+    const options = getObjectiveOptions();
+
+    const title = isAgenda
+      ? 'Qual tipo de Agenda você quer criar?'
+      : isPlanner
+      ? 'Qual tipo de Planner você quer criar?'
+      : 'Qual tipo de Caderno você quer criar?';
+
+    const subtitle = isAgenda
+      ? 'Escolha o objetivo principal da sua agenda. No próximo passo você poderá escolher o layout e características.'
+      : isPlanner
+      ? 'Escolha o formato principal do seu planner. No próximo passo você definirá o layout e características.'
+      : 'Escolha o estilo de miolo para as páginas do seu caderno.';
 
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6 font-sans relative">
+      <div className="min-h-screen bg-stone-950 text-stone-100 flex items-center justify-center p-6 font-sans relative">
+        {/* Background glow */}
+        <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+
+        {/* Top actions */}
+        <div className="absolute top-6 left-6 z-50">
+          <button
+            onClick={() => setStep('type')}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-stone-400 hover:text-white bg-stone-900 hover:bg-stone-850 border border-stone-800 rounded-xl transition-all shadow-sm cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 text-orange-400" />
+            <span>Voltar</span>
+          </button>
+        </div>
+
         {onLogout && (
           <button
             onClick={onLogout}
-            className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-gray-600 hover:text-red-650 bg-white hover:bg-red-50/50 border border-gray-200 hover:border-red-200 rounded-xl transition-all shadow-sm cursor-pointer z-50"
+            className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-stone-400 hover:text-white bg-stone-900 hover:bg-stone-850 border border-stone-800 rounded-xl transition-all shadow-sm cursor-pointer z-50"
           >
-            <LogOut className="w-4 h-4 text-gray-400" />
+            <LogOut className="w-4 h-4 text-orange-400" />
             <span>Sair do Aplicativo</span>
           </button>
         )}
-        <div className="max-w-4xl w-full bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col border border-gray-100">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50/80">
-            <div className="flex items-center gap-3">
-              <button onClick={() => setStep('type')} className="p-2 hover:bg-gray-200 rounded-full transition-colors cursor-pointer"><ArrowRight className="w-5 h-5 rotate-180 text-gray-900" /></button>
-              <div>
-                <h3 className="text-xl font-black text-gray-950 uppercase tracking-tight">
-                    {isNotebook ? 'Modelos de Cadernos' : isAgenda ? 'Modelos de Agenda' : 'Modelos de Planner'}
-                </h3>
-                <p className="text-xs text-gray-700 font-black uppercase tracking-widest">Escolha um ponto de partida</p>
-              </div>
+
+        <div className="max-w-4xl w-full flex flex-col gap-8 relative z-10 py-10">
+          {/* Header */}
+          <div className="text-center space-y-2.5">
+            <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 px-4 py-1.5 rounded-full text-xs font-bold text-orange-400 uppercase tracking-widest shadow-xs">
+              <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+              <span>Passo 2 • Escolha do Modelo</span>
             </div>
+            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+              {title}
+            </h1>
+            <p className="text-sm text-stone-400 font-medium max-w-lg mx-auto">
+              {subtitle}
+            </p>
           </div>
 
-          <div className="p-10 overflow-y-auto max-h-[70vh] bg-white">
-            {isPlanner ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 border-b-2 border-gray-200 pb-2">
-                    <Columns className="w-4 h-4 text-indigo-600" />
-                    <h4 className="text-xs font-black text-gray-800 uppercase tracking-[0.2em]">Semanal Vertical (2 Págs)</h4>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleTemplateSelect('weekly_vertical', 'blank')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors"></div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Em Branco</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_vertical', 'timetable')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex flex-col justify-center gap-1.5 px-2">
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider text-center leading-tight">Tabela de Horários</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_vertical', 'dots')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex flex-wrap content-center justify-center gap-1.5 p-2 overflow-hidden">
-                        {Array.from({length: 12}).map((_, i) => <div key={i} className="w-1.5 h-1.5 rounded-full bg-gray-600"></div>)}
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Pontilhado</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_vertical', 'grid')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors grid grid-cols-3 grid-rows-4 border-collapse">
-                        {Array.from({length: 12}).map((_, i) => <div key={i} className="border border-gray-400"></div>)}
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Quadriculado</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 border-b-2 border-gray-200 pb-2">
-                    <Grid className="w-4 h-4 text-amber-600" />
-                    <h4 className="text-xs font-black text-gray-800 uppercase tracking-[0.2em]">Semanal Horizontal (2 Págs)</h4>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleTemplateSelect('weekly_horizontal', 'blank')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-20 h-16 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors"></div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Em Branco</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_horizontal', 'timetable')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-20 h-16 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex flex-col justify-center gap-1.5 px-2">
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                        <div className="h-0.5 bg-gray-600 w-full"></div>
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider text-center leading-tight">Tabela de Horários</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_horizontal', 'dots')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-orange-500 hover:shadow-xl hover:shadow-orange-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-20 h-16 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex flex-wrap content-center justify-center gap-1.5 p-2 overflow-hidden">
-                        {Array.from({length: 12}).map((_, i) => <div key={i} className="w-1.5 h-1.5 rounded-full bg-gray-600"></div>)}
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Pontilhado</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_horizontal', 'grid')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-orange-500 hover:shadow-xl hover:shadow-orange-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-20 h-16 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors grid grid-cols-4 grid-rows-3 border-collapse">
-                        {Array.from({length: 12}).map((_, i) => <div key={i} className="border border-gray-400"></div>)}
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Quadriculado</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 border-b-2 border-gray-200 pb-2">
-                    <Columns className="w-4 h-4 text-emerald-600" />
-                    <h4 className="text-xs font-black text-gray-800 uppercase tracking-[0.2em]">Semanal 1 Pág (Colunas)</h4>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleTemplateSelect('weekly_one_page_vertical', 'blank')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-emerald-600 hover:shadow-xl hover:shadow-emerald-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex p-1 gap-1">
-                        <div className="flex-1 bg-gray-400 rounded-xs"></div>
-                        <div className="flex-1 bg-gray-400 rounded-xs"></div>
-                        <div className="flex-1 bg-gray-400 rounded-xs"></div>
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Padrão Colunas</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_one_page_vertical', 'lines')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-emerald-600 hover:shadow-xl hover:shadow-emerald-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex p-1 gap-1">
-                        <div className="flex-1 border border-gray-400 rounded-xs flex flex-col justify-around p-0.5">
-                          <div className="h-0.5 bg-gray-600 w-full"></div>
-                          <div className="h-0.5 bg-gray-600 w-full"></div>
-                        </div>
-                        <div className="flex-1 border border-gray-400 rounded-xs flex flex-col justify-around p-0.5">
-                          <div className="h-0.5 bg-gray-600 w-full"></div>
-                          <div className="h-0.5 bg-gray-600 w-full"></div>
-                        </div>
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Colunas Pautadas</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 border-b-2 border-gray-200 pb-2">
-                    <Grid className="w-4 h-4 text-purple-600" />
-                    <h4 className="text-xs font-black text-gray-800 uppercase tracking-[0.2em]">Semanal 1 Pág (Linhas)</h4>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleTemplateSelect('weekly_one_page_horizontal', 'blank')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-purple-600 hover:shadow-xl hover:shadow-purple-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex flex-col p-1 gap-1">
-                        <div className="flex-1 bg-gray-400 rounded-xs"></div>
-                        <div className="flex-1 bg-gray-400 rounded-xs"></div>
-                        <div className="flex-1 bg-gray-400 rounded-xs"></div>
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Padrão Faixas</span>
-                    </button>
-                    <button onClick={() => handleTemplateSelect('weekly_one_page_horizontal', 'lines')} className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-purple-600 hover:shadow-xl hover:shadow-purple-50 transition-all flex flex-col items-center gap-4 cursor-pointer">
-                      <div className="w-16 h-20 border-2 border-gray-400 rounded-lg bg-gray-100 group-hover:bg-white transition-colors flex flex-col p-1 gap-1">
-                        <div className="flex-1 border border-gray-400 rounded-xs flex flex-col justify-around px-0.5">
-                          <div className="h-0.5 bg-gray-600 w-full"></div>
-                        </div>
-                        <div className="flex-1 border border-gray-400 rounded-xs flex flex-col justify-around px-0.5">
-                          <div className="h-0.5 bg-gray-600 w-full"></div>
-                        </div>
-                      </div>
-                      <span className="text-xs font-black text-gray-950 uppercase tracking-wider">Faixas Pautadas</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {(isNotebook ? NOTEBOOK_TEMPLATES : DEVOTIONAL_TEMPLATES).map((template) => (
-                  <button 
-                    key={template.id}
-                    onClick={() => handlExtraTemplateSelect(template.elements)}
-                    className="group p-4 bg-white border-2 border-gray-300 rounded-2xl hover:border-orange-600 hover:shadow-xl hover:shadow-orange-50 transition-all flex flex-col items-center gap-4 cursor-pointer"
-                  >
-                    <div className="w-full aspect-[3/4] border-2 border-gray-300 rounded-lg bg-gray-100 group-hover:bg-white transition-colors relative overflow-hidden p-1">
-                      <div className="absolute inset-2 opacity-60 pointer-events-none scale-75 origin-top">
-                        {template.elements.slice(0, 5).map((el, i) => (
-                          <div 
-                            key={i} 
-                            className="absolute bg-gray-600 rounded-xs"
-                            style={{ left: `${el.x}%`, top: `${el.y}%`, width: `${el.w}%`, height: `${el.h/2}%` }}
-                          />
-                        ))}
-                      </div>
+          {/* Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {options.map((opt) => {
+              const isBlank = opt.isPureBlank || opt.id === 'notebook_liso';
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => handleSelectObjectiveModel(opt)}
+                  className={`group bg-stone-900 hover:bg-stone-850 p-6 rounded-3xl border-2 transition-all flex flex-col text-left gap-4 relative overflow-hidden cursor-pointer shadow-lg hover:shadow-2xl active:scale-99 ${
+                    isBlank 
+                      ? 'border-amber-500/40 hover:border-amber-400 hover:shadow-amber-500/10' 
+                      : 'border-stone-800 hover:border-orange-500 hover:shadow-orange-500/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className={`w-13 h-13 bg-stone-800 border rounded-2xl flex items-center justify-center transition-all shadow-inner ${
+                      isBlank
+                        ? 'border-amber-500/30 group-hover:scale-105 group-hover:bg-amber-500/15 group-hover:border-amber-500/50'
+                        : 'border-stone-700/80 group-hover:scale-105 group-hover:bg-orange-500/15 group-hover:border-orange-500/40'
+                    }`}>
+                      {renderObjectiveIcon(opt.iconName)}
                     </div>
-                    <span className="text-xs font-black text-gray-950 uppercase tracking-wider text-center">{template.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors border ${
+                      isBlank
+                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 group-hover:border-amber-400'
+                        : 'bg-stone-800 text-stone-300 border-stone-700 group-hover:border-orange-500/40 group-hover:text-orange-300'
+                    }`}>
+                      {opt.tag}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 flex-1">
+                    <h3 className={`text-lg font-black transition-colors ${
+                      isBlank ? 'text-white group-hover:text-amber-300' : 'text-white group-hover:text-orange-400'
+                    }`}>
+                      {opt.title}
+                    </h3>
+                    <p className="text-xs text-stone-400 leading-relaxed font-medium">
+                      {opt.subtitle}
+                    </p>
+                  </div>
+
+                  <div className={`pt-2 border-t flex items-center justify-between text-xs font-bold transition-colors ${
+                    isBlank
+                      ? 'border-stone-800 text-stone-400 group-hover:text-amber-300'
+                      : 'border-stone-800/80 text-stone-400 group-hover:text-orange-400'
+                  }`}>
+                    <span>Avançar para Configuração</span>
+                    <ArrowRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="p-6 bg-gray-100 border-t-2 border-gray-200 text-center">
-            <p className="text-xs text-gray-800 font-black uppercase tracking-wider">Selecione um ponto de partida para personalizar</p>
+          <div className="text-center pt-2">
+            <p className="text-xs text-stone-500 font-medium">
+              Na próxima página de configuração você definirá layout (1 ou 2 dias por página, semanal), tamanho do papel, datas e margens.
+            </p>
           </div>
         </div>
       </div>
@@ -657,17 +960,14 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
         <div className="w-full md:w-1/3 bg-orange-600 p-8 text-white flex flex-col justify-between">
             <div>
                 <button 
-                  onClick={() => setStep('type')}
+                  onClick={() => setStep('template')}
                   className="mb-6 flex items-center gap-2 text-orange-100 hover:text-white transition-colors text-xs font-black uppercase tracking-widest cursor-pointer"
                 >
-                  ← Escolher outro tipo de projeto
+                  <ArrowLeft className="w-4 h-4" /> Voltar para Modelos
                 </button>
                 <h2 className="text-2xl font-black mb-2 text-white">{defaultValues ? 'Editar Projeto' : 'Novo Projeto'}</h2>
                 <div className="text-orange-100 text-sm font-semibold">
-                  {projectType === 'agenda' && 'Configurando Agenda Diária'}
-                  {projectType === 'planner' && 'Configurando Planner Semanal'}
-                  {projectType === 'notebook' && 'Configurando Novo Caderno'}
-                  {projectType === 'devotional' && 'Configurando Novo Devocional'}
+                  {getSelectedModelName()}
                 </div>
                 
                 {!defaultValues && (
@@ -845,9 +1145,47 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                         </div>
                                         <span className={`text-xs font-black text-center ${layoutType === 'weekly_one_page_horizontal' ? 'text-orange-950' : 'text-gray-900'}`}>Semanal 1 Pág (Linhas)</span>
                                     </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setLayoutType('1_per_page')}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                    >
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex items-center justify-center ${layoutType === '1_per_page' ? 'border-orange-600' : 'border-gray-500'}`}>
+                                            <div className={`w-4 h-6 rounded-xs ${layoutType === '1_per_page' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        </div>
+                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page' ? 'text-orange-950' : 'text-gray-900'}`}>Planner Diário (1 Dia/Pág)</span>
+                                    </button>
                                 </>
                             )}
                         </div>
+                        {(projectType === 'agenda' || projectType === 'planner') && (
+                            <div className="mt-4 p-4 rounded-2xl bg-orange-50/70 border-2 border-orange-200/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-orange-500/15 text-orange-600 flex items-center justify-center shrink-0">
+                                        <Sparkles className="w-5 h-5 text-orange-600" />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-black uppercase tracking-wider text-orange-800">Modelo Selecionado</span>
+                                            <span className="px-2 py-0.5 bg-orange-600 text-white text-[9px] font-black uppercase rounded-full">Ativo</span>
+                                        </div>
+                                        <h4 className="text-sm font-black text-gray-950 mt-0.5">
+                                            {getSelectedModelName()}
+                                        </h4>
+                                        <p className="text-[11px] text-gray-600 font-medium">
+                                            Páginas iniciais, divisórias mensais e páginas mensais já inclusas.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setStep('template')}
+                                    className="px-3.5 py-2 bg-white hover:bg-orange-100/60 text-orange-950 font-black text-xs rounded-xl border-2 border-orange-200 hover:border-orange-500 transition-all shadow-xs cursor-pointer shrink-0"
+                                >
+                                    Alterar Modelo
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 

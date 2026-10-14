@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
-import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem } from '../../types';
+import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem, SpecialDateItem } from '../../types';
 import { generateCalendarYear, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday, getYearHolidays, formatHolidayItemText, generateHolidayListFullText, HolidayDateFormat, FormattedHolidayItem } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
@@ -19,8 +19,11 @@ import { getEffectiveBackgroundForPage, BackgroundCategoryType } from '../../cor
 import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
 import { detectInstalledFonts, getCachedInstalledFonts } from '../../core/logic/fontDetector';
 import { PdfImportModal } from './components/PdfImportModal';
+import { TemplateGalleryModal } from './components/TemplateGalleryModal';
 import { VectorShapeGalleryModal } from './components/VectorShapeGalleryModal';
 import { FooterTrackerGalleryModal, FOOTER_TRACKER_PRESETS, FooterTrackerPreset } from './components/FooterTrackerGalleryModal';
+import { SpecialDatesModal } from './components/SpecialDatesModal';
+import { enrichDayDataWithSpecialDates, getSpecialInfoForDay, getSpecialDateDisplaySample } from '../../core/logic/specialDates';
 import { StylesManagerPanel, ElementQuickStylesBar, StyleTabType } from './components/StylesManagerPanel';
 import { getProjectStyles, applyColorStyleToElement } from '../../core/logic/styleSystem';
 import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBounds } from './components/elements/vectorShapesData';
@@ -31,7 +34,8 @@ import { exportProject, importProject } from '../../core/logic/fileSystem';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
-import { LAYOUT_LIBRARY } from './templates/layoutLibrary';
+import { LAYOUT_LIBRARY, resolveLayoutLibraryConfig } from './templates/layoutLibrary';
+import { buildStandardAgendaConfig } from './templates/standardAgendaTemplate';
 import { 
   Calendar, LogOut, Moon, Type, CalendarRange,
   Trash2, Move, AlignLeft, AlignCenter, AlignRight, AlignJustify, Layout,
@@ -47,8 +51,16 @@ import {
   AlignStartVertical, AlignEndVertical, BoxSelect, Box,
   Minimize2, Maximize2, Loader2, Settings, Search,
   FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, FileImage, Printer, Lock, Ruler, WrapText, Scissors, MoreHorizontal, Italic, RotateCcw,
-  RefreshCw, ArrowLeftRight, Droplets, PenTool
+  RefreshCw, ArrowLeftRight, Droplets, PenTool, CalendarHeart,
+  ArrowRight, DollarSign, Wallet
 } from 'lucide-react';
+import { 
+  AGENDA_OBJECTIVE_OPTIONS, 
+  PLANNER_OBJECTIVE_OPTIONS, 
+  NOTEBOOK_OBJECTIVE_OPTIONS, 
+  renderObjectiveIcon,
+  ObjectiveModelOption
+} from './InitialSetup';
 
 const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: number; heightMm: number; zoom?: number; scale?: number }> = ({ children, widthMm, heightMm, zoom = 1, scale: propScale }) => {
     const wrapperRef = useRef<HTMLDivElement>(null);
@@ -889,6 +901,46 @@ const PageBackground: React.FC<PageBackgroundProps> = ({ bg, style, pageNumber }
 export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLogout, onConfigure }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState<'none' | 'sidebar' | 'properties' | 'layers' | 'elements'>('none');
+  const [showSidebar, setShowSidebar] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const [uiScale, setUiScale] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('agenda_master_ui_scale_v2');
+      if (saved) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.7 && parsed <= 1.25) return parsed;
+      }
+    }
+    return 1;
+  });
+
+  const handleSetUiScale = (scale: number) => {
+    setUiScale(scale);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('agenda_master_ui_scale_v2', String(scale));
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutsideMoreMenu = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    if (isMoreMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutsideMoreMenu);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutsideMoreMenu);
+    };
+  }, [isMoreMenuOpen]);
+
   const stylesDragControls = useDragControls();
 
   useEffect(() => {
@@ -940,7 +992,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     initialMargins: initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
     bindingMargins: initialConfig?.bindingMargins || initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
     municipalHolidays: initialConfig?.municipalHolidays || [],
-    elements: initialConfig?.elements && initialConfig.elements.length > 0 ? initialConfig.elements : getDefaultElements(),
+    specialDates: initialConfig?.specialDates || [],
+    showSpecialDateBadges: initialConfig?.showSpecialDateBadges ?? true,
+    specialDateBadgePosition: initialConfig?.specialDateBadgePosition || 'top',
+    elements: initialConfig?.elements !== undefined ? initialConfig.elements : getDefaultElements(),
     elementsSaturday: initialConfig?.elementsSaturday,
     elementsSunday: initialConfig?.elementsSunday,
     elementsTop: initialConfig?.elementsTop,
@@ -958,8 +1013,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const nextLayoutType = initialConfig.layoutType || prev.layoutType;
         const isWeekly = nextProjectType === 'planner' || nextLayoutType.startsWith('weekly');
 
-        let nextElements = initialConfig.elements ?? prev.elements;
-        if (!isWeekly && nextElements) {
+        let nextElements = initialConfig.elements !== undefined ? initialConfig.elements : prev.elements;
+        if (!isWeekly && nextElements && initialConfig.elements === undefined) {
           nextElements = nextElements.filter(el => el.type !== 'planner_day_box');
           if (nextElements.length === 0) {
             nextElements = getDefaultElements();
@@ -976,7 +1031,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           elements: nextElements,
           elementsWeeklyLeft: isWeekly ? initialConfig.elementsWeeklyLeft : undefined,
           elementsWeeklyRight: isWeekly ? initialConfig.elementsWeeklyRight : undefined,
-          municipalHolidays: initialConfig.municipalHolidays || prev.municipalHolidays || []
+          municipalHolidays: initialConfig.municipalHolidays || prev.municipalHolidays || [],
+          specialDates: initialConfig.specialDates || prev.specialDates || [],
+          showSpecialDateBadges: initialConfig.showSpecialDateBadges ?? prev.showSpecialDateBadges ?? true,
+          specialDateBadgePosition: initialConfig.specialDateBadgePosition || prev.specialDateBadgePosition || 'top'
         };
       });
 
@@ -1061,7 +1119,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [tableTargetCol, setTableTargetCol] = useState<number>(0);
   const [variantModal, setVariantModal] = useState<{type: ElementType, label: string} | null>(null);
   const [templateModal, setTemplateModal] = useState(false);
-  const [templateCategory, setTemplateCategory] = useState<'intro' | 'planner' | 'library' | 'notebook' | 'devotional' | 'custom'>('intro');
+  const [templateCategory, setTemplateCategory] = useState<'intro' | 'planner' | 'library' | 'agenda' | 'notebook' | 'devotional' | 'custom'>('agenda');
   const [customTemplates, setCustomTemplates] = useState<IntroPage[]>(() => {
       try {
           const saved = localStorage.getItem('agendamaster_custom_page_templates');
@@ -1077,6 +1135,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [shapeGalleryOpen, setShapeGalleryOpen] = useState(false);
   const [shapeGalleryTargetId, setShapeGalleryTargetId] = useState<string | null>(null);
   const [footerGalleryOpen, setFooterGalleryOpen] = useState(false);
+  const [isSpecialDatesModalOpen, setIsSpecialDatesModalOpen] = useState(false);
   const [pdfImportInitialFile, setPdfImportInitialFile] = useState<File | null>(null);
   const [pdfImportInitialDestination, setPdfImportInitialDestination] = useState<PdfImportDestination>('miolo_default');
   const [customVerses, setCustomVerses] = useState<string[]>(() => {
@@ -1520,7 +1579,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [editMode, setEditMode] = useState<'daily' | 'intro' | 'monthly_intro' | 'divider'>('daily');
   const [dividerViewMode, setDividerViewMode] = useState<'front' | 'verso'>('front');
   const [currentIntroPageId, setCurrentIntroPageId] = useState<string | null>(config.introPages[0]?.id || null);
-  const [currentMonthlyIntroPageId, setCurrentMonthlyIntroPageId] = useState<string | null>(null);
+  const [currentMonthlyIntroPageId, setCurrentMonthlyIntroPageId] = useState<string | null>(config.monthlyIntroPages?.[0]?.id || null);
+
+  useEffect(() => {
+    if (config.introPages && config.introPages.length > 0) {
+      if (!currentIntroPageId || !config.introPages.some(p => p.id === currentIntroPageId)) {
+        setCurrentIntroPageId(config.introPages[0].id);
+      }
+    }
+  }, [config.introPages, currentIntroPageId]);
+
+  useEffect(() => {
+    if (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) {
+      if (!currentMonthlyIntroPageId || !config.monthlyIntroPages.some(p => p.id === currentMonthlyIntroPageId)) {
+        setCurrentMonthlyIntroPageId(config.monthlyIntroPages[0].id);
+      }
+    }
+  }, [config.monthlyIntroPages, currentMonthlyIntroPageId]);
   
   const dragRef = useRef<any>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -2528,10 +2603,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const EDITOR_SCALE = EDITOR_WIDTH_PX / PAGE_WIDTH_MM;
   const EDITOR_HEIGHT_PX = PAGE_HEIGHT_MM * EDITOR_SCALE;
 
+  const handleFitToScreen = useCallback(() => {
+    const container = editorContainerRef.current;
+    if (!container) return;
+    const availW = Math.max(160, container.clientWidth - 40);
+    const availH = Math.max(160, container.clientHeight - 40);
+    const baseW = 400;
+    const baseH = (PAGE_HEIGHT_MM / Math.max(1, PAGE_WIDTH_MM)) * 400;
+    const fitZoom = Math.min(availW / baseW, availH / baseH);
+    const clamped = Math.max(0.35, Math.min(1.5, Math.round(fitZoom * 20) / 20));
+    setZoom(clamped);
+  }, [PAGE_HEIGHT_MM, PAGE_WIDTH_MM]);
+
+  const hasAutoFittedRef = useRef(false);
+  useEffect(() => {
+    if (!hasAutoFittedRef.current && editorContainerWidth > 0) {
+      hasAutoFittedRef.current = true;
+      if (typeof window !== 'undefined' && (window.innerWidth < 1440 || window.innerHeight < 800)) {
+        handleFitToScreen();
+      }
+    }
+  }, [editorContainerWidth, handleFitToScreen]);
+
   const getResponsiveScale = () => {
-    const baseWidth = 400;
-    if (editorContainerWidth && editorContainerWidth < baseWidth + 32) {
-      const fitScale = (editorContainerWidth - 32) / baseWidth;
+    const currentRenderWidth = 400 * zoom;
+    if (editorContainerWidth && editorContainerWidth < currentRenderWidth + 24) {
+      const fitScale = Math.max(0.2, (editorContainerWidth - 24) / currentRenderWidth);
       return fitScale;
     }
     return 1;
@@ -2564,8 +2661,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     }
     
+    if (config.specialDates && config.specialDates.length > 0) {
+        data = data.map(d => enrichDayDataWithSpecialDates(d, config.specialDates));
+    }
+    
     setGeneratedData(data);
-  }, [config.year, config.includeHolidays, config.municipalHolidays, config.layoutType, config.projectType, config.pageCount, config.startMonth, config.durationMonths]);
+  }, [config.year, config.includeHolidays, config.municipalHolidays, config.specialDates, config.layoutType, config.projectType, config.pageCount, config.startMonth, config.durationMonths]);
 
   useEffect(() => {
     if (config.includeQuotes && quotes.length === 0) {
@@ -3494,17 +3595,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const hasHolidayList = template.elements.some(e => e.type === 'holiday_list');
       const newElements = template.elements.map(el => {
           const id = Math.random().toString(36).substr(2, 9);
+          const targetYear = yearToUse + (el.style?.yearOffset || 0);
           let content = el.content;
           let nextEl: LayoutElement = { ...el, id };
           if (el.type === 'holiday_list') {
-              content = generateHolidayListText(yearToUse, (el.style?.holidayFormat as HolidayDateFormat) || 'full_written', {
+              content = generateHolidayListFullText(targetYear, {
+                  format: (el.style?.holidayFormat as HolidayDateFormat) || 'full_written',
                   includeOptional: el.style?.includeOptional !== false,
                   includeEaster: el.style?.includeEaster !== false,
-                  includeMunicipal: el.style?.includeMunicipal !== false
+                  municipalHolidays: el.style?.includeMunicipal !== false ? config.municipalHolidays : []
               });
               nextEl.content = content;
           } else if (el.type === 'text' && typeof el.content === 'string' && /CALEND[ÁA]RIO\s*\d{4}/i.test(el.content)) {
-              content = el.content.replace(/\d{4}/, String(yearToUse));
+              content = el.content.replace(/\d{4}/, String(targetYear));
               nextEl = {
                   ...nextEl,
                   content,
@@ -3568,23 +3671,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setTemplateModal(false);
   };
 
-  const applyLibraryLayout = (layoutId: string) => {
+  const applyLibraryLayout = (layoutId: string, mioloOnly: boolean = false) => {
       const item = LAYOUT_LIBRARY.find(l => l.id === layoutId);
       if (!item) return;
 
+      const resolved = resolveLayoutLibraryConfig(layoutId, config.year) || buildStandardAgendaConfig(config.year);
+      const isBlank = layoutId === 'layout-em-branco' || layoutId === 'planner-em-branco';
+
+      if (mioloOnly) {
+          setConfig(prev => ({
+              ...prev,
+              projectType: isBlank ? prev.projectType : (resolved.projectType || prev.projectType),
+              layoutType: isBlank ? prev.layoutType : (resolved.layoutType || prev.layoutType),
+              elements: isBlank ? [] : (resolved.elements !== undefined ? resolved.elements : prev.elements),
+              elementsVerso: isBlank ? [] : (resolved.elementsVerso !== undefined ? resolved.elementsVerso : prev.elementsVerso),
+              elementsSaturday: isBlank ? [] : (resolved.elementsSaturday !== undefined ? resolved.elementsSaturday : prev.elementsSaturday),
+              elementsSunday: isBlank ? [] : (resolved.elementsSunday !== undefined ? resolved.elementsSunday : prev.elementsSunday),
+              elementsTop: isBlank ? [] : (resolved.elementsTop !== undefined ? resolved.elementsTop : prev.elementsTop),
+              elementsBottom: isBlank ? [] : (resolved.elementsBottom !== undefined ? resolved.elementsBottom : prev.elementsBottom),
+              elementsWeeklyLeft: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (resolved.elementsWeeklyLeft !== undefined ? resolved.elementsWeeklyLeft : prev.elementsWeeklyLeft),
+              elementsWeeklyRight: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (resolved.elementsWeeklyRight !== undefined ? resolved.elementsWeeklyRight : prev.elementsWeeklyRight),
+          }));
+          setEditMode('daily');
+          setSelectedIds([]);
+          setTemplateModal(false);
+          setToastMessage(isBlank ? 'Miolo em Branco (100% limpo) aplicado com sucesso!' : `Miolo "${item.name}" aplicado mantendo suas Páginas Iniciais e Divisórias!`);
+          return;
+      }
+
+      if (isBlank) {
+          setConfig(prev => ({
+              ...prev,
+              projectType: resolved.projectType || prev.projectType,
+              layoutType: resolved.layoutType || prev.layoutType,
+              elements: [],
+              elementsSaturday: [],
+              elementsSunday: [],
+              elementsTop: [],
+              elementsBottom: [],
+              elementsWeeklyLeft: resolved.layoutType?.startsWith('weekly') ? [] : undefined,
+              elementsWeeklyRight: resolved.layoutType?.startsWith('weekly') ? [] : undefined,
+              introPages: [],
+              monthlyIntroPages: [],
+              includeMonthlyDividers: false,
+              includeMonthlyIntroPages: false,
+              year: prev.year,
+          }));
+          setEditMode('daily');
+          setSelectedIds([]);
+          setTemplateModal(false);
+          setToastMessage(`Projeto 100% em Branco (Folha Limpa) iniciado do zero!`);
+          return;
+      }
+
       setConfig(prev => ({
           ...prev,
-          ...item.config,
-          // Ensure IDs are unique
-          elements: item.config.elements?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) || prev.elements,
-          elementsSaturday: item.config.elementsSaturday?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          elementsSunday: item.config.elementsSunday?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          elementsTop: item.config.elementsTop?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          elementsBottom: item.config.elementsBottom?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          elementsWeeklyLeft: item.config.elementsWeeklyLeft?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          elementsWeeklyRight: item.config.elementsWeeklyRight?.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
+          ...resolved,
+          year: prev.year,
       }));
+      if (resolved.introPages && resolved.introPages.length > 0) {
+          setCurrentIntroPageId(resolved.introPages[0].id);
+      }
+      if (resolved.monthlyIntroPages && resolved.monthlyIntroPages.length > 0) {
+          setCurrentMonthlyIntroPageId(resolved.monthlyIntroPages[0].id);
+      }
+      setSelectedIds([]);
       setTemplateModal(false);
+      setToastMessage(`Modelo Completo "${item.name}" aplicado em todos os setores!`);
   };
 
   const applyPlannerTemplate = (type: 'weekly_vertical' | 'weekly_horizontal' | 'weekly_one_page_vertical' | 'weekly_one_page_horizontal', style: 'blank' | 'lines' | 'dots' | 'grid' | 'timetable') => {
@@ -4939,6 +5092,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (type === 'year') { newElement.w = 24; newElement.h = 10; newElement.style.fontSize = 24; newElement.style.fontWeight = 'bold'; newElement.style.borderWidth = 0; }
         if (type === 'text') { newElement.w = 40; newElement.h = 8; newElement.style.fontSize = 16; newElement.style.borderWidth = 0; }
         if (type === 'holiday') { newElement.w = 50; newElement.h = 6; newElement.style.fontSize = 11; newElement.style.color = '#ef4444'; newElement.style.borderWidth = 0; newElement.style.fontWeight = '500'; }
+        if (type === 'special_event') { 
+            newElement.w = 55; 
+            newElement.h = 6; 
+            newElement.x = 22.5;
+            newElement.style.fontSize = 11; 
+            newElement.style.borderWidth = 1; 
+            newElement.style.borderRadius = 999;
+            newElement.style.variant = 'pill';
+            newElement.style.fontWeight = 'bold'; 
+            newElement.style.textAlign = 'center'; 
+            
+            const activeSpecial = (config.specialDates && config.specialDates.length > 0)
+                ? (config.specialDates.slice().reverse().find(d => d.type === 'wedding_countdown' || d.isCountdown) || config.specialDates[config.specialDates.length - 1])
+                : undefined;
+            const sample = getSpecialDateDisplaySample(activeSpecial);
+
+            newElement.style.color = styleOverride.color || sample.color; 
+            newElement.style.backgroundColor = styleOverride.backgroundColor || sample.bgColor; 
+            newElement.style.borderColor = styleOverride.borderColor || sample.borderColor; 
+            newElement.content = styleOverride.content || sample.text;
+        }
         if (type === 'moon') { newElement.w = 20; newElement.h = 5; newElement.style.fontSize = 12; newElement.style.color = '#6b7280'; newElement.style.borderWidth = 0; }
         if (type === 'icon') { 
             const usableW_MM = Math.max(1, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
@@ -5299,6 +5473,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           alignment: 'center',
           showBox: false,
           showLabel: true
+      });
+  };
+
+  const handleInsertSpecialElement = (targetItem?: any) => {
+      const itemToUse = targetItem || ((config.specialDates && config.specialDates.length > 0)
+          ? (config.specialDates.slice().reverse().find(d => d.type === 'wedding_countdown' || d.isCountdown) || config.specialDates[config.specialDates.length - 1])
+          : undefined);
+      const sample = getSpecialDateDisplaySample(itemToUse);
+      addElement('special_event', itemToUse?.title || 'Datas & Contagem', {
+          variant: 'pill',
+          content: sample.text,
+          color: sample.color,
+          backgroundColor: sample.bgColor,
+          borderColor: sample.borderColor,
+          borderWidth: 1,
+          borderRadius: 999,
+          fontWeight: 'bold',
+          textAlign: 'center'
       });
   };
 
@@ -7554,7 +7746,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const year = config.year || new Date().getFullYear();
     const month = config.startMonth ?? 0;
     const date = new Date(year, month, 1 + offset);
-    return {
+    const baseDay: DayData = {
       dayOfMonth: date.getDate(),
       month: date.getMonth(),
       year: date.getFullYear(),
@@ -7563,7 +7755,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       moonPhase: 'Lua nova',
       date
     };
-  }, [config.year, config.startMonth, config.municipalHolidays]);
+    return config.specialDates && config.specialDates.length > 0
+      ? enrichDayDataWithSpecialDates(baseDay, config.specialDates)
+      : baseDay;
+  }, [config.year, config.startMonth, config.municipalHolidays, config.specialDates]);
 
   const renderTemplate = (
     elements: LayoutElement[], 
@@ -7577,7 +7772,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     introPageId?: string,
     weekDays?: DayData[]
   ) => {
-    const d = day || (weekDays && weekDays[0]) || getProjectFirstDay(0);
+    let d = day || (weekDays && weekDays[0]) || getProjectFirstDay(0);
+    if (config.specialDates && config.specialDates.length > 0 && d) {
+      d = enrichDayDataWithSpecialDates(d, config.specialDates);
+    }
     const globalStyle = getGlobalCalendarStyle();
     
     // Obter índices calculados (auto ou explícitos)
@@ -7724,7 +7922,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               willChange: isEditor && isSelectedThis && (isDragging || !!resizeDir) ? 'left, top, width, height' : 'auto'
           };
           const containerClass = `absolute group ${isSelected ? 'ring-2 ring-indigo-500 z-50' : 'hover:ring-1 hover:ring-indigo-300'} ${isEditor || activeTab === 'preview' ? 'cursor-pointer' : ''} ${isEditor ? 'cursor-move' : ''}`;
-          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list'].includes(el.type);
+          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list', 'special_event'].includes(el.type);
           const shouldClip = ['lines', 'note_grid', 'habit_tracker', 'mini_calendar', 'full_calendar', 'table', 'permanent_day_header', 'vector_shape'].includes(el.type);
           
           return (
@@ -8438,6 +8636,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         miolo: 0
     };
 
+    const getBadgeForDay = (d: DayData | null | undefined) => {
+        if (!d || !d.specialEventText) return undefined;
+        const primary = d.specialEvents?.[0] || d.countdowns?.[0]?.item;
+        return {
+            text: d.specialEventText,
+            color: primary?.color,
+            bgColor: primary?.bgColor,
+            icon: primary?.icon
+        };
+    };
+
+    const getBadgeForBatch = (batch: DayData[] | null | undefined) => {
+        if (!batch || batch.length === 0) return undefined;
+        for (const item of batch) {
+            const badge = getBadgeForDay(item);
+            if (badge) return badge;
+        }
+        return undefined;
+    };
+
     const renderPageContainer = (
         children: React.ReactNode, 
         key: string | number, 
@@ -8445,7 +8663,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         pageSpecificBg?: BackgroundConfig, 
         customPageStyle?: React.CSSProperties,
         pageType: 'intro' | 'daily' | 'monthly_intro' | 'divider' | 'divider_verso' | 'standard' = 'daily',
-        pageMonth?: number
+        pageMonth?: number,
+        specialBadge?: { text: string; color?: string; bgColor?: string; icon?: string }
     ) => {
         pageCount++;
         
@@ -8478,6 +8697,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             <div id={`preview-page-${pageCount}`} data-page={pageCount} data-month={pageMonth} data-type={pageType} key={key} className={`bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 ${shouldHideNumbers ? '' : 'transition-transform hover:scale-[1.01]'}`} style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
                 {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg, catRelIndex)}
                 <div className="relative z-10 h-full w-full">
+                    {specialBadge && (config.showSpecialDateBadges !== false) && (
+                        <div className={`absolute ${config.specialDateBadgePosition === 'bottom' ? 'bottom-0.5' : '-top-1'} left-1/2 -translate-x-1/2 z-30 flex items-center justify-center pointer-events-none max-w-[90%]`}>
+                            <div 
+                                className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[9px] font-bold shadow-2xs border pointer-events-auto select-none"
+                                style={{
+                                    color: specialBadge.color || '#db2777',
+                                    backgroundColor: specialBadge.bgColor || '#fdf2f8',
+                                    borderColor: specialBadge.color || '#f472b6'
+                                }}
+                                title={specialBadge.text}
+                            >
+                                {specialBadge.icon && <span className="text-[10px]">{specialBadge.icon}</span>}
+                                <span className="truncate max-w-[260px]">{specialBadge.text}</span>
+                            </div>
+                        </div>
+                    )}
                     {!shouldHideNumbers && (
                         <div className="absolute -top-7 left-0 right-0 flex justify-between items-center no-print px-2 bg-indigo-900/5 py-1 rounded-t-lg">
                             <div className="flex items-center gap-1.5">
@@ -8855,8 +9090,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false, 
                     undefined, 
                     undefined, 
-                    'daily',
-                    currentMonth
+                    'daily', 
+                    currentMonth,
+                    getBadgeForBatch(batch) || getBadgeForDay(day)
                 );
                 if(containerFrente) pages.push(containerFrente);
 
@@ -8871,8 +9107,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false, 
                     undefined, 
                     undefined, 
-                    'daily',
-                    currentMonth
+                    'daily', 
+                    currentMonth,
+                    getBadgeForBatch(batch) || getBadgeForDay(day)
                 );
                 if(containerVerso) pages.push(containerVerso);
 
@@ -8888,8 +9125,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     false, 
                     undefined, 
                     undefined, 
-                    'daily',
-                    currentMonth
+                    'daily', 
+                    currentMonth,
+                    getBadgeForBatch(batch) || getBadgeForDay(day)
                 );
                 if(container) pages.push(container);
                 i += daysPerPage;
@@ -8927,7 +9165,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             Página de Transição
                         </div>
                     </div>
-                , `transition-${dayTop.date.toISOString()}`, false, undefined, undefined, 'daily', dayTop.month);
+                , `transition-${dayTop.date.toISOString()}`, false, undefined, undefined, 'daily', dayTop.month, getBadgeForDay(dayTop));
                 if (container) pages.push(container);
 
                 i += 1; // Consome apenas dayTop; dayBottom será processado como dayTop na próxima iteração
@@ -8950,7 +9188,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         {dayBottom ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(bottomToRender, dayBottom, false, false, pageCount + 1, printW, printH / 2, 'bottom')}</div>) : null}
                     </div>
                 </div>
-            , i, false, undefined, undefined, 'daily', dayTop.month);
+            , i, false, undefined, undefined, 'daily', dayTop.month, getBadgeForDay(dayTop) || getBadgeForDay(dayBottom));
             if(container) pages.push(container);
             i += 2;
         }
@@ -8989,7 +9227,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 Página de Transição
                             </div>
                         </div>
-                    , `we-trans-${i}`, false, undefined, undefined, 'daily', day.month);
+                    , `we-trans-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
                     if(container) pages.push(container);
                     
                     i += 1; // Consome apenas sábado; domingo será processado na próxima iteração
@@ -9013,14 +9251,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             {effectiveDays[i+1] ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, effectiveDays[i+1], false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
                         </div>
                     </div>
-                , `we-${i}`, false, undefined, undefined, 'daily', day.month);
+                , `we-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day) || getBadgeForDay(daySun));
                 if(container) pages.push(container);
                 i += 2;
             } else {
                 const elementsToRender = (isEven && config.customVerso && config.elementsVerso)
                     ? config.elementsVerso
                     : (isEven ? getMirroredElements(config.elements) : config.elements);
-                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, undefined, undefined, 'daily', day.month);
+                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
                 if(container) pages.push(container);
                 i += 1;
             }
@@ -9664,7 +9902,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [config.projectType, config.year, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, config.orientation, config.name, user.plan]);
 
   return (
-    <div className={`flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900 ${isMobile ? 'pb-safe' : ''}`}>
+    <div 
+      style={uiScale !== 1 ? { 
+        zoom: uiScale,
+        height: `${(100 / uiScale).toFixed(2)}vh`,
+        maxHeight: `${(100 / uiScale).toFixed(2)}vh`,
+        width: `${(100 / uiScale).toFixed(2)}vw`,
+        maxWidth: `${(100 / uiScale).toFixed(2)}vw`
+      } : undefined}
+      className={`flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900 ${isMobile ? 'pb-safe' : ''}`}
+    >
       <style>{`
         @media print {
           @page {
@@ -10717,389 +10964,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           </div>
       )}
 
-      {templateModal && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={() => setTemplateModal(false)}>
-              <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-[700px] max-w-full m-4 flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gray-50/50">
-                      <div className="flex items-center gap-2">
-                          <div className="bg-indigo-600 p-1.5 rounded-lg shadow-sm"><Layout className="w-4 h-4 text-white"/></div>
-                          <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Modelos Prontos</h3>
-                      </div>
-                      <div className="flex items-center gap-2">
-                          <button
-                              onClick={() => {
-                                  setTemplateModal(false);
-                                  setPdfImportModalOpen(true);
-                              }}
-                              className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
-                              title="Importar layout editável de PDF (CorelDraw, Canva, Illustrator)"
-                          >
-                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                              <span>Importar PDF (Corel)</span>
-                          </button>
-                          <button onClick={() => setTemplateModal(false)} className="text-gray-400 hover:text-red-500 transition-colors p-1 hover:bg-red-50 rounded-full"><X className="w-5 h-5"/></button>
-                      </div>
-                  </div>
-                  
-                  <div className="flex border-b border-gray-100">
-                      <button 
-                        onClick={() => setTemplateCategory('intro')}
-                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${templateCategory === 'intro' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
-                      >
-                          Páginas Iniciais
-                      </button>
-                      <button 
-                        onClick={() => setTemplateCategory('planner')}
-                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${templateCategory === 'planner' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
-                      >
-                          Layouts de Planner
-                      </button>
-                      <button 
-                        onClick={() => setTemplateCategory('library')}
-                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${templateCategory === 'library' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
-                      >
-                          Biblioteca
-                      </button>
-                      <button 
-                        onClick={() => setTemplateCategory('custom')}
-                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${templateCategory === 'custom' ? 'border-amber-500 text-amber-700 bg-amber-50/30' : 'border-transparent text-gray-400 hover:text-amber-600 hover:bg-amber-50/10'}`}
-                      >
-                          Meus Modelos ⭐
-                      </button>
-                      {config.projectType === 'notebook' && (
-                          <button 
-                            onClick={() => setTemplateCategory('notebook' as any)}
-                            className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${templateCategory === 'notebook' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
-                          >
-                              Miolo Caderno
-                          </button>
-                      )}
-                  </div>
-
-                  <div className="p-6 overflow-y-auto max-h-[70vh] bg-gray-50/30">
-                      {templateCategory === 'intro' && (
-                          <div className="grid grid-cols-2 gap-4">
-                              {INTRO_TEMPLATES.map((template) => (
-                                  <div 
-                                    key={template.id} 
-                                    onClick={() => addIntroTemplate(template)} 
-                                    className="group relative bg-white border-2 border-gray-100 rounded-xl p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-100 cursor-pointer transition-all flex flex-col items-center text-center gap-4"
-                                  >
-                                      <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center group-hover:bg-indigo-100 transition-colors">
-                                          <FileText className="w-6 h-6 text-indigo-600" />
-                                      </div>
-                                      <div>
-                                          <div className="text-sm font-bold text-gray-800 group-hover:text-indigo-700 transition-colors">{template.name}</div>
-                                          <div className="text-[10px] text-gray-400 mt-1 uppercase tracking-wide font-medium">{template.elements.length} elementos editáveis</div>
-                                      </div>
-                                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          <Plus className="w-4 h-4 text-indigo-500" />
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      )}
-
-                      {templateCategory === 'notebook' && (
-                          <div className="grid grid-cols-2 gap-4">
-                              {NOTEBOOK_TEMPLATES.map((template) => (
-                                  <div 
-                                    key={template.id} 
-                                    onClick={() => {
-                                        const newElements = template.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
-                                        setConfig({ ...config, elements: newElements });
-                                        setTemplateModal(false);
-                                    }} 
-                                    className="group relative bg-white border-2 border-gray-100 rounded-xl p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-100 cursor-pointer transition-all flex flex-col items-center text-center gap-4"
-                                  >
-                                      <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
-                                          <Grid className="w-6 h-6 text-emerald-600" />
-                                      </div>
-                                      <div>
-                                          <div className="text-sm font-bold text-gray-800 group-hover:text-emerald-700 transition-colors">{template.name}</div>
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      )}
-
-                      {templateCategory === 'devotional' && (
-                          <div className="grid grid-cols-2 gap-4">
-                              {DEVOTIONAL_TEMPLATES.map((template) => (
-                                  <div 
-                                    key={template.id} 
-                                    onClick={() => {
-                                        const newElements = template.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
-                                        setConfig({ ...config, elements: newElements });
-                                        setTemplateModal(false);
-                                    }} 
-                                    className="group relative bg-white border-2 border-gray-100 rounded-xl p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-rose-100 cursor-pointer transition-all flex flex-col items-center text-center gap-4"
-                                  >
-                                      <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center group-hover:bg-rose-100 transition-colors">
-                                          <ClipboardList className="w-6 h-6 text-rose-600" />
-                                      </div>
-                                      <div>
-                                          <div className="text-sm font-bold text-gray-800 group-hover:text-rose-700 transition-colors">{template.name}</div>
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      )}
-                      {templateCategory === 'planner' && (
-                          <div className="space-y-6">
-                              <div className="grid grid-cols-2 gap-6">
-                                  <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Vertical (2 Páginas)</h4>
-                                      <div className="grid grid-cols-2 gap-2">
-                                          <button onClick={() => applyPlannerTemplate('weekly_vertical', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white"></div>
-                                              <span className="text-[10px] font-bold text-gray-600">Em Branco</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_vertical', 'lines')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex flex-col justify-center gap-1 px-1">
-                                                  <div className="h-px bg-gray-200 w-full"></div>
-                                                  <div className="h-px bg-gray-200 w-full"></div>
-                                                  <div className="h-px bg-gray-200 w-full"></div>
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Pautado</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_vertical', 'dots')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex flex-wrap content-center justify-center gap-1 p-1 overflow-hidden">
-                                                  {Array.from({length: 12}).map((_, i) => <div key={i} className="w-0.5 h-0.5 rounded-full bg-gray-300"></div>)}
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Pontilhado</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_vertical', 'grid')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white grid grid-cols-3 grid-rows-4 border-collapse">
-                                                  {Array.from({length: 12}).map((_, i) => <div key={i} className="border-[0.2px] border-gray-100"></div>)}
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Quadriculado</span>
-                                          </button>
-                                      </div>
-                                  </div>
-                                  <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Horizontal (2 Páginas)</h4>
-                                      <div className="grid grid-cols-2 gap-2">
-                                          <button onClick={() => applyPlannerTemplate('weekly_horizontal', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-10 h-8 border border-gray-300 rounded bg-white"></div>
-                                              <span className="text-[10px] font-bold text-gray-600">Em Branco</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_horizontal', 'lines')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-10 h-8 border border-gray-300 rounded bg-white flex flex-col justify-center gap-1 px-1">
-                                                  <div className="h-px bg-gray-200 w-full"></div>
-                                                  <div className="h-px bg-gray-200 w-full"></div>
-                                                  <div className="h-px bg-gray-200 w-full"></div>
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Pautado</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_horizontal', 'dots')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-10 h-8 border border-gray-300 rounded bg-white flex flex-wrap content-center justify-center gap-1 p-1 overflow-hidden">
-                                                  {Array.from({length: 12}).map((_, i) => <div key={i} className="w-0.5 h-0.5 rounded-full bg-gray-300"></div>)}
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Pontilhado</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_horizontal', 'grid')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-10 h-8 border border-gray-300 rounded bg-white grid grid-cols-4 grid-rows-3 border-collapse">
-                                                  {Array.from({length: 12}).map((_, i) => <div key={i} className="border-[0.2px] border-gray-100"></div>)}
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Quadriculado</span>
-                                          </button>
-                                      </div>
-                                  </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-6 pt-4 border-t border-gray-100">
-                                  <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest text-center">Semanal 1 Pág (Colunas)</h4>
-                                      <div className="grid grid-cols-2 gap-2">
-                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_vertical', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex p-0.5 gap-0.5">
-                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
-                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
-                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Padrão Colunas</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_vertical', 'lines')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex p-0.5 gap-0.5">
-                                                  <div className="flex-1 border border-gray-200 flex flex-col justify-around">
-                                                      <div className="h-px bg-gray-200 w-full"></div>
-                                                  </div>
-                                                  <div className="flex-1 border border-gray-200 flex flex-col justify-around">
-                                                      <div className="h-px bg-gray-200 w-full"></div>
-                                                  </div>
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Colunas Pautadas</span>
-                                          </button>
-                                      </div>
-                                  </div>
-                                  <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-purple-600 uppercase tracking-widest text-center">Semanal 1 Pág (Linhas)</h4>
-                                      <div className="grid grid-cols-2 gap-2">
-                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_horizontal', 'blank')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex flex-col p-0.5 gap-0.5">
-                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
-                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
-                                                  <div className="flex-1 bg-gray-200 rounded-xs"></div>
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Padrão Faixas</span>
-                                          </button>
-                                          <button onClick={() => applyPlannerTemplate('weekly_one_page_horizontal', 'lines')} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all flex flex-col items-center gap-2">
-                                              <div className="w-8 h-10 border border-gray-300 rounded bg-white flex flex-col p-0.5 gap-0.5">
-                                                  <div className="flex-1 border border-gray-200 flex items-center justify-center">
-                                                      <div className="h-px bg-gray-200 w-full"></div>
-                                                  </div>
-                                                  <div className="flex-1 border border-gray-200 flex items-center justify-center">
-                                                      <div className="h-px bg-gray-200 w-full"></div>
-                                                  </div>
-                                              </div>
-                                              <span className="text-[10px] font-bold text-gray-600">Faixas Pautadas</span>
-                                          </button>
-                                      </div>
-                                  </div>
-                              </div>
-                              <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg flex gap-3">
-                                  <Info className="w-5 h-5 text-amber-500 shrink-0" />
-                                  <p className="text-[10px] text-amber-800 leading-relaxed">
-                                      <strong>Atenção:</strong> Ao aplicar um layout de planner, os elementos atuais da sua agenda serão substituídos pelos blocos de dias da semana. Você poderá personalizá-los individualmente depois.
-                                  </p>
-                              </div>
-                          </div>
-                      )}
-
-                      {templateCategory === 'library' && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                              {LAYOUT_LIBRARY.map(item => (
-                                  <button 
-                                      key={item.id}
-                                      onClick={() => applyLibraryLayout(item.id)}
-                                      className="text-left group bg-white border border-gray-200 rounded-xl overflow-hidden hover:border-indigo-500 hover:shadow-lg transition-all"
-                                  >
-                                      <div className="h-24 bg-gray-50 flex items-center justify-center border-b border-gray-100 group-hover:bg-indigo-50 transition-colors">
-                                          <div className="p-2 bg-white shadow-sm rounded border border-gray-100 scale-75 origin-center">
-                                              <div className="w-16 h-20 flex flex-col gap-1">
-                                                  <div className="h-2 bg-gray-200 rounded-full w-3/4"></div>
-                                                  <div className="flex-1 bg-gray-100 rounded"></div>
-                                              </div>
-                                          </div>
-                                      </div>
-                                      <div className="p-4">
-                                          <div className="flex items-center justify-between mb-1">
-                                              <h5 className="text-xs font-bold text-gray-900 group-hover:text-indigo-600 font-sans">{item.name}</h5>
-                                              <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded font-mono">{item.category}</span>
-                                          </div>
-                                          <p className="text-[10px] text-gray-500 line-clamp-2 leading-relaxed">{item.description}</p>
-                                      </div>
-                                  </button>
-                              ))}
-                          </div>
-                      )}
-
-                      {templateCategory === 'custom' && (
-                          <div className="space-y-4 w-full">
-                              {/* Gerenciador de Backup de Modelos */}
-                              <div className="bg-amber-50/50 border border-amber-200/50 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">
-                                  <div className="flex items-center gap-2.5">
-                                      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
-                                          <Star className="w-4 h-4 fill-amber-300" />
-                                      </div>
-                                      <div>
-                                          <h4 className="text-xs font-bold text-amber-900 leading-tight">Backup de Modelos Personalizados</h4>
-                                          <p className="text-[10px] text-amber-700/80 mt-0.5 leading-normal">
-                                              Salve seus modelos no computador em formato <code className="bg-amber-100/60 px-1 py-0.5 rounded font-mono text-[9px] font-bold">.json</code> para guardá-los ou usá-los em outro navegador.
-                                          </p>
-                                      </div>
-                                  </div>
-                                  <div className="flex bg-white rounded-lg p-1 border border-amber-200/40 gap-1 shrink-0 self-start sm:self-center">
-                                      <button
-                                          type="button"
-                                          onClick={exportCustomTemplates}
-                                          disabled={customTemplates.length === 0}
-                                          className="flex items-center gap-1.5 text-[10px] text-gray-700 hover:text-indigo-600 font-bold hover:bg-gray-50 px-2.5 py-1.5 rounded transition-all disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400 cursor-pointer"
-                                          title="Exportar modelos como arquivo .json"
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                        <span>Exportar</span>
-                                      </button>
-                                      
-                                      <div className="w-px bg-gray-200 my-1"></div>
-                                      
-                                      <button
-                                          type="button"
-                                          onClick={() => templateFileInputRef.current?.click()}
-                                          className="flex items-center gap-1.5 text-[10px] text-gray-700 hover:text-indigo-600 font-bold hover:bg-gray-50 px-2.5 py-1.5 rounded transition-all cursor-pointer"
-                                          title="Importar modelos de um arquivo .json"
-                                      >
-                                        <Upload className="w-3.5 h-3.5" />
-                                        <span>Importar</span>
-                                      </button>
-                                      <input
-                                          type="file"
-                                          ref={templateFileInputRef}
-                                          onChange={importCustomTemplates}
-                                          accept=".json"
-                                          className="hidden"
-                                      />
-                                  </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                  {customTemplates.length === 0 ? (
-                                      <div className="col-span-full text-center py-20 text-gray-400 bg-white border border-gray-100 rounded-2xl p-8 flex flex-col items-center justify-center gap-3">
-                                          <Star className="w-10 h-10 text-amber-400 animate-bounce fill-amber-100" />
-                                          <p className="font-bold text-gray-700 text-sm">Você ainda não tem modelos salvos</p>
-                                          <p className="text-xs text-gray-400 max-w-sm leading-relaxed">
-                                              Para salvar um modelo personalizado, vá na barra lateral esquerda em <b>Páginas Iniciais</b> ou <b>Páginas Mensais</b>, clique na estrela (⭐) ao lado de qualquer página e salve como seu modelo! Ele ficará disponível aqui.
-                                          </p>
-                                      </div>
-                                  ) : (
-                                      customTemplates.map(template => (
-                                          <div 
-                                              key={template.id}
-                                              className="bg-white border-2 border-amber-100 rounded-xl overflow-hidden hover:border-amber-400 hover:shadow-lg transition-all flex flex-col justify-between"
-                                          >
-                                              <div className="p-4 flex-1">
-                                                  <div className="flex items-center gap-2 mb-3">
-                                                      <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
-                                                          <Star className="w-4 h-4 fill-amber-300" />
-                                                      </div>
-                                                      <div>
-                                                          <h5 className="text-xs font-bold text-gray-900 font-sans leading-tight line-clamp-1">{template.name}</h5>
-                                                          <span className="text-[9px] font-bold text-gray-400 tracking-wider uppercase">{template.elements.length} elementos</span>
-                                                      </div>
-                                                  </div>
-                                                  <p className="text-[10px] text-gray-500 leading-relaxed bg-amber-50/30 p-2 rounded border border-dashed border-amber-100/50">
-                                                      Este modelo pode ser inserido como Página Inicial ou Página Mensal, tanto em agendas como planners.
-                                                  </p>
-                                              </div>
-                                              <div className="p-3 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
-                                                  <button 
-                                                      onClick={(e) => { e.stopPropagation(); deleteCustomTemplate(template.id, template.name); }}
-                                                      className="text-[10px] text-gray-400 hover:text-red-600 font-bold hover:bg-red-50 py-1 px-2 rounded-md transition-colors"
-                                                      title="Excluir Modelo"
-                                                  >
-                                                      Excluir
-                                                  </button>
-                                                  <button 
-                                                      onClick={() => applyCustomTemplate(template)}
-                                                      className="text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded shadow transition-all uppercase tracking-wider"
-                                                  >
-                                                      Aplicar
-                                                  </button>
-                                              </div>
-                                          </div>
-                                      ))
-                                  )}
-                              </div>
-                          </div>
-                      )}
-                  </div>
-                  <div className="p-4 border-t border-gray-100 bg-white text-center">
-                      <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Escolha um modelo para começar e edite como desejar</p>
-                  </div>
-              </div>
-          </div>
-      )}
+      <TemplateGalleryModal
+          isOpen={templateModal}
+          onClose={() => setTemplateModal(false)}
+          config={config}
+          templateCategory={templateCategory}
+          setTemplateCategory={setTemplateCategory}
+          applyLibraryLayout={applyLibraryLayout}
+          addIntroTemplate={addIntroTemplate}
+          customTemplates={customTemplates}
+          exportCustomTemplates={exportCustomTemplates}
+          importCustomTemplates={importCustomTemplates}
+          deleteCustomTemplate={deleteCustomTemplate}
+          applyCustomTemplate={applyCustomTemplate}
+          templateFileInputRef={templateFileInputRef}
+          setPdfImportModalOpen={setPdfImportModalOpen}
+          setConfig={setConfig}
+          setToastMessage={setToastMessage}
+      />
 
       <SystemRequirementsModal 
           isOpen={reqModalOpen}
@@ -11140,124 +11022,142 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           onSelectPreset={handleSelectFooterTracker}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden no-print">
-          <header className="bg-white border-b border-gray-200 h-14 flex items-center justify-between px-4 z-20 shrink-0">
-            <div className="flex items-center space-x-3">
+      <SpecialDatesModal
+          isOpen={isSpecialDatesModalOpen}
+          onClose={() => setIsSpecialDatesModalOpen(false)}
+          specialDates={config.specialDates || []}
+          onUpdateSpecialDates={(newDates) => setConfig(prev => ({ ...prev, specialDates: newDates }))}
+          projectYear={config.year}
+          onInsertSpecialElement={handleInsertSpecialElement}
+          showSpecialDateBadges={config.showSpecialDateBadges !== false}
+          onToggleShowBadges={(show) => setConfig(prev => ({ ...prev, showSpecialDateBadges: show }))}
+      />
+
+      <div className="flex-1 flex flex-col overflow-hidden no-print min-w-0">
+          <header className="bg-white border-b border-gray-200 min-h-[48px] sm:min-h-[52px] h-auto flex flex-wrap items-center justify-between px-2 sm:px-3 py-1 sm:py-1.5 z-20 shrink-0 relative gap-y-1.5 gap-x-2">
+            {/* Left Group: Sidebar Toggle, Logo & Project Name */}
+            <div className="flex items-center space-x-1 sm:space-x-1.5 shrink-0 min-w-0">
+              {!isMobile && activeTab === 'editor' && (
+                <button
+                  type="button"
+                  onClick={() => setShowSidebar(prev => !prev)}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${showSidebar ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                  title={showSidebar ? "Recolher Painel Lateral (Mais espaço para desenhar)" : "Expandir Painel Lateral (Ferramentas e Elementos)"}
+                >
+                  <PanelLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
+              )}
+
               <div 
-                className={`flex items-center space-x-2 ${onConfigure ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                className={`flex items-center space-x-1 sm:space-x-1.5 shrink-0 ${onConfigure ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
                 onClick={() => onConfigure && onConfigure(config)}
+                title="Configurações do Projeto"
               >
-                <div className="bg-indigo-600 p-1.5 rounded">
-                  <Calendar className="h-4 w-4 text-white" />
+                <div className="bg-indigo-600 p-1.5 rounded text-white shrink-0 shadow-xs">
+                  <Calendar className="h-4 w-4" />
                 </div>
-                <span className="font-bold text-gray-800 hidden lg:block">AgendaMaster AI</span>
+                <span className="font-bold text-gray-800 hidden xl:block text-xs sm:text-sm whitespace-nowrap">AgendaMaster</span>
               </div>
 
-              <div className="h-6 w-px bg-gray-200 hidden md:block"></div>
-
-              <div className="flex items-center gap-2 group">
+              <div className="flex items-center gap-1 group min-w-0">
                 <input
                   type="text"
                   value={config.name || 'Sem Nome'}
                   onChange={(e) => setConfig({ ...config, name: e.target.value })}
-                  className="bg-transparent border-none focus:ring-0 text-sm font-bold text-gray-600 hover:bg-gray-50 px-2 py-1 rounded transition-colors w-32 md:w-48"
+                  className="bg-transparent border-none focus:ring-0 text-xs sm:text-sm font-bold text-gray-700 hover:bg-gray-50 px-1 py-0.5 rounded transition-colors w-16 sm:w-20 md:w-24 lg:w-28 truncate"
                   placeholder="Nome do Projeto"
                   title="Clique para renomear o projeto"
                 />
-                <div className="hidden group-hover:block">
-                  <Settings className="w-3 h-3 text-gray-300" />
-                </div>
               </div>
-              <div className="hidden lg:flex items-center text-[10px] text-gray-400 font-medium bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full mr-1.5 animate-pulse"></div>
-                Auto-salvo localmente
+
+              <div className="hidden 2xl:flex items-center text-[9px] text-gray-400 font-medium bg-gray-50 px-1.5 py-0.5 rounded-full border border-gray-100 shrink-0">
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full mr-1 animate-pulse"></div>
+                Auto-salvo
               </div>
             </div>
-            <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-xl">
+
+            {/* Center Group: Mode Navigation Tabs */}
+            <div className="flex items-center space-x-0.5 bg-gray-100 p-0.5 rounded-xl shrink-0">
               <button 
                 onClick={() => setActiveTab('editor')} 
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'editor' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'editor' ? 'bg-white shadow-xs text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="Modo de Edição do Miolo"
               >
-                <Layout className="w-3.5 h-3.5" />
-                <span>Editor</span>
+                <Layout className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Editor</span>
               </button>
               <button 
                 onClick={() => {
                   clearSimulationMode();
                   setActiveTab('preview');
                 }} 
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'preview' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'preview' ? 'bg-white shadow-xs text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="Visualizar Miolo Completo"
               >
-                <Eye className="w-3.5 h-3.5" />
-                <span>Visualizar</span>
+                <Eye className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Visualizar</span>
               </button>
               <button 
                 onClick={() => setActiveTab('opentype')} 
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'opentype' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'opentype' ? 'bg-white shadow-xs text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
                 title="Ver letras decorativas, swashes e glifos especiais"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>Glifos & Letras Especiais</span>
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="hidden sm:inline">Glifos</span>
               </button>
               <button 
                 onClick={() => setActiveTab('mockup')} 
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'mockup' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'mockup' ? 'bg-white shadow-xs text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
                 title="Estúdio de Mockup 3D: exiba e exporte fotos realistas da agenda com wire-o e cenários"
               >
-                <Box className="w-3.5 h-3.5 text-orange-500" />
-                <span>Mockup 3D</span>
+                <Box className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                <span className="hidden md:inline">Mockup</span>
               </button>
             </div>
-            <div className="flex items-center space-x-3">
+
+            {/* Right Group: Actions & Tools with BAIXAR PDF and ALL functions always visible and responsive */}
+            <div className="flex items-center flex-wrap gap-1 sm:gap-1.5 shrink-0 max-w-full">
                 <button 
                     onClick={handleUndo} 
                     disabled={history.length === 0}
-                    className={`p-1.5 rounded-md transition-colors ${history.length === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-100 hover:text-indigo-600'}`}
-                    title="Desfazer última alteração"
+                    className={`p-1.5 rounded-md transition-colors shrink-0 ${history.length === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-100 hover:text-indigo-600'}`}
+                    title="Desfazer última alteração (Ctrl+Z)"
                 >
-                    <Undo className="w-5 h-5" />
+                    <Undo className="w-4 h-4" />
                 </button>
 
-                <div className="h-5 w-px bg-gray-200 mr-2"></div>
+                <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0"></div>
 
-                {onConfigure && (
-                    <div className="flex items-center space-x-1 mr-2">
-                        <button onClick={() => onConfigure(config)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 hover:text-indigo-600" title="Voltar para Configuração Inicial">
-                            <Settings className="w-5 h-5" />
-                        </button>
-                    </div>
-                )}
-                
-                <div className="h-5 w-px bg-gray-200 mx-1"></div>
-
-                <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
+                {/* Project File Actions */}
+                <div className="flex items-center space-x-0.5 bg-gray-50 p-0.5 rounded-md border border-gray-200 shrink-0">
                     <button 
                         onClick={handleExport} 
-                        className="flex items-center px-3 py-1.5 text-xs font-bold uppercase tracking-tight text-indigo-600 hover:bg-white rounded transition-all shadow-sm bg-white/50" 
-                        title="Salvar alterações no computador"
+                        className="flex items-center px-1.5 sm:px-2 py-1 text-xs font-bold uppercase tracking-tight text-indigo-600 hover:bg-white rounded transition-all shadow-2xs bg-white/50 cursor-pointer" 
+                        title="Salvar alterações no computador (.json)"
                     >
-                        <icons.Save className="w-4 h-4 mr-2" />
-                        Salvar Projeto
+                        <icons.Save className="w-3.5 h-3.5" />
+                        <span className="hidden min-[1800px]:inline ml-1">Salvar</span>
                     </button>
                     <div className="w-px h-3 bg-gray-200"></div>
                     <button 
                         onClick={handleImportClick} 
-                        className="flex items-center px-3 py-1.5 text-xs font-bold uppercase tracking-tight text-gray-600 hover:text-indigo-600 hover:bg-white rounded transition-all" 
-                        title="Abrir um arquivo de projeto salvo anteriormente"
+                        className="flex items-center px-1.5 sm:px-2 py-1 text-xs font-bold uppercase tracking-tight text-gray-600 hover:text-indigo-600 hover:bg-white rounded transition-all cursor-pointer" 
+                        title="Abrir um arquivo de projeto (.json)"
                     >
-                        <Upload className="w-4 h-4 mr-2" />
-                        Abrir
+                        <Upload className="w-3.5 h-3.5" />
+                        <span className="hidden min-[1800px]:inline ml-1">Abrir</span>
                     </button>
                     <div className="w-px h-3 bg-gray-200"></div>
                     <button 
                         onClick={() => setPdfImportModalOpen(true)} 
-                        className="flex items-center px-3 py-1.5 text-xs font-bold uppercase tracking-tight text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 rounded transition-all border border-indigo-200/80 shadow-2xs cursor-pointer" 
+                        className="flex items-center px-1.5 sm:px-2 py-1 text-xs font-bold uppercase tracking-tight text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 rounded transition-all border border-indigo-200/80 shadow-2xs cursor-pointer" 
                         title="Importar layout editável de PDF (CorelDraw, Canva, Illustrator)"
                     >
-                        <Sparkles className="w-4 h-4 mr-1.5 text-indigo-600" />
-                        Importar PDF
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                        <span className="ml-1 text-[11px] font-bold">PDF</span>
                     </button>
                 </div>
+
                 <input 
                   type="file" 
                   ref={fileInputRef} 
@@ -11280,11 +11180,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   className="hidden" 
                 />
 
-                <div className="h-5 w-px bg-gray-200 mx-1"></div>
+                {/* PRIMARY EXPORT CTA: BAIXAR PDF (Always prominent, never hidden!) */}
+                <button 
+                  onClick={handlePrintRequest} 
+                  disabled={printStatus !== 'idle'} 
+                  className="flex items-center gap-1 sm:gap-1.5 text-xs font-bold text-white hover:bg-indigo-700 bg-indigo-600 px-2 sm:px-2.5 md:px-3 py-1.5 rounded-lg border border-indigo-600 disabled:opacity-50 shadow-md shadow-indigo-600/30 transition-all shrink-0 cursor-pointer active:scale-95 ring-2 ring-indigo-400/20"
+                  title="Baixar Arquivo PDF Pronto para Impressão"
+                >
+                  <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white shrink-0" />
+                  <span className="whitespace-nowrap">Baixar PDF</span>
+                </button>
 
+                <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0"></div>
+
+                {/* Design and Layout Tool Toggles */}
                 <button
                   onClick={() => setShowStylesPanel(!showStylesPanel)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                  className={`p-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${
                     showStylesPanel
                       ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-200'
                       : 'bg-indigo-50/70 text-indigo-700 border-indigo-200/80 hover:bg-indigo-100'
@@ -11292,79 +11204,240 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   title="Estilos Globais de Cor, Caractere e Parágrafo"
                 >
                   <icons.Palette className="w-4 h-4" />
-                  <span className="hidden xl:inline">Estilos</span>
+                  <span className="hidden min-[1800px]:inline">Estilos</span>
                 </button>
 
-                <button onClick={() => setShowAlignment(!showAlignment)} className={`p-1.5 rounded-md ${showAlignment ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Ferramentas de Alinhamento"><BoxSelect className="w-5 h-5" /></button>
-                <button onClick={() => setShowLayers(!showLayers)} className={`p-1.5 rounded-md ${showLayers ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Painel de Camadas"><Layers className="w-5 h-5" /></button>
-                <button onClick={() => setShowMargins(!showMargins)} className={`p-1.5 rounded-md ${showMargins ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Mostrar Margens de Sangria"><ScanLine className="w-5 h-5" /></button>
-                <button onClick={() => setShowRulers(!showRulers)} className={`p-1.5 rounded-md ${showRulers ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400'}`} title="Mostrar Réguas (mm)"><Ruler className="w-5 h-5" /></button>
-                <div className="h-5 w-px bg-gray-200"></div>
-                {!isAppInstalled && (
-                  <>
-                    <button 
-                      onClick={executeInstallApp} 
-                      className="flex items-center text-xs font-medium text-indigo-700 hover:text-indigo-850 bg-indigo-50/50 hover:bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded shadow-sm transition-colors"
-                      title="Instalar Agenda Master no Computador ou Celular"
-                    >
-                      <Monitor className="w-4 h-4 mr-1.5 text-indigo-600" />
-                      <span>Instalar no Computador</span>
-                    </button>
-                    <div className="h-5 w-px bg-gray-200"></div>
-                  </>
-                )}
-                <button onClick={handlePrintRequest} disabled={printStatus !== 'idle'} className="flex items-center text-xs font-medium text-white hover:bg-indigo-700 bg-indigo-600 px-3 py-1.5 rounded border border-indigo-600 disabled:opacity-50 shadow-sm transition-colors"><FileDown className="w-4 h-4 mr-1.5" /> Baixar PDF</button>
-                <button 
-                  onClick={() => setReqModalOpen(true)}
-                  className="flex items-center text-[11px] font-bold text-orange-600 hover:bg-orange-50 bg-orange-50/40 border border-orange-200/60 px-2.5 py-1.5 rounded-lg transition-colors gap-1 shadow-sm shrink-0"
-                  title="Requisitos do Sistema & Diagnóstico de Desempenho"
+                <button
+                  onClick={() => setIsSpecialDatesModalOpen(true)}
+                  className={`p-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${
+                    (config.specialDates && config.specialDates.length > 0)
+                      ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100 shadow-2xs'
+                      : 'bg-stone-50/70 text-stone-700 border-stone-200/80 hover:bg-stone-100'
+                  }`}
+                  title="Datas Importantes, Férias da Cliente e Contagem Regressiva"
                 >
-                  <icons.Gauge className="w-3.5 h-3.5 text-orange-500" />
-                  <span className="hidden sm:inline">Diagnóstico</span>
+                  <CalendarHeart className="w-4 h-4 text-rose-500" />
+                  {config.specialDates && config.specialDates.length > 0 && (
+                    <span className="w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
+                      {config.specialDates.length}
+                    </span>
+                  )}
                 </button>
-                <button 
-                  onClick={async () => {
-                    if (typeof window !== 'undefined' && (window as any).clearAppCache) {
-                      const confirm = window.confirm("Deseja limpar o cache e recarregar o sistema? Isso resolve lentidão ou travamentos e garante que você use a versão mais recente.");
-                      if (confirm) {
-                        await (window as any).clearAppCache(true);
-                      }
-                    } else {
-                      localStorage.clear();
-                      sessionStorage.clear();
-                      window.location.reload();
-                    }
-                  }} 
-                  className="text-gray-400 hover:text-indigo-600 p-1.5 rounded hover:bg-gray-100 transition-colors"
-                  title="Limpar Cache e Corrigir Travamentos"
-                >
-                  <icons.RefreshCw className="w-4 h-4" />
-                </button>
+
+                {/* Secondary Canvas Toggles (Visible on ultra-wide screens, also in More Menu) */}
+                <div className="hidden min-[1800px]:flex items-center space-x-1 shrink-0">
+                  <button onClick={() => setShowAlignment(!showAlignment)} className={`p-1.5 rounded-md ${showAlignment ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400 hover:text-gray-600'}`} title="Ferramentas de Alinhamento"><BoxSelect className="w-4 h-4" /></button>
+                  <button onClick={() => setShowLayers(!showLayers)} className={`p-1.5 rounded-md ${showLayers ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400 hover:text-gray-600'}`} title="Painel de Camadas"><Layers className="w-4 h-4" /></button>
+                  <button onClick={() => setShowMargins(!showMargins)} className={`p-1.5 rounded-md ${showMargins ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400 hover:text-gray-600'}`} title="Mostrar Margens de Sangria"><ScanLine className="w-4 h-4" /></button>
+                  <button onClick={() => setShowRulers(!showRulers)} className={`p-1.5 rounded-md ${showRulers ? 'bg-indigo-50 text-indigo-600 ring-1' : 'text-gray-400 hover:text-gray-600'}`} title="Mostrar Réguas (mm)"><Ruler className="w-4 h-4" /></button>
+                </div>
+
+                {/* Secondary Actions / More Tools Menu */}
+                <div className="relative shrink-0" ref={moreMenuRef}>
+                  <button 
+                    onClick={() => setIsMoreMenuOpen(prev => !prev)}
+                    className={`p-1.5 rounded-lg transition-colors border cursor-pointer ${isMoreMenuOpen ? 'bg-gray-100 text-indigo-600 border-gray-300' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800 border-gray-200 bg-white'}`}
+                    title="Menu e Opções de Tela"
+                  >
+                    <MoreHorizontal className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </button>
+
+                  {isMoreMenuOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-150 text-gray-800">
+                      {/* UI Screen Density / Scale Control */}
+                      <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/60">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Escala da Tela / Zoom UI</span>
+                          <span className="text-[10px] font-bold text-indigo-600">{Math.round(uiScale * 100)}%</span>
+                        </div>
+                        <p className="text-[10px] text-gray-400 mb-2 leading-tight">Adapta botões e menus ao tamanho do seu monitor:</p>
+                        <div className="grid grid-cols-4 gap-1">
+                          {[
+                            { label: '80%', value: 0.8 },
+                            { label: '90%', value: 0.9 },
+                            { label: '100%', value: 1.0 },
+                            { label: '110%', value: 1.1 },
+                          ].map(opt => (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              onClick={() => handleSetUiScale(opt.value)}
+                              className={`py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                                Math.abs(uiScale - opt.value) < 0.02
+                                  ? 'bg-indigo-600 text-white shadow-xs'
+                                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Canvas Visibility Toggles in More Menu (Accessible on all screen sizes) */}
+                      <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/30">
+                        <span className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Exibição & Guias</span>
+                        <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setShowRulers(!showRulers)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
+                              showRulers ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold shadow-2xs' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                            title="Mostrar réguas em milímetros"
+                          >
+                            <Ruler className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span className="truncate">Réguas (mm)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowMargins(!showMargins)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
+                              showMargins ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold shadow-2xs' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                            title="Mostrar margens e sangrias"
+                          >
+                            <ScanLine className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span className="truncate">Margens</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowLayers(!showLayers)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
+                              showLayers ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold shadow-2xs' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                            title="Abrir painel de camadas"
+                          >
+                            <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span className="truncate">Camadas</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowAlignment(!showAlignment)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
+                              showAlignment ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold shadow-2xs' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                            title="Ferramentas de alinhamento e distribuição"
+                          >
+                            <BoxSelect className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span className="truncate">Alinhar</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Other Extra Tools */}
+                      <div className="p-1.5 space-y-0.5">
+                        {onConfigure && (
+                          <button
+                            onClick={() => { setIsMoreMenuOpen(false); onConfigure(config); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Settings className="w-4 h-4 text-gray-400" />
+                            <span>Configuração Inicial do Projeto</span>
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => { setIsMoreMenuOpen(false); setReqModalOpen(true); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-orange-50 hover:text-orange-700 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <icons.Gauge className="w-4 h-4 text-orange-500" />
+                          <span>Diagnóstico & Requisitos do Sistema</span>
+                        </button>
+
+                        {!isAppInstalled && (
+                          <button
+                            onClick={() => { setIsMoreMenuOpen(false); executeInstallApp(); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Monitor className="w-4 h-4 text-indigo-500" />
+                            <span>Instalar no Computador / Celular</span>
+                          </button>
+                        )}
+
+                        <button
+                          onClick={async () => {
+                            setIsMoreMenuOpen(false);
+                            if (typeof window !== 'undefined' && (window as any).clearAppCache) {
+                              const confirm = window.confirm("Deseja limpar o cache e recarregar o sistema?");
+                              if (confirm) await (window as any).clearAppCache(true);
+                            } else {
+                              localStorage.clear();
+                              sessionStorage.clear();
+                              window.location.reload();
+                            }
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <icons.RefreshCw className="w-4 h-4 text-gray-400" />
+                          <span>Limpar Cache & Recarregar</span>
+                        </button>
+                      </div>
+
+                      {user?.name && (
+                        <div className="px-3 py-2 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                          <span className="font-semibold truncate max-w-[150px]">{user.name}</span>
+                          <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">Conectado</span>
+                        </div>
+                      )}
+
+                      <div className="p-1 border-t border-gray-100">
+                        <button
+                          onClick={() => { setIsMoreMenuOpen(false); onLogout(); }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <LogOut className="w-4 h-4 text-red-500" />
+                          <span>Sair da Conta</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {user?.name && (
-                  <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 rounded-lg border border-gray-200/80">
+                  <div className="hidden min-[1850px]:flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 rounded-lg border border-gray-200/80 shrink-0">
                     <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                    <span className="text-[10px] font-bold text-gray-600 uppercase tracking-tight">{user.name}</span>
+                    <span className="text-[10px] font-bold text-gray-600 uppercase tracking-tight max-w-[100px] truncate">{user.name}</span>
                   </div>
                 )}
-                <button onClick={onLogout} className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors" title="Sair da Conta"><LogOut className="w-4 h-4" /></button>
+                
+                <button onClick={onLogout} className="hidden min-[1850px]:block text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors shrink-0" title="Sair da Conta">
+                  <LogOut className="w-4 h-4" />
+                </button>
             </div>
           </header>
 
           <div className="flex-1 flex overflow-hidden relative">
             {/* Sidebar (Templates & Elements) */}
             <AnimatePresence>
-                {(!isMobile || mobileDrawer === 'sidebar') && activeTab !== 'opentype' && activeTab !== 'mockup' && (
+                {((!isMobile && showSidebar) || (isMobile && mobileDrawer === 'sidebar')) && activeTab !== 'opentype' && activeTab !== 'mockup' && (
                     <motion.aside 
-                        initial={isMobile ? { y: '100%' } : undefined}
-                        animate={isMobile ? { y: 0 } : undefined}
-                        exit={isMobile ? { y: '100%' } : undefined}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className={`${isMobile ? 'fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[80vh] border-t border-indigo-100 flex flex-col no-print' : 'w-72 bg-white border-r border-gray-200 flex flex-col shrink-0 z-10 overflow-hidden'}`}
+                        initial={isMobile ? { y: '100%' } : { x: -288, opacity: 0 }}
+                        animate={isMobile ? { y: 0 } : { x: 0, opacity: 1 }}
+                        exit={isMobile ? { y: '100%' } : { x: -288, opacity: 0 }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+                        className={`${isMobile ? 'fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[80vh] border-t border-indigo-100 flex flex-col no-print' : 'w-64 xl:w-72 bg-white border-r border-gray-200 flex flex-col shrink-0 z-20 overflow-hidden shadow-sm'}`}
                     >
-                        {isMobile && (
+                        {isMobile ? (
                             <div className="flex items-center justify-between p-4 border-b">
                                 <span className="text-xs font-black uppercase tracking-widest text-indigo-600">Configuração e Estrutura</span>
                                 <button onClick={() => setMobileDrawer('none')} className="p-1"><X className="w-5 h-5 text-gray-400" /></button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-gray-200 bg-gray-50/80 shrink-0">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                    <div className="bg-indigo-600 text-white p-1 rounded">
+                                        <Layout className="w-3.5 h-3.5" />
+                                    </div>
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-gray-700 truncate">Ferramentas & Miolo</span>
+                                </div>
+                                <button 
+                                    onClick={() => setShowSidebar(false)} 
+                                    className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors cursor-pointer"
+                                    title="Recolher Painel Lateral (Mais espaço para a tela)"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
                             </div>
                         )}
                         <div className={`${isMobile ? 'flex-1 overflow-y-auto pb-20' : 'flex-1 overflow-y-auto custom-scrollbar'}`}>
@@ -11805,27 +11878,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </button>
                         </div>
                         {editMode === 'daily' && (
-                            <div className="mb-3 flex gap-1.5">
-                                <button 
-                                    onClick={() => { 
-                                        setPdfImportInitialDestination('miolo_default'); 
-                                        setPdfImportModalOpen(true); 
-                                    }}
-                                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
-                                    title="Importar objetos de um PDF para usar como layout do Miolo"
-                                >
-                                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                                    <span>Layout Miolo (PDF)</span>
-                                </button>
-                                {(config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
+                            <div className="mb-3 flex flex-col gap-1.5">
+                                <div className="flex gap-1.5">
                                     <button 
-                                        onClick={() => { setTemplateCategory('planner'); setTemplateModal(true); }}
-                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-gray-50 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs"
+                                        onClick={() => { 
+                                            setPdfImportInitialDestination('miolo_default'); 
+                                            setPdfImportModalOpen(true); 
+                                        }}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                        title="Importar objetos de um PDF para usar como layout do Miolo"
                                     >
-                                        <Layout className="w-3.5 h-3.5" />
-                                        <span>Modelos</span>
+                                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>Layout Miolo (PDF)</span>
                                     </button>
-                                )}
+                                    {!(config.projectType === 'notebook' || config.projectType === 'devotional') && (
+                                        <button 
+                                            onClick={() => { 
+                                                setTemplateCategory(config.projectType === 'planner' ? 'planner' : config.projectType === 'notebook' ? 'notebook' : 'agenda'); 
+                                                setTemplateModal(true); 
+                                            }}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-rose-50 text-rose-800 rounded-lg border border-rose-200 hover:bg-rose-100 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                            title="Escolher variação de Miolo Pastel (Agendamento, Planner Comum, Financeiro, Semanal, etc.)"
+                                        >
+                                            <Layout className="w-3.5 h-3.5 text-rose-600" />
+                                            <span>Modelos Miolo</span>
+                                        </button>
+                                    )}
+                                </div>
+                                <button 
+                                    onClick={() => {
+                                        applyLibraryLayout(config.projectType === 'planner' ? 'planner-em-branco' : 'layout-em-branco', true);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-amber-50/70 text-amber-900 rounded-lg border border-amber-200/90 hover:bg-amber-100/80 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer active:scale-95"
+                                    title="Limpa todos os elementos atuais da página para desenhar do zero em uma folha em branco com margens prontas"
+                                >
+                                    <Square className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>Começar com Miolo em Branco</span>
+                                </button>
                             </div>
                         )}
                         {editMode === 'intro' && (
@@ -12197,6 +12286,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <button onClick={() => addElement('table', 'Tabela')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela Customizável"><TableIcon className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('table', 'Tabela de Horários', { isScheduleTable: true })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela com Horários (Grade)"><CalendarClock className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('holiday', 'Confraternização Universal')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Informação do Feriado do Dia"><Flag className="w-4 h-4 text-indigo-600"/></button>
+                                <button 
+                                    onClick={() => {
+                                        handleInsertSpecialElement();
+                                        if (!config.specialDates || config.specialDates.length === 0) {
+                                            setIsSpecialDatesModalOpen(true);
+                                        }
+                                    }} 
+                                    className="h-10 flex items-center justify-center border border-rose-200 bg-rose-50/70 hover:bg-rose-100 hover:border-rose-300 rounded text-rose-700 transition-colors" 
+                                    title="Informações Importantes & Contagem Regressiva (Férias, Casamento, etc.)"
+                                >
+                                    <CalendarHeart className="w-4 h-4 text-rose-600"/>
+                                </button>
                                 <button onClick={() => addElement('note_grid', 'Grid', { variant: 'dots', color: '#ccc', opacity: 0.5 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Grid de Notas"><Grid3X3 className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('mini_calendar', 'Calendário')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Mini Calendário"><CalendarDays className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Fases da Lua"><Moon className="w-4 h-4 text-indigo-600"/></button>
@@ -12248,9 +12349,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         )}
     </AnimatePresence>
 
+            {!showSidebar && !isMobile && activeTab === 'editor' && (
+              <button
+                type="button"
+                onClick={() => setShowSidebar(true)}
+                className="absolute left-3 top-3 z-30 px-3 py-2 bg-white/95 hover:bg-white text-indigo-700 rounded-xl shadow-lg border border-indigo-200/80 backdrop-blur-md flex items-center gap-1.5 transition-all text-xs font-bold hover:shadow-xl cursor-pointer no-print animate-in fade-in slide-in-from-left-2 duration-200"
+                title="Expandir Painel Lateral (Ferramentas & Miolo)"
+              >
+                <PanelLeft className="w-4 h-4 text-indigo-600" />
+                <span>Ferramentas</span>
+              </button>
+            )}
+
             <main 
                 ref={workspaceRef} 
-                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-gray-200 p-4 md:p-8'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'md:pr-[320px]' : ''}`}
+                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-gray-200 p-2 sm:p-4 md:p-6'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'lg:pr-[290px] xl:pr-[300px]' : ''}`}
                 onMouseDown={(e) => {
                   if (e.button !== 0) return;
                   const targetEl = e.target as HTMLElement;
@@ -12350,7 +12463,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 shrink-0" title="Diminuir Zoom"><Minus className="w-4 h-4" /></button>
                             <div className="flex flex-col items-center min-w-[36px] px-1 shrink-0"><span className="text-[7px] font-bold text-gray-400 uppercase leading-none">Zoom</span><span className="text-[10px] font-bold text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span></div>
                             <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 shrink-0" title="Aumentar Zoom"><Plus className="w-4 h-4" /></button>
-                            <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1 shrink-0" title="Resetar Zoom">100%</button>
+                            
+                            <button 
+                                onClick={handleFitToScreen} 
+                                className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors border border-indigo-200/60 cursor-pointer" 
+                                title="Ajustar à Tela (Calcula o zoom perfeito para o tamanho do seu monitor)"
+                            >
+                                <Maximize2 className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>Ajustar</span>
+                            </button>
+                            
+                            <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1 shrink-0" title="Tamanho Real (100%)">100%</button>
 
                             <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
 
@@ -12499,19 +12622,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     title={editorViewMode === 'verso' ? "Copiar todos os elementos da Frente para o Verso" : "Copiar todos os elementos do Verso para a Frente"}
                                     onClick={() => {
                                         if (editorViewMode === 'verso') {
-                                            if (confirm("Deseja substituir os elementos do Verso pelos elementos da Frente?")) {
-                                                setConfig(prev => ({
-                                                    ...prev,
-                                                    elementsVerso: prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
-                                                }));
-                                            }
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                elementsVerso: prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
+                                            }));
+                                            setToastMessage("Elementos da Frente copiados para o Verso com sucesso!");
                                         } else {
-                                            if (confirm("Deseja substituir os elementos da Frente pelos elementos do Verso?")) {
-                                                setConfig(prev => ({
-                                                    ...prev,
-                                                    elements: (prev.elementsVerso || []).map(el => ({ ...el, id: 'recto_' + Math.random().toString(36).substring(2, 9) }))
-                                                }));
-                                            }
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                elements: (prev.elementsVerso || []).map(el => ({ ...el, id: 'recto_' + Math.random().toString(36).substring(2, 9) }))
+                                            }));
+                                            setToastMessage("Elementos do Verso copiados para a Frente com sucesso!");
                                         }
                                     }}
                                     className="ml-2 px-2.5 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
@@ -12577,7 +12698,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             <div 
                               id="editor-scroll-container"
                               ref={editorContainerRef} 
-                              className={`relative flex-1 w-full flex overflow-auto p-4 md:p-12 custom-scrollbar ${isMobile ? 'h-full' : ''}`}
+                              className={`relative flex-1 w-full flex overflow-auto p-2 sm:p-4 md:p-6 lg:p-8 custom-scrollbar ${isMobile ? 'h-full' : ''}`}
                               onMouseDown={handlePanMouseDown}
                               onMouseMove={handlePanMouseMove}
                               onMouseUp={handlePanMouseUpOrLeave}
@@ -13792,6 +13913,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             );
                                                         })()}
                                                     </div>
+                                                </div>
+                                            )}
+
+                                            {selectedElement.type === 'special_event' && (
+                                                <div className="pt-3 border-t border-gray-100 space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Datas Especiais & Contagem</h4>
+                                                        <span className="text-[9px] bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.5 rounded-full">Miolo</span>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsSpecialDatesModalOpen(true)}
+                                                        className="w-full py-2 px-3 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white rounded-lg text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                                    >
+                                                        <CalendarHeart className="w-4 h-4" />
+                                                        Gerenciar Férias & Casamento ({config.specialDates?.length || 0})
+                                                    </button>
+
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo do Badge</label>
+                                                        <select
+                                                            value={selectedElement.style.variant || 'pill'}
+                                                            onChange={(e) => updateElementStyle(selectedElement.id, { variant: e.target.value })}
+                                                            className="w-full text-xs p-2 border border-gray-200 rounded bg-white"
+                                                        >
+                                                            <option value="pill">Pílula Arredondada (Pill)</option>
+                                                            <option value="tag">Etiqueta com Borda (Tag)</option>
+                                                            <option value="underline">Linha Inferior Sofisticada</option>
+                                                            <option value="minimal">Texto Minimalista Puro</option>
+                                                        </select>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Cor do Texto</label>
+                                                        <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
+                                                            <input type="color" value={selectedElement.style.color || '#db2777'} onChange={(e) => updateElementStyle(selectedElement.id, { color: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Cor do Fundo</label>
+                                                        <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
+                                                            <input type="color" value={selectedElement.style.backgroundColor || '#fdf2f8'} onChange={(e) => updateElementStyle(selectedElement.id, { backgroundColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Cor da Borda</label>
+                                                        <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
+                                                            <input type="color" value={selectedElement.style.borderColor || '#f472b6'} onChange={(e) => updateElementStyle(selectedElement.id, { borderColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda</label>
+                                                        <input type="number" min="0" max="6" value={selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 1} onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseInt(e.target.value) || 0 })} className="w-16 text-xs p-1 border rounded" />
+                                                    </div>
+
+                                                    <p className="text-[10px] text-gray-400 italic leading-tight">
+                                                        * Este elemento exibe automaticamente as férias, datas comemorativas ou contagem regressiva para o casamento em cada dia correspondente.
+                                                    </p>
                                                 </div>
                                             )}
 
@@ -18291,7 +18474,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                         {/* Controles de Zoom */}
                         {!isMobile && (
-                            <div className={`fixed bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 px-4 py-2 gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 ${showProperties && activeTab === 'editor' ? 'right-[312px]' : 'right-6'}`}>
+                            <div className={`fixed bottom-4 sm:bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 px-3 sm:px-4 py-1.5 sm:py-2 gap-2 sm:gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 max-w-[calc(100vw-32px)] overflow-x-auto no-scrollbar ${showProperties && activeTab === 'editor' ? 'right-4 lg:right-[304px]' : 'right-4 sm:right-6'}`}>
                                 {activeTab === 'editor' && (
                                     <>
                                         <div className="flex bg-gray-100 p-0.5 rounded-full border border-gray-200 select-none">
@@ -18335,10 +18518,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 </button>
                                 <div className="w-px h-6 bg-gray-200 mx-1"></div>
                                 <button 
+                                    onClick={handleFitToScreen} 
+                                    className="px-2.5 py-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-colors flex items-center gap-1 cursor-pointer"
+                                    title="Ajustar à Tela (Tamanho ideal para seu monitor)"
+                                >
+                                    <Maximize2 className="w-3 h-3" />
+                                    <span>Ajustar</span>
+                                </button>
+                                <button 
                                     onClick={() => setZoom(1)} 
                                     className="text-[9px] font-bold text-gray-500 hover:text-indigo-600 uppercase tracking-widest px-2 py-1 hover:bg-gray-50 rounded transition-colors cursor-pointer"
                                 >
-                                    Reset
+                                    100%
+                                </button>
+                                <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                <button 
+                                    onClick={handlePrintRequest} 
+                                    disabled={printStatus !== 'idle'} 
+                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-xs font-bold shadow-md shadow-indigo-600/20 cursor-pointer transition-all active:scale-95 shrink-0"
+                                    title="Baixar PDF do Miolo Pronto para Impressão"
+                                >
+                                    <FileDown className="w-3.5 h-3.5 text-white" />
+                                    <span>Baixar PDF</span>
                                 </button>
                             </div>
                         )}
@@ -18419,6 +18620,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 >
                                                     <Box className="w-3.5 h-3.5" />
                                                     <span className="hidden sm:inline">Mockup 3D</span>
+                                                </button>
+
+                                                <button
+                                                    onClick={handlePrintRequest}
+                                                    disabled={printStatus !== 'idle'}
+                                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-md shadow-indigo-600/30 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
+                                                    title="Baixar PDF do Miolo Pronto para Impressão"
+                                                >
+                                                    <FileDown className="w-3.5 h-3.5 text-white" />
+                                                    <span className="whitespace-nowrap">Baixar PDF</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -18586,6 +18797,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     <button onClick={() => { addElement('mini_calendar', 'Calendário'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><CalendarDays className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Mini Cal.</span></button>
                                     <button onClick={() => { addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Moon className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Lua</span></button>
                                     <button onClick={() => { addElement('holiday', 'Feriado'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Flag className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Feriado</span></button>
+                                    <button onClick={() => { handleInsertSpecialElement(); setIsSpecialDatesModalOpen(true); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-rose-100 rounded-xl bg-rose-50/50 gap-1 shadow-2xs hover:border-rose-300 active:scale-95 transition-transform"><CalendarHeart className="w-5 h-5 text-rose-600"/><span className="text-[9px] font-bold text-rose-700 uppercase">Datas & Contagem</span></button>
                                     <button onClick={() => { addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><BookOpen className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Versículo</span></button>
                                     <button onClick={() => { addElement('permanent_day_header', 'Agenda Perm.', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><List className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Agenda Perm.</span></button>
 

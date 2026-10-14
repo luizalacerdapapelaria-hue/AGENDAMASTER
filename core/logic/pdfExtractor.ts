@@ -12,7 +12,7 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
-import { LayoutElement } from '../../types';
+import { LayoutElement, ElementType } from '../../types';
 
 let blobWorkerUrl: string | null = null;
 
@@ -117,7 +117,708 @@ export interface PdfExtractionOptions {
   renderBackgroundCanvas?: boolean;
   textColorDefault?: string;
   applyTextWhiteout?: boolean; // Máscara automática de cobertura para eliminar duplicidade de texto sobre fundos
+  autoDetectDynamicVariables?: boolean; // Converte automaticamente dias, meses, anos e datas do PDF em variáveis dinâmicas da agenda
 }
+
+export interface DetectedDynamicClassification {
+  type: ElementType;
+  name: string;
+  variant?: string;
+  nameFormat?: 'full' | 'no_feira' | 'short' | 'two_letters' | 'initial' | 'ordinal_full' | 'ordinal_short' | string;
+  dateTemplate?: string;
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize' | 'sentence';
+  dayIndex?: number;
+  weekdayValue?: number;
+  monthValue?: number;
+}
+
+const detectStringCaseTransform = (raw: string): 'none' | 'uppercase' | 'lowercase' => {
+  const letters = (raw.match(/[a-zA-ZÀ-ÿ]/g) || []).join('');
+  if (letters.length >= 2) {
+    if (letters === letters.toUpperCase()) return 'uppercase';
+    if (letters === letters.toLowerCase()) return 'lowercase';
+  }
+  return 'none';
+};
+
+const matchIsolatedWeekday = (raw: string): { matched: boolean; nameFormat: string; weekdayIndex: number } | null => {
+  const clean = raw.trim().replace(/^[•·\-–—|(\[]+|[•·\-–—|)\].:;]+$/g, '').trim();
+  if (!clean) return null;
+
+  const lower = clean.toLowerCase();
+
+  // Completo com -feira
+  const fullMap: Record<string, number> = {
+    'domingo': 0,
+    'segunda-feira': 1, 'segunda feira': 1,
+    'terça-feira': 2, 'terca-feira': 2, 'terça feira': 2, 'terca feira': 2,
+    'quarta-feira': 3, 'quarta feira': 3,
+    'quinta-feira': 4, 'quinta feira': 4,
+    'sexta-feira': 5, 'sexta feira': 5,
+    'sábado': 6, 'sabado': 6,
+  };
+  if (lower in fullMap) {
+    return { matched: true, nameFormat: 'full', weekdayIndex: fullMap[lower] };
+  }
+
+  // Sem -feira
+  const noFeiraMap: Record<string, number> = {
+    'segunda': 1,
+    'terça': 2, 'terca': 2,
+    'quarta': 3,
+    'quinta': 4,
+    'sexta': 5,
+  };
+  if (lower in noFeiraMap) {
+    return { matched: true, nameFormat: 'no_feira', weekdayIndex: noFeiraMap[lower] };
+  }
+
+  // 3 letras (Dom, Seg, Ter, Qua, Qui, Sex, Sáb)
+  const shortMap: Record<string, number> = {
+    'dom': 0,
+    'seg': 1,
+    'ter': 2,
+    'qua': 3,
+    'qui': 4,
+    'sex': 5,
+    'sáb': 6, 'sab': 6,
+  };
+  if (lower in shortMap) {
+    return { matched: true, nameFormat: 'short', weekdayIndex: shortMap[lower] };
+  }
+
+  // Ordinal completo (2ª-feira, 3ª feira...)
+  const ordFullMatch = lower.match(/^([2-6])[ªa°º](-|\s)?feira$/);
+  if (ordFullMatch) {
+    return { matched: true, nameFormat: 'ordinal_full', weekdayIndex: parseInt(ordFullMatch[1], 10) - 1 };
+  }
+
+  // Ordinal curto (2ª, 3ª...)
+  const ordShortMatch = lower.match(/^([2-6])[ªa°º]$/);
+  if (ordShortMatch) {
+    return { matched: true, nameFormat: 'ordinal_short', weekdayIndex: parseInt(ordShortMatch[1], 10) - 1 };
+  }
+
+  return null;
+};
+
+const matchIsolatedMonth = (raw: string): { matched: boolean; nameFormat: 'full' | 'short'; monthIndex: number } | null => {
+  const clean = raw.trim().replace(/^[•·\-–—|(\[]+|[•·\-–—|)\].:;]+$/g, '').trim();
+  if (!clean) return null;
+
+  const lower = clean.toLowerCase();
+
+  const fullMonths: Record<string, number> = {
+    'janeiro': 0,
+    'fevereiro': 1,
+    'março': 2, 'marco': 2,
+    'abril': 3,
+    'maio': 4,
+    'junho': 5,
+    'julho': 6,
+    'agosto': 7,
+    'setembro': 8,
+    'outubro': 9,
+    'novembro': 10,
+    'dezembro': 11,
+  };
+  if (lower in fullMonths) {
+    return { matched: true, nameFormat: 'full', monthIndex: fullMonths[lower] };
+  }
+
+  const shortMonths: Record<string, number> = {
+    'jan': 0,
+    'fev': 1,
+    'mar': 2,
+    'abr': 3,
+    'mai': 4,
+    'jun': 5,
+    'jul': 6,
+    'ago': 7,
+    'set': 8,
+    'out': 9,
+    'nov': 10,
+    'dez': 11,
+  };
+  if (lower in shortMonths) {
+    return { matched: true, nameFormat: 'short', monthIndex: shortMonths[lower] };
+  }
+
+  return null;
+};
+
+/**
+ * Detecta se uma string isolada representa um padrão de variável dinâmica (Dia da Semana, Mês, Ano ou Data Composta).
+ * Números puros (01..31) são validados em nível de página para evitar falsos positivos com horários ou mini-calendários.
+ */
+export const detectSingleTextDynamicPattern = (rawText: string): DetectedDynamicClassification | null => {
+  const trimmed = (rawText || '').trim();
+  if (!trimmed || trimmed.length > 48) return null;
+
+  const textTransform = detectStringCaseTransform(trimmed);
+
+  // 1. Placeholders explícitos ex: {{DD}}, {{MES}}, {{DATA}}
+  if (/\{\{.*?\}\}/.test(trimmed)) {
+    return {
+      type: 'date_placeholder',
+      name: `Data Dinâmica (${trimmed})`,
+      variant: 'custom_template',
+      dateTemplate: trimmed,
+      textTransform,
+    };
+  }
+
+  // 2. Dia da Semana isolado (ex: "SEGUNDA-FEIRA", "Quarta", "DOM")
+  const wk = matchIsolatedWeekday(trimmed);
+  if (wk) {
+    return {
+      type: 'day_name',
+      name: `Dia da Semana (${trimmed})`,
+      nameFormat: wk.nameFormat,
+      textTransform,
+      weekdayValue: wk.weekdayIndex,
+    };
+  }
+
+  // 3. Mês isolado (ex: "JANEIRO", "Fevereiro", "OUT")
+  const mo = matchIsolatedMonth(trimmed);
+  if (mo) {
+    return {
+      type: 'month_name',
+      name: `Mês (${trimmed})`,
+      nameFormat: mo.nameFormat,
+      textTransform,
+      monthValue: mo.monthIndex,
+    };
+  }
+
+  // 4. Ano isolado (ex: "2025", "2026", "2027")
+  if (/^(202[4-9]|203[0-6])$/.test(trimmed)) {
+    return {
+      type: 'year',
+      name: `Ano (${trimmed})`,
+      textTransform: 'none',
+    };
+  }
+
+  // 5. Datas Compostas: Dia da Semana + Dia + Mês (+ Ano opcional)
+  // Ex: "Segunda-feira, 01 de Janeiro" ou "DOMINGO | 15 DE MARÇO DE 2026"
+  const wkDayMonthMatch = trimmed.match(
+    /^([a-zA-ZÀ-ÿ2-6ªº-]+)\.?(\s*[,|•·/-]\s*|\s+)(0?[1-9]|[12]\d|3[01])(\s+de\s+|\s*[/|•·-]\s*|\s+)([a-zA-ZÀ-ÿ]+)\.?(?:(\s+de\s+|\s*[/|•·-]\s*|\s+)(202\d|203\d))?$/i
+  );
+  if (wkDayMonthMatch) {
+    const [, wkPart, sep1, , sep2, moPart, sep3, yrPart] = wkDayMonthMatch;
+    const wkInfo = matchIsolatedWeekday(wkPart);
+    const moInfo = matchIsolatedMonth(moPart);
+    if (wkInfo && moInfo) {
+      const wkTag = wkInfo.nameFormat === 'short'
+        ? '{{DIA_SEMANA_CURTO}}'
+        : wkInfo.nameFormat === 'no_feira'
+          ? '{{DIA_SEMANA_SEM_FEIRA}}'
+          : '{{DIA_SEMANA}}';
+      const moTag = moInfo.nameFormat === 'short' ? '{{MMM}}' : '{{MMMM}}';
+      const normSep2 = /de/i.test(sep2) ? ' de ' : sep2;
+      const normSep3 = yrPart ? (/de/i.test(sep3 || '') ? ' de ' : (sep3 || ' ')) : '';
+      const tpl = `${wkTag}${sep1}{{DD}}${normSep2}${moTag}${yrPart ? `${normSep3}{{YYYY}}` : ''}`;
+      return {
+        type: 'date_placeholder',
+        name: `Data Completa (${trimmed.substring(0, 22)})`,
+        variant: 'custom_template',
+        dateTemplate: tpl,
+        textTransform,
+        weekdayValue: wkInfo.weekdayIndex,
+        monthValue: moInfo.monthIndex,
+      };
+    }
+  }
+
+  // 6. Datas Compostas: Dia + Mês (+ Ano opcional)
+  // Ex: "01 de Janeiro", "15 DE OUTUBRO", "01 / JANEIRO", "01 de Janeiro de 2026"
+  const dayMonthMatch = trimmed.match(
+    /^(0?[1-9]|[12]\d|3[01])(\s+de\s+|\s*[/|•·-]\s*|\s+)([a-zA-ZÀ-ÿ]+)\.?(?:(\s+de\s+|\s*[/|•·-]\s*|\s+)(202\d|203\d))?$/i
+  );
+  if (dayMonthMatch) {
+    const [, , sep1, moPart, sep2, yrPart] = dayMonthMatch;
+    const moInfo = matchIsolatedMonth(moPart);
+    if (moInfo) {
+      const moTag = moInfo.nameFormat === 'short' ? '{{MMM}}' : '{{MMMM}}';
+      const normSep1 = /de/i.test(sep1) ? ' de ' : sep1;
+      const normSep2 = yrPart ? (/de/i.test(sep2 || '') ? ' de ' : (sep2 || ' ')) : '';
+      const tpl = `{{DD}}${normSep1}${moTag}${yrPart ? `${normSep2}{{YYYY}}` : ''}`;
+      return {
+        type: 'date_placeholder',
+        name: `Data: Dia + Mês (${trimmed})`,
+        variant: 'custom_template',
+        dateTemplate: tpl,
+        textTransform,
+        monthValue: moInfo.monthIndex,
+      };
+    }
+  }
+
+  // 7. Datas Compostas: Mês + Ano
+  // Ex: "JANEIRO 2026", "JANEIRO / 2026", "Janeiro de 2026", "JAN | 2026"
+  const monthYearMatch = trimmed.match(
+    /^([a-zA-ZÀ-ÿ]+)\.?(\s+de\s+|\s*[/|•·-]\s*|\s+)(202[4-9]|203[0-6])$/i
+  );
+  if (monthYearMatch) {
+    const [, moPart, sep1] = monthYearMatch;
+    const moInfo = matchIsolatedMonth(moPart);
+    if (moInfo) {
+      const moTag = moInfo.nameFormat === 'short' ? '{{MMM}}' : '{{MMMM}}';
+      const normSep = /de/i.test(sep1) ? ' de ' : sep1;
+      const tpl = `${moTag}${normSep}{{YYYY}}`;
+      return {
+        type: 'date_placeholder',
+        name: `Mês e Ano (${trimmed})`,
+        variant: 'custom_template',
+        dateTemplate: tpl,
+        textTransform,
+        monthValue: moInfo.monthIndex,
+      };
+    }
+  }
+
+  // 8. Datas Compostas: Dia + Dia da Semana (ou Dia da Semana + Dia)
+  // Ex: "01 | SEGUNDA-FEIRA", "01 • DOMINGO", "SEGUNDA | 01"
+  const dayWkMatch = trimmed.match(/^(0?[1-9]|[12]\d|3[01])(\s*[,|•·/-]\s*|\s+)([a-zA-ZÀ-ÿ2-6ªº-]+)\.?$/i);
+  if (dayWkMatch) {
+    const [, , sep, wkPart] = dayWkMatch;
+    const wkInfo = matchIsolatedWeekday(wkPart);
+    if (wkInfo) {
+      const wkTag = wkInfo.nameFormat === 'short'
+        ? '{{DIA_SEMANA_CURTO}}'
+        : wkInfo.nameFormat === 'no_feira'
+          ? '{{DIA_SEMANA_SEM_FEIRA}}'
+          : '{{DIA_SEMANA}}';
+      return {
+        type: 'date_placeholder',
+        name: `Dia + Semana (${trimmed})`,
+        variant: 'custom_template',
+        dateTemplate: `{{DD}}${sep}${wkTag}`,
+        textTransform,
+        weekdayValue: wkInfo.weekdayIndex,
+      };
+    }
+  }
+
+  const wkDayMatch = trimmed.match(/^([a-zA-ZÀ-ÿ2-6ªº-]+)\.?(\s*[,|•·/-]\s*|\s+)(0?[1-9]|[12]\d|3[01])$/i);
+  if (wkDayMatch) {
+    const [, wkPart, sep] = wkDayMatch;
+    const wkInfo = matchIsolatedWeekday(wkPart);
+    if (wkInfo) {
+      const wkTag = wkInfo.nameFormat === 'short'
+        ? '{{DIA_SEMANA_CURTO}}'
+        : wkInfo.nameFormat === 'no_feira'
+          ? '{{DIA_SEMANA_SEM_FEIRA}}'
+          : '{{DIA_SEMANA}}';
+      return {
+        type: 'date_placeholder',
+        name: `Semana + Dia (${trimmed})`,
+        variant: 'custom_template',
+        dateTemplate: `${wkTag}${sep}{{DD}}`,
+        textTransform,
+        weekdayValue: wkInfo.weekdayIndex,
+      };
+    }
+  }
+
+  // 9. Data Numérica Completa: DD/MM/YYYY ou DD.MM.YYYY
+  const numericFullMatch = trimmed.match(/^(0?[1-9]|[12]\d|3[01])([/.-])(0?[1-9]|1[0-2])\2(202[4-9]|203[0-6])$/);
+  if (numericFullMatch) {
+    const sep = numericFullMatch[2];
+    return {
+      type: 'date_placeholder',
+      name: `Data Numérica (${trimmed})`,
+      variant: sep === '/' ? 'numeric_full' : 'custom_template',
+      dateTemplate: `{{DD}}${sep}{{MM}}${sep}{{YYYY}}`,
+      textTransform: 'none',
+    };
+  }
+
+  return null;
+};
+
+/**
+ * Classifica todos os textos de uma página de PDF em elementos dinâmicos da agenda ou textos estáticos,
+ * considerando o contexto da página inteira (evitando falsos positivos em horários de pauta, mini-calendários e calendários anuais)
+ * e comparação opcional com uma segunda página do PDF.
+ */
+export const classifyExtractedTextsAsDynamic = (
+  texts: ExtractedTextItem[],
+  viewport: { width: number; height: number },
+  otherPageTexts?: ExtractedTextItem[]
+): Map<string, DetectedDynamicClassification> => {
+  const result = new Map<string, DetectedDynamicClassification>();
+  if (!texts || texts.length === 0) return result;
+
+  // Calcula tamanho médio/mediano de fonte da página
+  const sortedFontSizes = texts.map(t => t.fontSize).sort((a, b) => a - b);
+  const medianFontSize = sortedFontSizes[Math.floor(sortedFontSizes.length / 2)] || 10;
+
+  // Passo 1: Classificação preliminar de padrões textuais (Dias da Semana, Meses, Anos, Datas Compostas)
+  for (const txt of texts) {
+    const detected = detectSingleTextDynamicPattern(txt.text);
+    if (detected) {
+      result.set(txt.id, detected);
+    }
+  }
+
+  // Passo 2: Proteção contra Calendário Anual (se houver >= 3 meses distintos na mesma página, não converter meses individuais em variável dinâmica única)
+  const detectedMonths = new Set<number>();
+  for (const [, cls] of result.entries()) {
+    if (cls.type === 'month_name' && cls.monthValue !== undefined) {
+      detectedMonths.add(cls.monthValue);
+    }
+  }
+  if (detectedMonths.size >= 3) {
+    for (const [id, cls] of Array.from(result.entries())) {
+      if (cls.type === 'month_name') {
+        result.delete(id);
+      }
+    }
+  }
+
+  // Passo 3: Proteção contra cabeçalho de Mini-Calendário (ex: Dom Seg Ter Qua Qui Sex Sab pequenos na mesma linha)
+  const dayNameItems = texts.filter(t => result.get(t.id)?.type === 'day_name');
+  for (const item of dayNameItems) {
+    const sameRowWeekdays = dayNameItems.filter(other => Math.abs(other.y - item.y) <= 5);
+    if (sameRowWeekdays.length >= 5 && item.fontSize <= 10.5) {
+      const minX = Math.min(...sameRowWeekdays.map(o => o.x));
+      const maxX = Math.max(...sameRowWeekdays.map(o => o.x + o.width));
+      // Se 5+ dias cabem em menos de 48% da largura da página, é cabeçalho de mini-calendário
+      if (maxX - minX < viewport.width * 0.48) {
+        result.delete(item.id);
+      }
+    }
+  }
+
+  // Passo 4: Detecção inteligente de Número do Dia (day_number: 01 a 31)
+  // Filtra apenas textos numéricos puros de 1 a 31
+  const candidateNumbers = texts.filter(t => {
+    if (result.has(t.id)) return false;
+    const clean = t.text.trim();
+    return /^(0?[1-9]|[12]\d|3[01])$/.test(clean);
+  });
+
+  // Textos que parecem horários na página (para identificar colunas de pauta de horários)
+  const hourLikeTexts = texts.filter(t => /^(\d{1,2})([:h]\d{0,2})?$/i.test(t.text.trim()));
+
+  for (const numItem of candidateNumbers) {
+    // Regra A: Ignorar se faz parte de uma coluna vertical de horários/números (>= 3 números alinhados no mesmo X)
+    const verticallyAligned = hourLikeTexts.filter(
+      other => other.id !== numItem.id && Math.abs(other.x - numItem.x) <= 15 && Math.abs(other.fontSize - numItem.fontSize) <= 2.5
+    );
+    if (verticallyAligned.length >= 3) continue;
+
+    // Regra B: Ignorar se há sufixo de hora ("h", ":00", "00", "30") imediatamente à direita na mesma linha
+    const hasHourSuffix = texts.some(
+      other =>
+        other.id !== numItem.id &&
+        Math.abs(other.y - numItem.y) <= 6 &&
+        other.x >= numItem.x &&
+        other.x - (numItem.x + numItem.width) <= 18 &&
+        /^(h|hs|hr|hrs|:00|:30|00|30|am|pm)$/i.test(other.text.trim())
+    );
+    if (hasHourSuffix) continue;
+
+    // Regra C: Ignorar se faz parte da grade de números de um Mini-Calendário (>= 5 números pequenos próximos)
+    const nearbySmallNumbers = candidateNumbers.filter(
+      other =>
+        other.id !== numItem.id &&
+        Math.abs(other.fontSize - numItem.fontSize) <= 2.5 &&
+        Math.hypot(other.x - numItem.x, other.y - numItem.y) <= 115
+    );
+    if (nearbySmallNumbers.length >= 5) continue;
+
+    // Regra D: Sinais positivos para confirmar que é um Número do Dia (day_number):
+    // Sinal 1: Comparação com outra página do mesmo PDF na mesma faixa Y mostra que o número mudou!
+    let confirmedByMultiPageDiff = false;
+    if (otherPageTexts && otherPageTexts.length > 0) {
+      const matchingOtherPageNumber = otherPageTexts.find(
+        other =>
+          /^(0?[1-9]|[12]\d|3[01])$/.test(other.text.trim()) &&
+          Math.abs(other.y - numItem.y) <= 8 &&
+          Math.abs(other.fontSize - numItem.fontSize) <= 2.5 &&
+          other.text.trim() !== numItem.text.trim()
+      );
+      if (matchingOtherPageNumber) {
+        confirmedByMultiPageDiff = true;
+      }
+    }
+
+    // Sinal 2: Está próximo a um Dia da Semana (day_name), Mês (month_name) ou Ano (year) já detectado
+    const nearDetectedDateHeader = texts.some(other => {
+      const otherCls = result.get(other.id);
+      if (!otherCls || !['day_name', 'month_name', 'year', 'date_placeholder'].includes(otherCls.type)) return false;
+      const dy = Math.abs(other.y - numItem.y);
+      const dx = Math.abs(other.x - numItem.x);
+      return dy <= 85 && dx <= viewport.width * 0.65;
+    });
+
+    // Sinal 3: Está no cabeçalho superior da página (top 30%) com fonte de destaque
+    const isProminentHeaderNumber =
+      numItem.y <= viewport.height * 0.30 &&
+      (numItem.fontSize >= 14 || numItem.fontSize >= medianFontSize * 1.25);
+
+    if (confirmedByMultiPageDiff || nearDetectedDateHeader || isProminentHeaderNumber) {
+      result.set(numItem.id, {
+        type: 'day_number',
+        name: `Nº do Dia (${numItem.text.trim()})`,
+        textTransform: 'none',
+      });
+    }
+  }
+
+  // Passo 5: Atribuição automática de sequência (dayIndex) quando há múltiplos dias na mesma página
+  // (Ex: Layout 2 dias por página ou Planner Semanal)
+  const sortByReadingOrder = (a: ExtractedTextItem, b: ExtractedTextItem) => {
+    if (Math.abs(a.y - b.y) > 18) return a.y - b.y;
+    return a.x - b.x;
+  };
+
+  const detectedDayNumbers = texts.filter(t => result.get(t.id)?.type === 'day_number').sort(sortByReadingOrder);
+  if (detectedDayNumbers.length >= 2 && detectedDayNumbers.length <= 7) {
+    detectedDayNumbers.forEach((item, idx) => {
+      const cls = result.get(item.id);
+      if (cls) {
+        cls.dayIndex = idx;
+        cls.name = `Nº do Dia ${idx + 1} (${item.text.trim()})`;
+      }
+    });
+  }
+
+  const detectedDayNames = texts.filter(t => result.get(t.id)?.type === 'day_name').sort(sortByReadingOrder);
+  if (detectedDayNames.length >= 2 && detectedDayNames.length <= 7) {
+    detectedDayNames.forEach((item, idx) => {
+      const cls = result.get(item.id);
+      if (cls) {
+        cls.dayIndex = idx;
+        cls.name = `Dia da Semana ${idx + 1} (${item.text.trim()})`;
+      }
+    });
+  }
+
+  const detectedDatePlaceholders = texts
+    .filter(t => {
+      const cls = result.get(t.id);
+      return cls?.type === 'date_placeholder' && (cls.dateTemplate?.includes('{{DD}}') || cls.dateTemplate?.includes('{{DIA'));
+    })
+    .sort(sortByReadingOrder);
+
+  if (detectedDatePlaceholders.length >= 2 && detectedDatePlaceholders.length <= 7) {
+    detectedDatePlaceholders.forEach((item, idx) => {
+      const cls = result.get(item.id);
+      if (cls) {
+        cls.dayIndex = idx;
+      }
+    });
+  }
+
+  return result;
+};
+
+/**
+ * Converte um LayoutElement entre texto estático ('text') e qualquer tipo variável dinâmico da agenda,
+ * preservando fonte, tamanho, cor, posição e o texto original do PDF.
+ */
+export const convertElementBetweenStaticAndDynamic = (
+  el: LayoutElement,
+  targetType: ElementType,
+  options?: {
+    variant?: string;
+    nameFormat?: string;
+    dateTemplate?: string;
+  }
+): LayoutElement => {
+  const originalText = el.style?.originalPdfText || el.content || '';
+  const detected = detectSingleTextDynamicPattern(originalText);
+  const autoTransform = detectStringCaseTransform(originalText);
+
+  if (targetType === 'text') {
+    return {
+      ...el,
+      type: 'text',
+      name: `Texto: ${(originalText || 'Texto').substring(0, 20).trim()}`,
+      content: originalText || el.content || 'Texto',
+      style: {
+        ...el.style,
+        originalPdfText: originalText || undefined,
+      },
+    };
+  }
+
+  const nextStyle = {
+    ...el.style,
+    originalPdfText: originalText || undefined,
+    textTransform: el.style?.textTransform && el.style.textTransform !== 'none'
+      ? el.style.textTransform
+      : (autoTransform !== 'none' ? autoTransform : el.style?.textTransform),
+  };
+
+  if (targetType === 'day_number') {
+    return {
+      ...el,
+      type: 'day_number',
+      name: `Nº do Dia (${originalText || '01'})`,
+      content: originalText || '01',
+      style: nextStyle,
+    };
+  }
+
+  if (targetType === 'day_name') {
+    const fmt = options?.nameFormat || detected?.nameFormat || nextStyle.nameFormat || 'full';
+    return {
+      ...el,
+      type: 'day_name',
+      name: `Dia da Semana (${originalText || 'Segunda-feira'})`,
+      content: originalText || 'Segunda-feira',
+      style: {
+        ...nextStyle,
+        nameFormat: fmt,
+      },
+    };
+  }
+
+  if (targetType === 'month_name') {
+    const fmt = options?.nameFormat || detected?.nameFormat || nextStyle.nameFormat || 'full';
+    return {
+      ...el,
+      type: 'month_name',
+      name: `Mês (${originalText || 'Janeiro'})`,
+      content: originalText || 'Janeiro',
+      style: {
+        ...nextStyle,
+        nameFormat: fmt,
+      },
+    };
+  }
+
+  if (targetType === 'month_number') {
+    return {
+      ...el,
+      type: 'month_number',
+      name: `Nº do Mês (${originalText || '01'})`,
+      content: originalText || '01',
+      style: nextStyle,
+    };
+  }
+
+  if (targetType === 'year') {
+    return {
+      ...el,
+      type: 'year',
+      name: `Ano (${originalText || '2026'})`,
+      content: originalText || '2026',
+      style: nextStyle,
+    };
+  }
+
+  if (targetType === 'date_placeholder') {
+    const variant = options?.variant || detected?.variant || nextStyle.variant || 'custom_template';
+    const tpl = options?.dateTemplate || detected?.dateTemplate || nextStyle.dateTemplate || '{{DD}} de {{MMMM}}';
+    return {
+      ...el,
+      type: 'date_placeholder',
+      name: `Data Dinâmica (${originalText || tpl})`,
+      content: originalText || tpl,
+      style: {
+        ...nextStyle,
+        variant,
+        dateTemplate: tpl,
+      },
+    };
+  }
+
+  if (targetType === 'quote') {
+    return {
+      ...el,
+      type: 'quote',
+      name: 'Frase Motivacional do Dia',
+      content: originalText || '"Frase Inspiradora"',
+      style: nextStyle,
+    };
+  }
+
+  if (targetType === 'verse') {
+    return {
+      ...el,
+      type: 'verse',
+      name: 'Versículo do Dia',
+      content: originalText || '"Versículo Bíblico"',
+      style: nextStyle,
+    };
+  }
+
+  if (targetType === 'holiday') {
+    return {
+      ...el,
+      type: 'holiday',
+      name: 'Feriado do Dia',
+      content: originalText || 'Feriado Nacional',
+      style: nextStyle,
+    };
+  }
+
+  return {
+    ...el,
+    type: targetType,
+    style: nextStyle,
+  };
+};
+
+/**
+ * Reaplica (ou reverte para texto fixo) a detecção automática de variáveis dinâmicas
+ * em uma lista de LayoutElements já extraídos na tela de pré-visualização.
+ */
+export const reapplyDynamicDetectionToElements = (
+  elements: LayoutElement[],
+  enableDynamic: boolean
+): LayoutElement[] => {
+  if (!enableDynamic) {
+    return elements.map(el => {
+      if (['day_number', 'day_name', 'month_name', 'month_number', 'year', 'date_placeholder'].includes(el.type)) {
+        return convertElementBetweenStaticAndDynamic(el, 'text');
+      }
+      return el;
+    });
+  }
+
+  const textCandidates: ExtractedTextItem[] = elements
+    .filter(el => ['text', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'date_placeholder'].includes(el.type))
+    .map(el => ({
+      id: el.id,
+      type: 'text' as const,
+      text: el.style?.originalPdfText || el.content || '',
+      x: (el.x / 100) * 595,
+      y: (el.y / 100) * 842,
+      width: (el.w / 100) * 595,
+      height: (el.h / 100) * 842,
+      fontSize: el.style?.fontSize || 12,
+      fontFamily: el.style?.fontFamily || 'Inter',
+      color: el.style?.color || '#1f2937',
+    }));
+
+  const classifications = classifyExtractedTextsAsDynamic(textCandidates, { width: 595, height: 842 });
+
+  return elements.map(el => {
+    const cls = classifications.get(el.id);
+    if (!cls) return el;
+    const converted = convertElementBetweenStaticAndDynamic(el, cls.type, {
+      variant: cls.variant,
+      nameFormat: cls.nameFormat,
+      dateTemplate: cls.dateTemplate,
+    });
+    return {
+      ...converted,
+      name: cls.name,
+      style: {
+        ...converted.style,
+        dayIndex: cls.dayIndex ?? converted.style.dayIndex,
+      },
+    };
+  });
+};
 
 /**
  * Converte argumentos de cor do PDF.js para string hexadecimal #RRGGBB.
@@ -658,6 +1359,7 @@ export async function extractPdfObjects(
     renderBackgroundCanvas = false,
     textColorDefault = '#1f2937',
     applyTextWhiteout = false,
+    autoDetectDynamicVariables = true,
   } = options;
 
   let data: ArrayBuffer | string;
@@ -1294,19 +1996,107 @@ export async function extractPdfObjects(
     });
   });
 
-  // C. Textos (Camada superior: Z-Index 100+ para seleção e edição direta)
-  // O usuário pode clicar duas vezes ou no painel para alterar qualquer frase, data, título ou anotação
+  // C. Textos e Variáveis Dinâmicas da Agenda (Camada superior: Z-Index 100+ para seleção e edição direta)
+  // Se o PDF tiver mais de 1 página e autoDetectDynamicVariables estiver ativo, compara coordenadas com página adjacente
+  let otherPageTexts: ExtractedTextItem[] | undefined = undefined;
+  if (autoDetectDynamicVariables && totalPages > 1) {
+    try {
+      const comparePageNum = validPageNum < totalPages ? validPageNum + 1 : Math.max(1, validPageNum - 1);
+      if (comparePageNum !== validPageNum) {
+        const comparePage = await pdf.getPage(comparePageNum);
+        const compareViewport = comparePage.getViewport({ scale: 1.0 });
+        const compareTextContent = await comparePage.getTextContent();
+        const rawCompare: ExtractedTextItem[] = [];
+        for (let cIdx = 0; cIdx < compareTextContent.items.length; cIdx++) {
+          const cItem = compareTextContent.items[cIdx] as any;
+          if (!cItem.str || cItem.str.trim() === '') continue;
+          const tr = cItem.transform;
+          const fSize = Math.max(7, Math.round(Math.abs(tr[3]) > 0.1 ? Math.abs(tr[3]) : Math.hypot(tr[0], tr[1]) || cItem.height || 12));
+          const [sx, sBaseY] = compareViewport.convertToViewportPoint(tr[4], tr[5]);
+          const sy = sBaseY - fSize * 0.82;
+          const sw = Math.max(cItem.width || 8, fSize * 0.55 * cItem.str.length);
+          const fInfo = sanitizeFontName(cItem.fontName || '');
+          rawCompare.push({
+            id: `cmp-${comparePageNum}-${cIdx}`,
+            type: 'text',
+            text: cItem.str,
+            x: sx,
+            y: sy,
+            width: sw,
+            height: fSize * 1.22,
+            fontSize: fSize,
+            fontFamily: fInfo.fontFamily,
+            fontWeight: fInfo.fontWeight,
+            fontStyle: fInfo.fontStyle,
+            color: textColorDefault,
+          });
+        }
+        otherPageTexts = groupTextLines ? groupLineFragments(rawCompare) : rawCompare;
+      }
+    } catch {
+      // Ignora silenciosamente se a página adjacente falhar
+    }
+  }
+
+  const dynamicClassifications = autoDetectDynamicVariables
+    ? classifyExtractedTextsAsDynamic(texts, { width: widthPt, height: heightPt }, otherPageTexts)
+    : new Map<string, DetectedDynamicClassification>();
+
   texts.forEach((txt, idx) => {
-    const xPct = Math.max(0, Math.min(100, (txt.x / widthPt) * 100));
+    let xPct = Math.max(0, Math.min(100, (txt.x / widthPt) * 100));
     const yPct = Math.max(0, Math.min(100, (txt.y / heightPt) * 100));
     // Margem de segurança de 6% na largura para evitar quebras involuntárias com fontes do sistema
-    const wPct = Math.max(1, Math.min(100, ((txt.width * 1.06) / widthPt) * 100));
+    let wPct = Math.max(1, Math.min(100, ((txt.width * 1.06) / widthPt) * 100));
     const hPct = Math.max(0.8, Math.min(100, (txt.height / heightPt) * 100));
+
+    const dynamicInfo = dynamicClassifications.get(txt.id);
+    let resolvedTextAlign: 'left' | 'center' | 'right' = 'left';
+
+    if (dynamicInfo) {
+      // Verifica se a variável dinâmica está centralizada dentro de uma caixa/moldura/círculo de cabeçalho
+      const enclosingBox = shapes.find(
+        shp =>
+          !shp.isLine &&
+          shp.type !== 'lines' &&
+          shp.width < widthPt * 0.55 &&
+          shp.height < heightPt * 0.25 &&
+          txt.x >= shp.x - 6 &&
+          txt.x + txt.width <= shp.x + shp.width + 6 &&
+          txt.y >= shp.y - 6 &&
+          txt.y + txt.height <= shp.y + shp.height + 6
+      );
+
+      if (enclosingBox) {
+        const txtCenterX = txt.x + txt.width / 2;
+        const boxCenterX = enclosingBox.x + enclosingBox.width / 2;
+        if (Math.abs(txtCenterX - boxCenterX) <= Math.max(8, enclosingBox.width * 0.16)) {
+          xPct = Math.max(0, Math.min(100, (enclosingBox.x / widthPt) * 100));
+          wPct = Math.max(wPct, Math.min(100 - xPct, (enclosingBox.width / widthPt) * 100));
+          resolvedTextAlign = 'center';
+        }
+      }
+
+      // Garante largura mínima segura para que meses longos ("Novembro") ou dias ("Segunda-feira", "30") não quebrem
+      if (resolvedTextAlign === 'left') {
+        const charWidthPt = txt.fontSize * 0.62;
+        let minExpectedChars = txt.text.length;
+        if (dynamicInfo.type === 'day_number') minExpectedChars = Math.max(minExpectedChars, 2.5);
+        else if (dynamicInfo.type === 'month_name') {
+          minExpectedChars = dynamicInfo.nameFormat === 'short' ? 4 : 9.5;
+        } else if (dynamicInfo.type === 'day_name') {
+          minExpectedChars = dynamicInfo.nameFormat === 'short' ? 4 : dynamicInfo.nameFormat === 'no_feira' ? 8.5 : 14;
+        } else if (dynamicInfo.type === 'date_placeholder') {
+          minExpectedChars = Math.max(minExpectedChars + 4, 16);
+        }
+        const safeMinWPct = ((minExpectedChars * charWidthPt) / widthPt) * 100;
+        wPct = Math.min(100 - xPct, Math.max(wPct, safeMinWPct));
+      }
+    }
 
     elements.push({
       id: `imported-txt-${Date.now()}-${idx}`,
-      name: `Texto: ${txt.text.substring(0, 20).trim() || 'Texto'}`,
-      type: 'text',
+      name: dynamicInfo ? dynamicInfo.name : `Texto: ${txt.text.substring(0, 20).trim() || 'Texto'}`,
+      type: dynamicInfo ? dynamicInfo.type : 'text',
       content: txt.text,
       x: Number(xPct.toFixed(2)),
       y: Number(yPct.toFixed(2)),
@@ -1319,7 +2109,13 @@ export async function extractPdfObjects(
         fontWeight: txt.fontWeight || 'normal',
         fontStyle: txt.fontStyle || 'normal',
         color: txt.color || '#1f2937',
-        textAlign: 'left',
+        textAlign: resolvedTextAlign,
+        textTransform: dynamicInfo?.textTransform && dynamicInfo.textTransform !== 'none' ? dynamicInfo.textTransform : undefined,
+        variant: dynamicInfo?.variant,
+        nameFormat: dynamicInfo?.nameFormat,
+        dateTemplate: dynamicInfo?.dateTemplate,
+        dayIndex: dynamicInfo?.dayIndex,
+        originalPdfText: txt.text,
         backgroundColor: applyTextWhiteout ? '#ffffff' : 'transparent', // Máscara de cobertura contra duplicação de texto no fundo
         cellPadding: applyTextWhiteout ? 1 : 0,
         borderRadius: applyTextWhiteout ? 2 : 0,

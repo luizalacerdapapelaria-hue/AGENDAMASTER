@@ -67,6 +67,8 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
                     width: '100%', 
                     height: '100%', 
                     whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                     textTransform: cssTransform as any
                 }}
             >
@@ -87,7 +89,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
             return renderContent(String(mVal).padStart(2, '0'));
         }
         case 'day_name': return renderContent(getDayName(d.dayOfWeek, style?.nameFormat));
-        case 'year': return renderContent(d.year);
+        case 'year': return renderContent((d.year || currentYear) + (style?.yearOffset || 0));
         case 'date_placeholder': {
             const variant = style?.variant || 'day_number';
             switch (variant) {
@@ -98,7 +100,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
                     const mVal = d.month >= 0 ? d.month + 1 : 1;
                     return renderContent(String(mVal).padStart(2, '0'));
                 }
-                case 'year': return renderContent(d.year);
+                case 'year': return renderContent((d.year || currentYear) + (style?.yearOffset || 0));
                 default: return renderContent(String(d.dayOfMonth).padStart(2, '0'));
             }
         }

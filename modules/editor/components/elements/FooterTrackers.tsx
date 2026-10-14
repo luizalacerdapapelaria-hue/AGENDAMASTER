@@ -645,19 +645,39 @@ export const DEFAULT_COMPOSITE_SECTIONS: FooterTrackerSection[] = [
 ];
 
 export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, style, pageHeight, pageWidth }) => {
+    const fallbackType: FooterTrackerType = (['water', 'mood', 'weather', 'meals', 'sleep', 'meds', 'gratitude', 'fitness'].includes(style.variant as string)
+        ? (style.variant as FooterTrackerType)
+        : 'water');
+    const fallbackIcon = fallbackType === 'mood'
+        ? 'faces_clean'
+        : fallbackType === 'weather'
+        ? 'weather_5'
+        : fallbackType === 'meals'
+        ? 'meals_4'
+        : fallbackType === 'sleep'
+        ? 'sleep_hours'
+        : fallbackType === 'meds'
+        ? 'pills'
+        : fallbackType === 'fitness'
+        ? 'fitness_4'
+        : fallbackType === 'gratitude'
+        ? 'gratitude_line'
+        : 'glass';
+    const fallbackCount = fallbackType === 'water' ? 6 : fallbackType === 'mood' ? 5 : 4;
+
     const config: FooterTrackerConfig = style.footerTracker || {
         mode: 'single',
-        trackerType: 'water',
-        iconVariant: 'glass',
-        itemCount: 8,
-        itemSize: 20,
-        spacing: 5,
-        strokeColor: style.color || '#2563eb',
+        trackerType: fallbackType,
+        iconVariant: fallbackIcon,
+        itemCount: fallbackCount,
+        itemSize: 15,
+        spacing: 4,
+        strokeColor: style.color || '#9d174d',
         fillColor: style.backgroundColor || 'transparent',
         strokeWidth: style.borderWidth ?? 1.2,
         showLabel: true,
-        label: 'Água',
-        labelPosition: 'left',
+        label: (style as any).title || undefined,
+        labelPosition: 'top',
         showBox: false
     };
 

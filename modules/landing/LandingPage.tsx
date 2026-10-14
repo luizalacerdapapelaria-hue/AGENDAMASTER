@@ -5,7 +5,8 @@ import {
   Printer, ShieldCheck, Download, LogIn,
   Sliders, Calendar, CheckCircle2, ChevronRight,
   ExternalLink, MousePointerClick, RefreshCw, Zap,
-  Play, Video
+  Play, Video, BookOpen, Hash, Columns, Grid,
+  Receipt, Ticket
 } from 'lucide-react';
 import { AppState } from '../../types';
 
@@ -13,12 +14,14 @@ interface LandingPageProps {
   onNavigate: (state: AppState) => void;
   exeUrl?: string;
   checkoutUrl?: string;
+  originalOfferUrl?: string;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ 
   onNavigate, 
   exeUrl,
-  checkoutUrl = 'https://pay.herospark.com/agenda-master-523399'
+  checkoutUrl = 'https://pay.herospark.com/agenda-master-545764',
+  originalOfferUrl = 'https://pay.herospark.com/agenda-master-523399'
 }) => {
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
@@ -48,16 +51,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Agenda Master <span className="text-amber-600">AI</span>
               </span>
               <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                v1.1.2
+                v2.0.0
               </span>
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => onNavigate(AppState.QUIZ)}
+              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-stone-950 text-xs font-black px-3.5 py-2 rounded-lg shadow-sm transition-all flex items-center gap-1.5 animate-pulse"
+              id="landing-quiz-header-btn"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Facilitaria sua Vida?</span>
+            </button>
             <button
               onClick={() => onNavigate(AppState.LOGIN)}
-              className="text-stone-600 hover:text-stone-900 text-xs font-semibold px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors flex items-center gap-1.5"
+              className="text-stone-600 hover:text-stone-900 text-xs font-semibold px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors hidden sm:flex items-center gap-1.5"
               id="landing-login-btn"
             >
               <LogIn className="w-3.5 h-3.5" />
@@ -98,7 +109,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </p>
 
         {/* Hero CTAs */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-14">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-6">
           <a
             href={checkoutUrl}
             target="_blank"
@@ -119,8 +130,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </button>
         </div>
 
+        {/* ── QUIZ FUNNEL PROMO BANNER ── */}
+        <div className="max-w-2xl mx-auto mb-12 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border border-amber-200/90 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-stone-900 leading-snug">
+                Sofrendo com mesclagem de dados e horas montando agendas?
+              </h3>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Responda a 6 perguntas práticas e vamos ver se o Agenda Master facilitaria a sua vida!
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate(AppState.QUIZ)}
+            className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-5 py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap"
+            id="landing-hero-quiz-cta"
+          >
+            <span>Fazer Teste de 60s</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+
         {/* ── VÍDEO DEMONSTRAÇÃO DO SISTEMA FUNCIONANDO ── */}
-        <div className="bg-white border border-stone-200/90 rounded-2xl shadow-2xl overflow-hidden max-w-4xl mx-auto text-left">
+        <div className="bg-white border border-stone-200/90 rounded-2xl shadow-2xl overflow-hidden max-w-4xl mx-auto text-left transform-gpu">
           <div className="bg-stone-900 text-stone-300 px-4 py-3 border-b border-stone-800 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
@@ -128,17 +165,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
               <span className="ml-2 font-mono text-[11px] text-stone-400">Demonstração Prática • Agenda Master em Ação</span>
             </div>
-            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-              <Video className="w-3.5 h-3.5" /> Assista à Demonstração
-            </span>
+            <a 
+              href="https://www.youtube.com/watch?v=FBqMHhpH8pg"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 hover:underline transition-colors"
+              title="Assistir diretamente no YouTube em alta definição"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Abrir no YouTube</span>
+            </a>
           </div>
           
-          <div className="relative w-full aspect-video bg-black">
+          <div className="relative w-full aspect-video bg-black overflow-hidden transform-gpu will-change-transform">
             <iframe
-              src="https://www.youtube.com/embed/FBqMHhpH8pg?autoplay=0&rel=0&modestbranding=1"
+              src="https://www.youtube-nocookie.com/embed/FBqMHhpH8pg?autoplay=0&rel=0&modestbranding=1&playsinline=1&enablejsapi=1"
               title="Demonstração do Agenda Master"
-              className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              className="w-full h-full border-0 transform-gpu will-change-transform"
+              loading="eager"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
             />
           </div>
@@ -160,6 +205,166 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
 
+      </section>
+
+      {/* ── 1.5. O QUE VOCÊ PODE CRIAR COM O AGENDA MASTER ── */}
+      <section className="py-16 md:py-20 bg-stone-50 px-4 sm:px-6 lg:px-8 border-y border-stone-200" id="produtos-section">
+        <div className="max-w-6xl mx-auto w-full">
+          
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <span className="text-xs font-black uppercase tracking-widest text-amber-700 bg-amber-100/80 px-3 py-1 rounded-full inline-block mb-3">
+              Versatilidade Total
+            </span>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-stone-950 tracking-tight mb-3">
+              O que você cria em segundos:
+            </h2>
+            <p className="text-stone-600 text-sm sm:text-base font-medium">
+              Arquivos completos em PDF 300 DPI, prontos para imprimir e encadernar sem Corel, InDesign ou Excel.
+            </p>
+          </div>
+
+          {/* 4 Impactful Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+            
+            {/* 1. AGENDAS */}
+            <div className="bg-white border-2 border-stone-200/90 hover:border-amber-500 rounded-2xl p-6 sm:p-7 shadow-xs hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full">
+                  Datadas & Permanentes
+                </span>
+              </div>
+
+              <h3 className="text-xl sm:text-2xl font-black text-stone-900 mb-4">
+                Agendas Personalizadas
+              </h3>
+
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                  <span>1 Dia por Página (1 DPP)</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                  <span>2 Dias por Página (2 DPP)</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                  <span>1 DPP com Finais de Semana Compartilhados (Sábado e Domingo juntos)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. PLANNERS */}
+            <div className="bg-white border-2 border-stone-200/90 hover:border-rose-500 rounded-2xl p-6 sm:p-7 shadow-xs hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <BookOpen className="w-6 h-6" />
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-rose-800 bg-rose-50 border border-rose-200 px-3 py-1 rounded-full">
+                  Semanais & Diários
+                </span>
+              </div>
+
+              <h3 className="text-xl sm:text-2xl font-black text-stone-900 mb-4">
+                Planners Completos
+              </h3>
+
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>Layouts Semanais Horizontais</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>Layouts Semanais Verticais</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>Visão Mensal e Financeiro</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. CADERNOS */}
+            <div className="bg-white border-2 border-stone-200/90 hover:border-indigo-500 rounded-2xl p-6 sm:p-7 shadow-xs hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-indigo-800 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
+                  Personalizáveis
+                </span>
+              </div>
+
+              <h3 className="text-xl sm:text-2xl font-black text-stone-900 mb-4">
+                Cadernos Personalizados
+              </h3>
+
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
+                  <span>Cadernos Pautados</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
+                  <span>Cadernos Pontilhados (Bullet Journal)</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
+                  <span>Cadernos Quadriculados e Lisos</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. BLOCOS & RIFAS */}
+            <div className="bg-white border-2 border-stone-200/90 hover:border-emerald-500 rounded-2xl p-6 sm:p-7 shadow-xs hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Hash className="w-6 h-6" />
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+                  Em Sequência
+                </span>
+              </div>
+
+              <h3 className="text-xl sm:text-2xl font-black text-stone-900 mb-4">
+                Blocos & Rifas com Numeração
+              </h3>
+
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span>Numeração Sequencial Automática (001 a 1000)</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span>Blocos de Pedidos, Comandas e Recibos</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-sm text-stone-800 font-bold bg-stone-50 p-3 rounded-xl border border-stone-100">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span>Rifas e Ingressos com Canhoto</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Quick CTA button */}
+          <div className="text-center">
+            <button
+              onClick={() => onNavigate(AppState.WELCOME)}
+              className="inline-flex items-center gap-2.5 bg-stone-900 hover:bg-stone-800 text-white font-extrabold text-xs sm:text-sm px-7 py-4 rounded-xl shadow-md transition-all hover:scale-[1.02]"
+              id="landing-products-explore-btn"
+            >
+              <span>Experimentar Todos os Modelos no Editor</span>
+              <ArrowRight className="w-4 h-4 text-amber-400" />
+            </button>
+          </div>
+
+        </div>
       </section>
 
       {/* ── 2. O PROBLEMA ── */}
@@ -625,7 +830,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="font-black text-stone-300">Agenda Master AI</span>
-            <span>• Versão 1.1.2</span>
+            <span>• Versão 2.0.0</span>
           </div>
           <p>© {new Date().getFullYear()} Luiza Lacerda Papelaria. Todos os direitos reservados.</p>
         </div>

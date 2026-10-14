@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Sparkles, X, ChevronRight, Laptop } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { localStorage } from '../../../services/safeStorage';
 
-const CURRENT_VERSION = "1.1.2"; // Versão fixa do build atual
+const CURRENT_VERSION = "2.0.0"; // Versão fixa do build atual
 
 export const UpdateNotifier: React.FC = () => {
   const [hasUpdate, setHasUpdate] = useState(false);

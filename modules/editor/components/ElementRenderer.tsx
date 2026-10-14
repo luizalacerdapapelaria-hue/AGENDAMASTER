@@ -13,6 +13,7 @@ import { IconElement } from './elements/Icons';
 import { PermanentDayHeader } from './elements/PermanentDayHeader';
 import { PlannerDayBox } from './elements/PlannerDayBox';
 import { FooterTrackerElement } from './elements/FooterTrackers';
+import { SpecialEventElement } from './elements/SpecialEvents';
 
 interface ElementRendererProps {
   element: LayoutElement;
@@ -383,6 +384,10 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
 
   if (element.type === 'footer_tracker') {
       return <FooterTrackerElement {...scaledProps} style={scaledElement.style} pageHeight={pageHeight} pageWidth={pageWidth} />;
+  }
+
+  if (element.type === 'special_event') {
+      return <SpecialEventElement {...scaledProps} style={scaledElement.style} pageHeight={pageHeight} pageWidth={pageWidth} />;
   }
 
   return null;

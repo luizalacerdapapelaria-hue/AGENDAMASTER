@@ -61,8 +61,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
 
         if (style.showTimes) {
             const startH = style.startHour !== undefined ? style.startHour : 7;
-            const endH = style.endHour !== undefined ? style.endHour : 18;
-            const intervalM = style.timeInterval || 60;
+            const endH = style.endHour !== undefined ? style.endHour : 20;
+            const intervalM = style.timeInterval || ((style as any).stepHour ? (style as any).stepHour * 60 : 60);
             const skipLine = style.skipBlankLine || false;
             
             const startMin = startH * 60;
@@ -77,6 +77,9 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                 }
             }
             lineCount = timesList.length;
+            if (lineCount > 0 && heightPx > 0) {
+                finalLineSpacing = heightPx / lineCount;
+            }
         } else if (style.rowCount && style.rowCount > 0) {
             lineCount = style.rowCount;
             finalLineSpacing = heightPx / lineCount;
@@ -88,7 +91,12 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         const textAlign = style.textAlign || 'left';
         const verticalAlign = style.verticalAlign || 'middle';
         const timePosition = style.timePosition || 'left';
-        const timeWidthPx = style.timeWidth || 36;
+        const timeWidthPx = (style as any).timeColumnWidth || style.timeWidth || 30;
+        const timeFontSizeVal = (style as any).timeFontSize || style.fontSize || 7.5;
+        const timeColorVal = (style as any).timeColor || style.color || '#6b7280';
+        const timeFontWeightVal = (style as any).timeFontWeight || style.fontWeight || 'bold';
+        const showCheckboxes = Boolean((style as any).showCheckboxes);
+        const checkboxStyle = (style as any).checkboxStyle || 'circle';
 
         let flexVerticalAlign = 'items-center';
         let selfVerticalAlign = 'self-center';
@@ -111,6 +119,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             flexHorizontalAlign = 'justify-end';
         }
 
+        const cbSize = Math.max(7, Math.min(11, finalLineSpacing * 0.55));
+
         return (
             <>
                 {Array(lineCount).fill(0).map((_, i) => {
@@ -121,10 +131,10 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         <div 
                             className={`shrink-0 select-none flex ${flexHorizontalAlign} ${selfVerticalAlign}`}
                             style={{ 
-                                width: style.timeWidth ? `${style.timeWidth}px` : undefined,
+                                width: `${timeWidthPx}px`,
                                 minWidth: `${timeWidthPx}px`,
-                                paddingRight: timePosition === 'left' ? '8px' : '0px',
-                                paddingLeft: timePosition === 'right' ? '8px' : '0px',
+                                paddingRight: timePosition === 'left' ? '6px' : '0px',
+                                paddingLeft: timePosition === 'right' ? '6px' : '0px',
                                 marginBottom: verticalAlign === 'bottom' ? verticalOffset : undefined,
                                 marginTop: verticalAlign === 'top' ? verticalOffset : undefined,
                                 justifyContent: textAlign === 'center' ? 'center' : (textAlign === 'right' ? 'flex-end' : 'flex-start'),
@@ -133,10 +143,10 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         >
                             <span 
                                 style={{ 
-                                    fontFamily: style.fontFamily || 'monospace',
-                                    fontSize: style.fontSize || 10,
-                                    fontWeight: style.fontWeight || 'normal',
-                                    color: style.color || '#6b7280',
+                                    fontFamily: style.fontFamily || 'Montserrat, monospace',
+                                    fontSize: timeFontSizeVal,
+                                    fontWeight: timeFontWeightVal,
+                                    color: timeColorVal,
                                     letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
                                     textTransform: (style.textTransform as any) || 'none',
                                     backgroundColor: style.backgroundColor || 'transparent',
@@ -152,6 +162,19 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         </div>
                     ) : null;
 
+                    const checkboxNode = (!style.showTimes && showCheckboxes) ? (
+                        <div
+                            className="shrink-0 select-none flex items-center justify-center mr-2 self-center"
+                            style={{
+                                width: `${cbSize}px`,
+                                height: `${cbSize}px`,
+                                borderRadius: checkboxStyle === 'circle' ? '9999px' : '2.5px',
+                                border: `${Math.max(1, borderWidthVal * 1.4)}px solid ${strokeColor}`,
+                                backgroundColor: '#ffffff'
+                            }}
+                        />
+                    ) : null;
+
                     return (
                         <div 
                             key={i} 
@@ -162,6 +185,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             }}
                         >
                             {timeNode && timePosition === 'left' && timeNode}
+                            {checkboxNode}
                             <div className="flex-1 self-end relative w-full flex items-center" style={{ height: `${Math.max(1, borderWidthVal)}px` }}>
                                 <svg className="w-full h-full overflow-visible">
                                     <line 

@@ -326,21 +326,78 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     if (element.type === 'quote') {
         const quoteText = quote || element.content || (isEditor ? '"Frase Inspiradora"' : '');
         const content = isSentenceOrCapitalize ? applyTextTransform(quoteText, textTransform) : quoteText;
-        return <div style={{...style, ...alignmentStyles, lineHeight: style.lineHeight || 1.5, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{content}</div>;
+        return (
+            <div 
+                style={{
+                    ...style, 
+                    ...alignmentStyles, 
+                    lineHeight: style.lineHeight || 1.3, 
+                    display: 'flex', 
+                    width: '100%', 
+                    height: '100%', 
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    textTransform: cssTransform as any
+                }}
+            >
+                {content}
+            </div>
+        );
     }
 
     if (element.type === 'verse') {
         const verseText = verse || element.content || (isEditor ? '"Versículo Bíblico"' : '');
         const content = isSentenceOrCapitalize ? applyTextTransform(verseText, textTransform) : verseText;
-        return <div style={{...style, ...alignmentStyles, lineHeight: style.lineHeight || 1.5, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{content}</div>;
+        return (
+            <div 
+                style={{
+                    ...style, 
+                    ...alignmentStyles, 
+                    lineHeight: style.lineHeight || 1.3, 
+                    display: 'flex', 
+                    width: '100%', 
+                    height: '100%', 
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    textTransform: cssTransform as any
+                }}
+            >
+                {content}
+            </div>
+        );
     }
 
     if (element.type === 'holiday') {
         if (!dayData || dayData.dayOfMonth === 0) return null;
-        const holidayText = dayData.holiday || (isEditor ? 'Confraternização Universal' : '');
+        let holidayText = dayData.holiday || '';
+        if (dayData.specialEventText) {
+            holidayText = holidayText ? `${holidayText} • ${dayData.specialEventText}` : dayData.specialEventText;
+        }
+        if (!holidayText && isEditor) {
+            holidayText = 'Confraternização Universal';
+        }
         if (!holidayText && !isEditor) return null;
         const content = isSentenceOrCapitalize ? applyTextTransform(holidayText, textTransform) : holidayText;
-        return <div style={{...style, ...alignmentStyles, lineHeight: style.lineHeight || 1.5, display: 'flex', width: '100%', height: '100%', textTransform: cssTransform as any}}>{content}</div>;
+        return (
+            <div 
+                style={{
+                    ...style, 
+                    ...alignmentStyles, 
+                    lineHeight: style.lineHeight || 1.3, 
+                    display: 'flex', 
+                    width: '100%', 
+                    height: '100%', 
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    textTransform: cssTransform as any
+                }}
+            >
+                {content}
+            </div>
+        );
     }
 
     return null;

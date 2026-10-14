@@ -227,8 +227,10 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const colStyles = style.table?.colStyles || {};
     const cellStyles = style.table?.cellStyles || {};
 
-    const zebraRows = style.table?.zebraRows;
-    const zebraColor = style.table?.zebraColor || '#f9fafb';
+    const zebraRows = style.table?.zebraRows ?? Boolean((style.table as any)?.alternateRowColor);
+    const zebraColor = style.table?.zebraColor || (style.table as any)?.alternateRowColor || '#f9fafb';
+    const headerBgColor = (style.table as any)?.headerBackgroundColor || '#f3f4f6';
+    const headerTxtColor = (style.table as any)?.headerTextColor;
     const borderColor = style.table?.borderColor || '#e5e7eb';
     const borderWidth = style.table?.borderWidth !== undefined ? style.table.borderWidth : (style.borderWidth !== undefined ? style.borderWidth : 1);
     const outerBorderWidth = style.table?.outerBorderWidth !== undefined ? style.table.outerBorderWidth : borderWidth;
@@ -334,10 +336,17 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                         {Array(columns).fill(0).map((_, c) => {
                             const cellKey = `${r}-${c}`;
                             const cellKeyAlt = `${r}_${c}`;
-                            const content = style.table?.cellContent?.[cellKey] ?? style.table?.cellContent?.[cellKeyAlt] ?? '';
+                            const content = style.table?.cellContent?.[cellKey] ?? style.table?.cellContent?.[cellKeyAlt] ?? (style.table as any)?.data?.[r]?.[c] ?? '';
                             const isHeaderCell = hasHeader && r === 0;
+                            const headerFallbackStyle = isHeaderCell
+                                ? {
+                                    fontWeight: 'bold',
+                                    verticalAlign: 'middle',
+                                    ...(headerTxtColor ? { color: headerTxtColor } : {})
+                                }
+                                : {};
                             const cellCustomStyle = filterDefined(cellStyles[cellKey] || cellStyles[cellKeyAlt] || {});
-                            const tStyle = { ...globalTextStyle, ...filterDefined(rowStyles[r]), ...filterDefined(colStyles[c]), ...cellCustomStyle };
+                            const tStyle = { ...globalTextStyle, ...headerFallbackStyle, ...filterDefined(rowStyles[r]), ...filterDefined(colStyles[c]), ...cellCustomStyle };
                             const va = (tStyle.verticalAlign as string) || 'top';
                             
                             const rawFontSize = typeof tStyle.fontSize === 'number' ? tStyle.fontSize : (parseFloat(String(tStyle.fontSize)) || 10);
@@ -367,7 +376,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             const customBg = tStyle.backgroundColor;
                             let defaultBg = 'transparent';
                             if (isHeaderCell) {
-                                defaultBg = '#f3f4f6';
+                                defaultBg = headerBgColor;
                             } else if (zebraRows) {
                                 const dataRowIdx = hasHeader ? r - 1 : r;
                                 if (dataRowIdx % 2 === 1) {

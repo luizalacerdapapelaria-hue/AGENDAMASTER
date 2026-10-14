@@ -988,9 +988,7 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
                         <button
                             type="button"
                             onClick={() => {
-                                if (confirm('Tem certeza que deseja apagar todas as regras de fundo da agenda?')) {
-                                    updateAllRules({});
-                                }
+                                updateAllRules({});
                             }}
                             className="text-[9px] font-bold text-red-600 hover:text-red-800 hover:underline cursor-pointer flex items-center gap-1"
                         >

@@ -5,6 +5,7 @@
  * (Windows, macOS, Linux) e no ambiente Desktop (Electron), disponibilizando-as 
  * automaticamente para uso nos elementos de texto, capas e agendas.
  */
+import { localStorage } from '../../services/safeStorage';
 
 // Lista abrangente de fontes comuns de sistemas operacionais (Windows, Mac, Linux)
 export const CANDIDATE_SYSTEM_FONTS = [
