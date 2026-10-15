@@ -78,16 +78,6 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl, onNav
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {onNavigateToLanding && (
-              <button
-                onClick={onNavigateToLanding}
-                className="text-xs font-bold text-stone-300 hover:text-white bg-stone-900 hover:bg-stone-850 border border-stone-800 px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                title="Acessar Landing Page de apresentação"
-              >
-                <Globe className="w-3.5 h-3.5 text-orange-400" />
-                <span className="hidden sm:inline">Landing Page</span>
-              </button>
-            )}
 
             <button
               onClick={() => setShowReqModal(true)}

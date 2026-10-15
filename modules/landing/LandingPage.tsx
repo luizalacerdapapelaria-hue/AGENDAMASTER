@@ -3,8 +3,8 @@ import {
   Sparkles, ArrowRight, Check, X, 
   Layers, Palette, Layout, FileText, 
   Printer, ShieldCheck, Download, LogIn,
-  Sliders, Calendar, CheckCircle2, ChevronRight,
-  ExternalLink, MousePointerClick, RefreshCw, Zap,
+  Sliders, Calendar, CheckCircle2,
+  ExternalLink, RefreshCw, Zap,
   Play, Video, BookOpen, Hash, Columns, Grid,
   Receipt, Ticket
 } from 'lucide-react';
@@ -40,7 +40,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           {/* Logo */}
           <div 
             className="flex items-center gap-2.5 cursor-pointer select-none" 
-            onClick={() => onNavigate(AppState.WELCOME)}
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
             id="landing-logo-btn"
           >
             <div className="bg-gradient-to-br from-amber-600 to-orange-600 w-8 h-8 rounded-lg flex items-center justify-center shadow-xs">
@@ -59,16 +59,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           {/* Actions */}
           <div className="flex items-center gap-2.5">
             <button
-              onClick={() => onNavigate(AppState.QUIZ)}
-              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-stone-950 text-xs font-black px-3.5 py-2 rounded-lg shadow-sm transition-all flex items-center gap-1.5 animate-pulse"
-              id="landing-quiz-header-btn"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Facilitaria sua Vida?</span>
-            </button>
-            <button
               onClick={() => onNavigate(AppState.LOGIN)}
-              className="text-stone-600 hover:text-stone-900 text-xs font-semibold px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors hidden sm:flex items-center gap-1.5"
+              className="text-stone-600 hover:text-stone-900 text-xs font-semibold px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors flex items-center gap-1.5"
               id="landing-login-btn"
             >
               <LogIn className="w-3.5 h-3.5" />
@@ -109,7 +101,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </p>
 
         {/* Hero CTAs */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-6">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-12">
           <a
             href={checkoutUrl}
             target="_blank"
@@ -117,43 +109,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white text-sm sm:text-base font-extrabold px-8 py-4 rounded-xl shadow-md shadow-amber-600/20 transition-all flex items-center justify-center gap-2"
             id="hero-primary-cta"
           >
-            <span>QUERO CONHECER O AGENDA MASTER</span>
+            <span>QUERO MEU ACESSO AO AGENDA MASTER</span>
             <ArrowRight className="w-4 h-4" />
           </a>
-          <button
-            onClick={() => onNavigate(AppState.WELCOME)}
-            className="w-full sm:w-auto bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 text-sm sm:text-base font-bold px-6 py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
-            id="hero-test-editor-btn"
-          >
-            <MousePointerClick className="w-4 h-4 text-amber-600" />
-            <span>Experimentar o Editor</span>
-          </button>
-        </div>
-
-        {/* ── QUIZ FUNNEL PROMO BANNER ── */}
-        <div className="max-w-2xl mx-auto mb-12 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border border-amber-200/90 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-stone-900 leading-snug">
-                Sofrendo com mesclagem de dados e horas montando agendas?
-              </h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Responda a 6 perguntas práticas e vamos ver se o Agenda Master facilitaria a sua vida!
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => onNavigate(AppState.QUIZ)}
-            className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-5 py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap"
-            id="landing-hero-quiz-cta"
-          >
-            <span>Fazer Teste de 60s</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
         </div>
 
         {/* ── VÍDEO DEMONSTRAÇÃO DO SISTEMA FUNCIONANDO ── */}
@@ -354,14 +312,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Quick CTA button */}
           <div className="text-center">
-            <button
-              onClick={() => onNavigate(AppState.WELCOME)}
+            <a
+              href={checkoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-2.5 bg-stone-900 hover:bg-stone-800 text-white font-extrabold text-xs sm:text-sm px-7 py-4 rounded-xl shadow-md transition-all hover:scale-[1.02]"
               id="landing-products-explore-btn"
             >
-              <span>Experimentar Todos os Modelos no Editor</span>
+              <span>Garantir Acesso a Todos os Modelos</span>
               <ArrowRight className="w-4 h-4 text-amber-400" />
-            </button>
+            </a>
           </div>
 
         </div>
@@ -537,14 +497,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Action button */}
         <div className="text-center">
-          <button
-            onClick={() => onNavigate(AppState.WELCOME)}
+          <a
+            href={checkoutUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center gap-2 bg-stone-900 hover:bg-stone-800 text-white text-xs sm:text-sm font-bold px-6 py-3.5 rounded-xl transition-colors"
-            id="showcase-try-btn"
+            id="showcase-access-btn"
           >
-            <span>Ver todas as opções no editor interativo</span>
+            <span>Liberar Acesso Completo aos Recursos</span>
             <ArrowRight className="w-4 h-4 text-amber-400" />
-          </button>
+          </a>
         </div>
 
       </section>

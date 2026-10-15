@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { localStorage } from '../../services/safeStorage';
 import { User } from '../../types';
-import { Lock, Mail, ArrowRight, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings, Key, Globe } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings, Key } from 'lucide-react';
 import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from '../../services/supabase';
 
 interface LoginProps {
@@ -575,16 +575,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                     <Sparkles className="w-3.5 h-3.5 text-orange-400" />
                     <span>Ainda não é aluno? Adquira seu acesso aqui</span>
                   </a>
-                  {onNavigateToLanding && (
-                    <button
-                      type="button"
-                      onClick={onNavigateToLanding}
-                      className="text-xs text-stone-400 hover:text-white font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Globe className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Conhecer o Agenda Master AI (Landing Page)</span>
-                    </button>
-                  )}
                 </div>
 
               </form>
