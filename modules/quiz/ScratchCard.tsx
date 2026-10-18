@@ -1,107 +1,145 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Sparkles, Trophy, Gift, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Trophy, CheckCircle2, RotateCcw, Zap } from 'lucide-react';
 
 interface ScratchCardProps {
   onReveal: () => void;
   isRevealed: boolean;
+  onReset?: () => void;
 }
 
-export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }) => {
+export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed, onReset }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isScratching, setIsScratching] = useState(false);
   const [scratchPercent, setScratchPercent] = useState(0);
   const [hasTriggeredReveal, setHasTriggeredReveal] = useState(false);
+  const isRevealedRef = useRef(false);
 
-  // Initialize and draw the scratchable surface
+  // Initialize and draw the scratchable surface with rose gold & gold metallic gradient
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const rect = container.getBoundingClientRect();
+    const width = Math.max(rect.width || 360, 300);
+    const height = Math.max(rect.height || 220, 200);
+
+    canvas.width = width;
+    canvas.height = height;
+
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    // Reset composite operation to normal draw
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, width, height);
 
-    // Rich metallic gold gradient
+    // Rose gold & champagne luxury metallic gradient
     const gradient = ctx.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, '#f59e0b');
-    gradient.addColorStop(0.25, '#fbbf24');
-    gradient.addColorStop(0.5, '#d97706');
-    gradient.addColorStop(0.75, '#fef3c7');
-    gradient.addColorStop(1, '#b45309');
+    gradient.addColorStop(0, '#e5a59c');
+    gradient.addColorStop(0.2, '#f6cfbe');
+    gradient.addColorStop(0.4, '#d88373');
+    gradient.addColorStop(0.65, '#fde6dc');
+    gradient.addColorStop(0.85, '#c26658');
+    gradient.addColorStop(1, '#a84c42');
 
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
-    // Decorative starbursts / sparkles pattern
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-    for (let i = 0; i < 40; i++) {
-      const x = (i * 37) % width;
-      const y = (i * 29) % height;
-      const r = (i % 4) + 2;
+    // Decorative sparkles & polka dots texture
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+    for (let i = 0; i < 48; i++) {
+      const x = (i * 47) % width;
+      const y = (i * 31) % height;
+      const r = (i % 4) + 2.5;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Border
-    ctx.strokeStyle = '#fef3c7';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(6, 6, width - 12, height - 12);
+    // Elegant inner border
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(8, 8, width - 16, height - 16);
 
-    // Text in the center
+    ctx.strokeStyle = 'rgba(168, 76, 66, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(12, 12, width - 24, height - 24);
+
+    // Text in center
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Top icon/sparkle
-    ctx.fillStyle = '#78350f';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('✨ RASPE COM O DEDO OU MOUSE ✨', width / 2, height / 2 - 18);
+    // Top instruction
+    ctx.fillStyle = '#6b201a';
+    ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText('✨ RASPE COM O DEDO OU MOUSE ✨', width / 2, height / 2 - 24);
 
-    ctx.font = '900 19px sans-serif';
-    ctx.fillStyle = '#451a03';
-    ctx.fillText('DESCUBRA SEU DESCONTO', width / 2, height / 2 + 10);
+    // Main Title
+    ctx.font = '900 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = '#4a120e';
+    ctx.fillText('DESCUBRA SEU DESCONTO', width / 2, height / 2 + 6);
 
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillStyle = '#78350f';
-    ctx.fillText('Passe o dedo para revelar seu prêmio', width / 2, height / 2 + 32);
+    // Subtitle
+    ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = '#7a2d25';
+    ctx.fillText('Passe o dedo para revelar seu prêmio exclusivo', width / 2, height / 2 + 30);
   }, []);
 
-  // Resize canvas according to container
+  // Initialize canvas on mount or when container is laid out
   useEffect(() => {
-    const handleResize = () => {
-      const canvas = canvasRef.current;
-      const container = containerRef.current;
-      if (!canvas || !container) return;
+    isRevealedRef.current = isRevealed;
+    if (isRevealed) {
+      setHasTriggeredReveal(true);
+      setScratchPercent(100);
+      return;
+    }
 
-      const rect = container.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-      if (!isRevealed && !hasTriggeredReveal) {
-        initCanvas();
-      }
+    setHasTriggeredReveal(false);
+    setScratchPercent(0);
+
+    const timer = setTimeout(() => {
+      initCanvas();
+    }, 50);
+
+    // Use ResizeObserver for accurate layout sizing
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      ro = new ResizeObserver(() => {
+        if (!isRevealedRef.current) {
+          initCanvas();
+        }
+      });
+      ro.observe(containerRef.current);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      ro?.disconnect();
     };
+  }, [initCanvas, isRevealed]);
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [initCanvas, isRevealed, hasTriggeredReveal]);
-
-  // Scratch action logic using destination-out
-  const scratch = (clientX: number, clientY: number) => {
+  // Scratch action logic using destination-out with proper coordinate scaling
+  const scratchAtPoint = (clientX: number, clientY: number) => {
+    if (hasTriggeredReveal || isRevealed) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
 
     ctx.globalCompositeOperation = 'destination-out';
     ctx.beginPath();
-    ctx.arc(x, y, 28, 0, Math.PI * 2);
+    ctx.arc(x, y, 32 * scaleX, 0, Math.PI * 2);
     ctx.fill();
 
     // Check completion threshold
@@ -109,21 +147,19 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }
   };
 
   const checkScratchCompletion = () => {
-    if (hasTriggeredReveal) return;
+    if (hasTriggeredReveal || isRevealedRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     try {
-      // Sample 16x16 grid for high performance
       const width = canvas.width;
       const height = canvas.height;
       const imageData = ctx.getImageData(0, 0, width, height);
       const data = imageData.data;
       let transparentPixels = 0;
-      const totalPixels = data.length / 4;
-      const step = 32; // sampling step for 60fps smoothness
+      const step = 32; // sampling step for performance
 
       let sampled = 0;
       for (let i = 3; i < data.length; i += step * 4) {
@@ -136,8 +172,7 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }
       const percent = Math.round((transparentPixels / sampled) * 100);
       setScratchPercent(percent);
 
-      if (percent >= 35 && !hasTriggeredReveal) {
-        setHasTriggeredReveal(true);
+      if (percent >= 30 && !hasTriggeredReveal) {
         triggerCompleteReveal();
       }
     } catch {
@@ -146,9 +181,11 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }
   };
 
   const triggerCompleteReveal = () => {
+    if (hasTriggeredReveal) return;
     setHasTriggeredReveal(true);
+    isRevealedRef.current = true;
     setScratchPercent(100);
-    // Smoothly clear canvas
+
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
@@ -159,68 +196,68 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }
     onReveal();
   };
 
-  // Mouse handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleManualReset = () => {
+    setHasTriggeredReveal(false);
+    isRevealedRef.current = false;
+    setScratchPercent(0);
+    initCanvas();
+    onReset?.();
+  };
+
+  // Pointer Event handlers (seamless across Mouse, Pen, Touch on iOS/Android/PC)
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
     setIsScratching(true);
-    scratch(e.clientX, e.clientY);
+    scratchAtPoint(e.clientX, e.clientY);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isScratching) return;
-    scratch(e.clientX, e.clientY);
+    e.preventDefault();
+    scratchAtPoint(e.clientX, e.clientY);
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     setIsScratching(false);
-  };
-
-  // Touch handlers
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length > 0) {
-      setIsScratching(true);
-      scratch(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isScratching || e.touches.length === 0) return;
-    scratch(e.touches[0].clientX, e.touches[0].clientY);
-  };
-
-  const handleTouchEnd = () => {
-    setIsScratching(false);
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
   };
 
   return (
-    <div className="w-full max-w-md mx-auto">
-      {/* Scratch Box Wrapper */}
+    <div className="w-full max-w-md mx-auto select-none">
+      {/* Scratch Box Wrapper with Feminine Atelier Styling */}
       <div 
         ref={containerRef}
-        className="relative w-full h-56 sm:h-64 rounded-3xl overflow-hidden border-2 border-amber-500/60 shadow-2xl bg-gradient-to-b from-stone-900 to-stone-950 select-none cursor-crosshair touch-none"
+        className="relative w-full h-56 sm:h-64 rounded-3xl overflow-hidden border-2 border-[#f2deda] shadow-[0_12px_36px_rgba(184,74,86,0.12)] bg-gradient-to-br from-[#fff7f5] via-white to-[#faece8] cursor-crosshair touch-none"
       >
         {/* UNDERLYING PRIZE CONTENT (REVEALED UNDER CANVAS) */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-gradient-to-br from-amber-950/90 via-stone-900 to-orange-950/90">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[11px] font-extrabold uppercase tracking-wider mb-2 border border-amber-500/30 animate-bounce">
-            <Trophy className="w-3.5 h-3.5 text-amber-400" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-gradient-to-br from-[#fff5f2] via-[#fffbf9] to-[#faebe6] border border-[#f5ded9]">
+          
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-[#fdeeed] text-[#b84a56] text-[11px] font-extrabold uppercase tracking-wider mb-2 border border-[#f8d4ce] shadow-xs">
+            <Trophy className="w-3.5 h-3.5 text-[#b84a56]" />
             <span>DESCONTO EXCLUSIVO DESBLOQUEADO</span>
           </div>
 
-          <div className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-200 to-orange-400 tracking-tight drop-shadow-md">
+          <div className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#b84a56] via-[#d66d7d] to-[#e08291] tracking-tight drop-shadow-xs">
             50% OFF
           </div>
 
-          <div className="text-white font-extrabold text-sm sm:text-base mt-1">
-            ATENÇÃO: CONDIÇÃO ÚNICA!
+          <div className="text-[#3a1d22] font-black text-sm sm:text-base mt-1 tracking-tight">
+            PARABÉNS! VOCÊ LIBEROU A OFERTA ESPECIAL
           </div>
 
-          <div className="text-xs text-stone-300 mt-1 max-w-xs">
+          <div className="text-xs text-stone-600 mt-1 max-w-xs font-medium">
             De <span className="line-through text-stone-400">R$ 299,90</span> por apenas{' '}
-            <strong className="text-amber-400 font-bold">12x de R$ 12,49</strong> ou R$ 149,90 à vista
+            <strong className="text-[#b84a56] font-bold text-sm">12x de R$ 12,49</strong> ou R$ 149,90 à vista
           </div>
 
-          <div className="mt-2.5 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Economia de R$ 150,00 garantida</span>
+          <div className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Economia imediata de R$ 150,00 garantida</span>
           </div>
         </div>
 
@@ -228,40 +265,51 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }
         {(!isRevealed && !hasTriggeredReveal) && (
           <canvas
             ref={canvasRef}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            className="absolute inset-0 w-full h-full z-10 transition-opacity duration-500"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            className="absolute inset-0 w-full h-full z-10 touch-none select-none transition-opacity duration-300"
+            style={{ touchAction: 'none' }}
           />
         )}
       </div>
 
-      {/* Helper & Fast Reveal Button */}
+      {/* Helper & Fast Reveal Controls */}
       <div className="mt-3.5 flex flex-col sm:flex-row items-center justify-between gap-2.5 px-2">
-        <span className="text-xs text-stone-400 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+        <span className="text-xs text-[#8c5a61] flex items-center gap-1.5 font-medium">
+          <Sparkles className="w-3.5 h-3.5 text-[#b84a56]" />
           <span>
-            {scratchPercent > 0 && scratchPercent < 35 
+            {scratchPercent > 0 && scratchPercent < 30
               ? `Raspado: ${scratchPercent}% (continue raspando...)` 
               : isRevealed || hasTriggeredReveal
-                ? 'Prêmio 100% revelado!'
-                : 'Raspe com o dedo ou mouse'}
+                ? '✨ Prêmio 100% revelado!'
+                : 'Raspe com o dedo ou mouse na área acima'}
           </span>
         </span>
 
-        {(!isRevealed && !hasTriggeredReveal) && (
-          <button
-            onClick={triggerCompleteReveal}
-            type="button"
-            className="text-xs font-bold text-amber-400 hover:text-amber-300 underline underline-offset-4 cursor-pointer hover:scale-105 transition-all py-1 px-2"
-          >
-            ⚡ Raspar tudo de uma vez
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {(!isRevealed && !hasTriggeredReveal) ? (
+            <button
+              onClick={triggerCompleteReveal}
+              type="button"
+              className="inline-flex items-center gap-1 text-xs font-extrabold text-[#b84a56] hover:text-[#973943] bg-[#fdeeed] hover:bg-[#fae1dc] border border-[#f5d0c8] px-3 py-1.5 rounded-xl cursor-pointer transition-all active:scale-95 shadow-2xs"
+            >
+              <Zap className="w-3.5 h-3.5 text-[#b84a56]" />
+              <span>Revelar agora</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleManualReset}
+              type="button"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#8c5a61] hover:text-[#b84a56] bg-white border border-[#eedad5] hover:border-[#b84a56]/40 px-2.5 py-1 rounded-lg cursor-pointer transition-all"
+              title="Recarregar a raspadinha"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Raspar de novo</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

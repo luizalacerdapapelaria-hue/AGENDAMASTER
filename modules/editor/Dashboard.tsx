@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
-import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem, SpecialDateItem } from '../../types';
+import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem, SpecialDateItem, CustomTemplateItem } from '../../types';
 import { generateCalendarYear, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday, getYearHolidays, formatHolidayItemText, generateHolidayListFullText, HolidayDateFormat, FormattedHolidayItem } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
-import { MOTIVATIONAL_QUOTES, getQuoteForDay } from '../../core/constants/quotes';
+import { MOTIVATIONAL_QUOTES, getQuoteForDay, getRandomQuote, QuoteCategory, QUOTE_CATEGORIES_METADATA } from '../../core/constants/quotes';
+import { MotivationalQuotesModal } from './components/MotivationalQuotesModal';
 import { calculateDragPosition, calculateResize, SnapGuide } from '../../core/logic/interaction';
 import { ELEMENT_VARIANTS, AVAILABLE_FONTS, SYSTEM_FONTS } from '../../core/constants/elements';
 import { ElementRenderer } from './components/ElementRenderer';
@@ -52,7 +53,7 @@ import {
   Minimize2, Maximize2, Loader2, Settings, Search,
   FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, FileImage, Printer, Lock, Ruler, WrapText, Scissors, MoreHorizontal, Italic, RotateCcw,
   RefreshCw, ArrowLeftRight, Droplets, PenTool, CalendarHeart,
-  ArrowRight, DollarSign, Wallet
+  ArrowRight, DollarSign, Wallet, Bookmark
 } from 'lucide-react';
 import { 
   AGENDA_OBJECTIVE_OPTIONS, 
@@ -1120,7 +1121,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [variantModal, setVariantModal] = useState<{type: ElementType, label: string} | null>(null);
   const [templateModal, setTemplateModal] = useState(false);
   const [templateCategory, setTemplateCategory] = useState<'intro' | 'planner' | 'library' | 'agenda' | 'notebook' | 'devotional' | 'custom'>('agenda');
-  const [customTemplates, setCustomTemplates] = useState<IntroPage[]>(() => {
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplateItem[]>(() => {
       try {
           const saved = localStorage.getItem('agendamaster_custom_page_templates');
           return saved ? JSON.parse(saved) : [];
@@ -1130,6 +1131,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   });
   const [versesModalOpen, setVersesModalOpen] = useState(false);
   const [quotesModalOpen, setQuotesModalOpen] = useState(false);
+  const [quotesModalInitialTab, setQuotesModalInitialTab] = useState<QuoteCategory | 'custom'>('feminine_strength');
   const [reqModalOpen, setReqModalOpen] = useState(false);
   const [pdfImportModalOpen, setPdfImportModalOpen] = useState(false);
   const [shapeGalleryOpen, setShapeGalleryOpen] = useState(false);
@@ -1799,18 +1801,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           throw new Error('O arquivo importado não é um formato de lista válido de modelos.');
         }
 
-        const validTemplates: IntroPage[] = [];
+        const validTemplates: CustomTemplateItem[] = [];
         
         parsed.forEach((item: any, idx: number) => {
           if (item && typeof item === 'object' && item.name && Array.isArray(item.elements)) {
-            const cleanTemplate: IntroPage = {
-              id: item.id && !customTemplates.some(t => t.id === item.id) ? item.id : 'custom-' + Math.random().toString(36).substr(2, 9),
+            const isMiolo = item.templateType === 'miolo' || (item.id && String(item.id).startsWith('miolo-'));
+            const cleanTemplate: CustomTemplateItem = {
+              id: item.id && !customTemplates.some(t => t.id === item.id) ? item.id : (isMiolo ? 'miolo-' : 'custom-') + Math.random().toString(36).substr(2, 9),
               name: item.name,
+              templateType: item.templateType || (isMiolo ? 'miolo' : 'page'),
+              layoutType: item.layoutType,
+              projectType: item.projectType,
               elements: item.elements.map((el: any) => ({
                 ...el,
                 id: el.id || Math.random().toString(36).substr(2, 9)
               })),
-              background: item.background
+              elementsVerso: Array.isArray(item.elementsVerso) ? item.elementsVerso.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsWeeklyLeft: Array.isArray(item.elementsWeeklyLeft) ? item.elementsWeeklyLeft.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsWeeklyRight: Array.isArray(item.elementsWeeklyRight) ? item.elementsWeeklyRight.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              background: item.background,
+              createdAt: item.createdAt || new Date().toISOString()
             };
             validTemplates.push(cleanTemplate);
           } else {
@@ -2021,6 +2031,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(lines));
     setRenderedPreviewCount(prev => prev + 1);
     alert(`${lines.length} frase(s) motivacional(is) salvas com sucesso!`);
+  };
+
+  const handleInsertQuoteElement = (options: {
+    category: QuoteCategory;
+    positionPreset?: 'top' | 'bottom' | 'card' | 'custom';
+    fixedText?: string;
+    stylePreset?: 'minimal' | 'quotation_marks' | 'divider_card';
+  }) => {
+    pushHistory();
+    const pos = options.positionPreset === 'top'
+      ? { x: 10, y: 6, w: 80, h: 5 }
+      : options.positionPreset === 'card'
+      ? { x: 12, y: 72, w: 76, h: 14 }
+      : { x: 10, y: 92, w: 80, h: 6 };
+
+    const stylePreset = options.stylePreset || (options.positionPreset === 'card' ? 'divider_card' : 'quotation_marks');
+
+    const getQuoteCategoryLabel = (cat: QuoteCategory) => {
+      switch (cat) {
+        case 'feminine_strength': return 'Frase: Força Feminina';
+        case 'faith': return 'Frase: Fé & Oração';
+        case 'motivational': return 'Frase: Motivação';
+        case 'self_love': return 'Frase: Amor-Próprio';
+        case 'self_care': return 'Frase: Autocuidado';
+        case 'gratitude_mindfulness': return 'Frase: Gratidão & Calma';
+        case 'entrepreneurship_creativity': return 'Frase: Ateliê & Criação';
+        case 'success_habits': return 'Frase: Hábitos & Sucesso';
+        default: return 'Frase Motivacional';
+      }
+    };
+
+    const newElement: LayoutElement = {
+      id: `quote_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: getQuoteCategoryLabel(options.category),
+      type: 'quote',
+      x: pos.x,
+      y: pos.y,
+      w: pos.w,
+      h: pos.h,
+      zIndex: 20,
+      style: {
+        fontSize: options.positionPreset === 'card' ? 11 : 9.5,
+        fontFamily: 'Inter',
+        fontWeight: 'normal',
+        fontStyle: 'italic',
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        color: '#4a3a37',
+        backgroundColor: 'transparent',
+        quoteCategory: options.category,
+        quoteDisplayMode: options.fixedText ? 'fixed' : 'daily_rotating',
+        quoteFixedText: options.fixedText,
+        quoteStylePreset: stylePreset,
+        showQuoteMarks: stylePreset === 'quotation_marks'
+      }
+    };
+
+    setConfig(prev => ({
+      ...prev,
+      includeQuotes: true
+    }));
+    updateActiveElements(prevList => [...prevList, newElement]);
+    setSelectedIds([newElement.id]);
+    setShowProperties(true);
+    setToastMessage('✨ Frase Motivacional adicionada à página!');
   };
 
   const triggerImageElementUpload = (elementId: string) => {
@@ -3784,16 +3859,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setTemplateModal(false);
   };
 
-  const applyCustomTemplate = (template: IntroPage) => {
-      const newPage = {
+  const applyCustomTemplate = (template: CustomTemplateItem, targetMode?: 'miolo' | 'page') => {
+      // Determine if we should apply directly to the Miolo
+      const shouldApplyToMiolo = targetMode === 'miolo' || (template.templateType === 'miolo' && targetMode !== 'page');
+
+      if (shouldApplyToMiolo) {
+          pushHistory();
+          setConfig(prev => ({
+              ...prev,
+              ...(template.layoutType ? { layoutType: template.layoutType } : {}),
+              elements: (template.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
+              elementsVerso: template.elementsVerso ? template.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsVerso,
+              elementsWeeklyLeft: template.elementsWeeklyLeft ? template.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyLeft,
+              elementsWeeklyRight: template.elementsWeeklyRight ? template.elementsWeeklyRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyRight,
+          }));
+          if (template.layoutType === 'weekly_one_page_vertical' || template.layoutType === 'weekly_one_page_horizontal') {
+              setEditorViewMode('standard');
+          } else if (template.layoutType === 'weekly_vertical' || template.layoutType === 'weekly_horizontal') {
+              setEditorViewMode('weekly_left');
+          }
+          setEditMode('daily');
+          setToastMessage(`Modelo de Miolo "${template.name}" aplicado com sucesso!`);
+          setTemplateModal(false);
+          return;
+      }
+
+      const newPage: IntroPage = {
           ...template,
           id: Math.random().toString(36).substr(2, 9),
           // Deep copy elements to avoid reference issues
-          elements: template.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+          elements: (template.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
       };
       if (editMode === 'monthly_intro') {
           setConfig(prev => ({ ...prev, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
           setCurrentMonthlyIntroPageId(newPage.id);
+          setToastMessage(`Modelo "${template.name}" inserido como Página Mensal!`);
       } else if (editMode === 'divider') {
           if (dividerViewMode === 'verso') {
               setConfig(prev => ({
@@ -3816,14 +3916,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   }
               }));
           }
+          setToastMessage(`Modelo "${template.name}" aplicado à Divisória!`);
       } else {
           setConfig(prev => ({ ...prev, introPages: [...prev.introPages, newPage] }));
           setCurrentIntroPageId(newPage.id);
+          setToastMessage(`Modelo "${template.name}" inserido como Página Inicial!`);
       }
       setTemplateModal(false);
   };
 
-  const savePageAsTemplate = (page: IntroPage) => {
+  const saveCurrentMioloAsTemplate = () => {
+      let defaultName = 'Meu Modelo de Miolo';
+      if (config.projectType === 'planner') defaultName = 'Meu Modelo de Planner';
+      else if (config.projectType === 'notebook') defaultName = 'Meu Modelo de Caderno';
+      else if (config.layoutType === '2_per_page') defaultName = 'Miolo 2 Dias por Página';
+      else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') defaultName = 'Miolo Semanal';
+
+      let templateName: string | null = null;
+      try {
+          templateName = prompt("Digite o nome para o seu modelo de Miolo personalizado:", defaultName);
+      } catch (e) {
+          templateName = defaultName;
+      }
+      if (templateName === null) return;
+      const finalName = templateName.trim() || defaultName;
+
+      const activeElements = config.elements || [];
+      const newTemplate: CustomTemplateItem = {
+          id: 'miolo-' + Math.random().toString(36).substr(2, 9),
+          name: finalName,
+          templateType: 'miolo',
+          layoutType: config.layoutType,
+          projectType: config.projectType,
+          elements: activeElements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
+          elementsVerso: config.elementsVerso ? config.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
+          elementsWeeklyLeft: config.elementsWeeklyLeft ? config.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
+          elementsWeeklyRight: config.elementsWeeklyRight ? config.elementsWeeklyRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
+          background: config.background,
+          createdAt: new Date().toISOString()
+      };
+
+      const updated = [...customTemplates, newTemplate];
+      setCustomTemplates(updated);
+      localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+      setToastMessage(`Modelo de Miolo "${finalName}" salvo com sucesso em Meus Modelos!`);
+      setTemplateCategory('custom');
+      setTemplateModal(true);
+  };
+
+  const savePageAsTemplate = (page: IntroPage, type: 'page' | 'intro' | 'monthly_intro' = 'page') => {
       let templateName: string | null = null;
       try {
           templateName = prompt("Digite o nome para o seu modelo personalizado:", page.name);
@@ -3834,15 +3975,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       
       if (templateName === null) return; // cancelled
       const finalName = templateName.trim() || page.name;
-      const newTemplate: IntroPage = {
+      const newTemplate: CustomTemplateItem = {
           id: 'custom-' + Math.random().toString(36).substr(2, 9),
           name: finalName,
+          templateType: type,
           elements: (page.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          background: page.background
+          background: page.background,
+          createdAt: new Date().toISOString()
       };
       const updated = [...customTemplates, newTemplate];
       setCustomTemplates(updated);
       localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+      setToastMessage(`Modelo "${finalName}" salvo com sucesso em Meus Modelos!`);
       
       // Navigate and open tab automatically
       setTemplateCategory('custom');
@@ -5129,6 +5273,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newElement.style.textAlign = 'center'; 
             newElement.style.borderWidth = 0; 
             setConfig(prev => ({ ...prev, includeVerses: true }));
+        }
+        if (type === 'quote') { 
+            newElement.w = 84; 
+            newElement.h = 6; 
+            newElement.x = 8; 
+            newElement.y = (styleOverride as any)?.y !== undefined ? (styleOverride as any).y : 90;
+            newElement.style.fontSize = (styleOverride as any)?.fontSize || 10; 
+            newElement.style.fontStyle = 'italic'; 
+            newElement.style.textAlign = (styleOverride as any)?.textAlign || 'center'; 
+            newElement.style.borderWidth = 0; 
+            newElement.style.quoteCategory = (styleOverride as any)?.quoteCategory || config.quoteCategory || 'feminine_strength';
+            newElement.style.quoteDisplayMode = (styleOverride as any)?.quoteDisplayMode || 'daily_rotating';
+            newElement.style.quoteStylePreset = (styleOverride as any)?.quoteStylePreset || 'quotation_marks';
+            newElement.style.showQuoteMarks = (styleOverride as any)?.showQuoteMarks ?? true;
+            newElement.name = (styleOverride as any)?.name || 'Frase Motivacional';
+            setConfig(prev => ({ ...prev, includeQuotes: true }));
         }
         if (type === 'habit_tracker') { 
             newElement.w = 40; newElement.h = 15; 
@@ -7834,7 +7994,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     
     const dayOfYear = d.date ? getDayOfYear(new Date(d.date)) : 0;
     const currentVerse = getVerseForDay(dayOfYear);
-    const currentQuote = getQuoteForDay(dayOfYear, d.month);
+    const defaultQuote = getQuoteForDay(
+        dayOfYear,
+        d.month,
+        config.quoteCategory || 'all',
+        config.quoteCustomList || customQuotes
+    );
 
     const handleContextMenu = (e: React.MouseEvent, elementId: string) => {
         if (!isEditor && activeTab !== 'preview') return;
@@ -7924,6 +8089,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           const containerClass = `absolute group ${isSelected ? 'ring-2 ring-indigo-500 z-50' : 'hover:ring-1 hover:ring-indigo-300'} ${isEditor || activeTab === 'preview' ? 'cursor-pointer' : ''} ${isEditor ? 'cursor-move' : ''}`;
           const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list', 'special_event'].includes(el.type);
           const shouldClip = ['lines', 'note_grid', 'habit_tracker', 'mini_calendar', 'full_calendar', 'table', 'permanent_day_header', 'vector_shape'].includes(el.type);
+          
+          const currentQuote = (el.style?.quoteDisplayMode === 'fixed' && el.style?.quoteFixedText)
+              ? el.style.quoteFixedText
+              : (el.content && el.style?.quoteDisplayMode === 'fixed')
+              ? el.content
+              : getQuoteForDay(
+                  dayOfYear,
+                  d.month,
+                  el.style?.quoteCategory || config.quoteCategory || 'all',
+                  config.quoteCustomList || customQuotes
+                );
           
           return (
             <div 
@@ -9910,7 +10086,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         width: `${(100 / uiScale).toFixed(2)}vw`,
         maxWidth: `${(100 / uiScale).toFixed(2)}vw`
       } : undefined}
-      className={`flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900 ${isMobile ? 'pb-safe' : ''}`}
+      className={`flex flex-col h-screen overflow-hidden bg-[#faf6f4] text-slate-800 ${isMobile ? 'pb-safe' : ''}`}
     >
       <style>{`
         @media print {
@@ -9999,21 +10175,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         </button>
                   </div>
               ) : pdfExporting ? (
-                  <div className="w-full max-w-lg bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center text-gray-800 animate-in zoom-in duration-300">
-                        <Loader2 className="w-12 h-12 animate-spin mb-4 text-indigo-600" />
-                        <h2 className="text-2xl font-black mb-2 text-center text-indigo-950 animate-pulse">Compilando PDF Final...</h2>
-                        <p className="text-sm text-gray-500 mb-6 text-center max-w-sm">
+                  <div className="w-full max-w-lg bg-white p-8 rounded-3xl shadow-[0_20px_60px_rgba(184,74,86,0.2)] flex flex-col items-center text-slate-800 animate-in zoom-in duration-300 border border-[#eedad5]">
+                        <Loader2 className="w-12 h-12 animate-spin mb-4 text-[#b84a56]" />
+                        <h2 className="text-2xl font-black mb-2 text-center text-slate-900 animate-pulse">Compilando PDF Final...</h2>
+                        <p className="text-xs text-slate-500 mb-6 text-center max-w-sm font-medium">
                             Processando alinhamento milimétrico {pdfExportProgress} de {actualTotalPagesCount} páginas. Por favor, mantenha a janela aberta.
                         </p>
                         
-                        <div className="w-full bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-6">
+                        <div className="w-full bg-[#fdeeed] border border-[#f5ded9] rounded-2xl p-4 mb-6 shadow-2xs">
                             <div className="flex justify-between items-center mb-2">
-                                <span className="text-xs font-bold text-indigo-800">Progresso da Renderização</span>
-                                <span className="text-xs font-black text-indigo-950">{Math.round((pdfExportProgress / Math.max(1, actualTotalPagesCount)) * 100)}%</span>
+                                <span className="text-xs font-bold text-[#9f3d4a]">Progresso da Renderização</span>
+                                <span className="text-xs font-black text-[#9f3d4a]">{Math.round((pdfExportProgress / Math.max(1, actualTotalPagesCount)) * 100)}%</span>
                             </div>
-                            <div className="w-full h-3 bg-indigo-100 rounded-full overflow-hidden">
+                            <div className="w-full h-3 bg-white/80 border border-[#f5ded9] rounded-full overflow-hidden">
                                 <div 
-                                    className="h-full bg-indigo-600 transition-all duration-300" 
+                                    className="h-full bg-gradient-to-r from-[#b84a56] to-[#c45663] transition-all duration-300" 
                                     style={{ width: `${Math.round((pdfExportProgress / Math.max(1, actualTotalPagesCount)) * 100)}%` }}
                                 />
                             </div>
@@ -10021,7 +10197,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         
                         <button 
                             disabled
-                            className="w-full py-3 px-4 rounded-lg bg-gray-200 text-gray-400 font-medium text-sm cursor-not-allowed text-center"
+                            className="w-full py-3.5 px-4 rounded-xl bg-[#faf5f3] text-slate-400 font-bold text-xs uppercase tracking-wider cursor-not-allowed text-center border border-[#eedad5]"
                         >
                             Aguarde, gerando arquivo...
                         </button>
@@ -10109,30 +10285,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       </div>
 
                       {/* Right Column: Export Setup and Download Options */}
-                      <div className="flex-1 p-6 sm:p-8 flex flex-col justify-between overflow-y-auto max-h-[650px] min-h-[500px]">
+                      <div className="flex-1 p-6 sm:p-8 flex flex-col justify-between overflow-y-auto max-h-[650px] min-h-[500px] bg-white">
                           <div className="flex flex-col items-center flex-1">
-                              <div className="bg-indigo-100 p-2.5 rounded-full mb-3 shrink-0">
-                                  <CheckCircle2 className="w-7 h-7 text-indigo-600" />
+                              <div className="bg-[#fdeeed] p-3 rounded-2xl mb-3 shrink-0 border border-[#f5ded9] shadow-2xs">
+                                  <CheckCircle2 className="w-7 h-7 text-[#b84a56]" />
                               </div>
                               
-                              <h2 className="text-xl font-black mb-1 text-center text-indigo-950">Seu arquivo está pronto!</h2>
-                              <p className="text-xs text-gray-500 mb-5 text-center max-w-xs">
+                              <h2 className="text-xl font-black mb-1 text-center text-slate-900">Seu arquivo está pronto!</h2>
+                              <p className="text-xs text-slate-500 mb-5 text-center max-w-xs font-medium">
                                   Escolha o melhor método de exportação para as suas {actualTotalPagesCount} páginas de acordo com a sua necessidade de uso.
                               </p>
 
                               {/* Seletor de Tecnologia / Método */}
-                              <div className="flex bg-gray-100 p-1 rounded-xl mb-5 w-full shrink-0">
+                              <div className="flex bg-[#fdeeed] p-1 rounded-2xl mb-5 w-full shrink-0 border border-[#eedad5]">
                                   <button
                                       type="button"
                                       onClick={() => setPdfExportMethod('vector')}
-                                      className={`flex-1 py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${pdfExportMethod === 'vector' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-gray-500 hover:text-gray-700'}`}
+                                      className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${pdfExportMethod === 'vector' ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
                                   >
-                                      <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" /> PDF Vetorial 💎
+                                      <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" /> PDF Vetorial 💎
                                   </button>
                                   <button
                                       type="button"
                                       onClick={() => setPdfExportMethod('canvas')}
-                                      className={`flex-1 py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${pdfExportMethod === 'canvas' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-gray-500 hover:text-gray-700'}`}
+                                      className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${pdfExportMethod === 'canvas' ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
                                   >
                                       <FileImage className="w-3.5 h-3.5" /> PDF por Imagem
                                   </button>
@@ -10140,70 +10316,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                               {pdfExportMethod === 'vector' ? (
                                   <div className="w-full text-left space-y-4 mb-5 flex-1">
-                                      <div className="bg-emerald-50 border border-emerald-100/80 rounded-xl p-3.5 flex gap-3">
-                                          <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0 h-8 w-8 flex items-center justify-center">
-                                              <Sparkles className="w-4 h-4 fill-emerald-600 text-emerald-600" />
+                                      <div className="bg-[#fcedea] border border-[#f8d4ce] rounded-2xl p-3.5 flex gap-3">
+                                          <div className="p-2 bg-[#fdeeed] text-[#b84a56] rounded-xl shrink-0 h-8 w-8 flex items-center justify-center border border-[#f5ded9]">
+                                              <Sparkles className="w-4 h-4 fill-[#b84a56] text-[#b84a56]" />
                                           </div>
                                           <div>
-                                              <h3 className="text-xs font-bold text-emerald-900">Modo Vetorial (Vantagens Profissionais)</h3>
-                                              <p className="text-[10px] text-emerald-800/80 mt-0.5 leading-relaxed">
+                                              <h3 className="text-xs font-black text-[#9f3d4a]">Modo Vetorial (Vantagens Profissionais)</h3>
+                                              <p className="text-[10px] text-slate-700 mt-0.5 leading-relaxed font-medium">
                                                   Gera o miolo inteiro em <strong>vetores nativos</strong>. Garante nitidez absoluta perfeita nas fontes e linhas (mesmo com zoom de 1000%), gera arquivos super leves (<strong>de 200MB vira ~5MB</strong>) e o processamento é <strong>instantâneo</strong>.
                                               </p>
                                           </div>
                                       </div>
 
-                                      <div className="border border-gray-100 bg-gray-50/50 rounded-xl p-4 space-y-3">
-                                          <h4 className="text-[9px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                                              <Info className="w-3.5 h-3.5 text-indigo-500" /> Passo a Passo para Salvar o PDF:
+                                      <div className="border border-[#eedad5] bg-[#faf6f4] rounded-2xl p-4 space-y-3">
+                                          <h4 className="text-[9px] font-black text-[#9f3d4a] uppercase tracking-wider flex items-center gap-2">
+                                              <Info className="w-3.5 h-3.5 text-[#b84a56]" /> Passo a Passo para Salvar o PDF:
                                           </h4>
                                           
                                           <ul className="space-y-2.5">
                                               <li className="flex items-start gap-2.5">
-                                                  <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">1</div>
-                                                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                                                  <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">1</div>
+                                                  <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
                                                       No diálogo que abrir, selecione <strong>"Salvar como PDF"</strong> (ou "Exportar para PDF") no campo Destino.
                                                   </p>
                                               </li>
                                               <li className="flex items-start gap-2.5">
-                                                  <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
-                                                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                                                  <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
+                                                  <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
                                                       Marque/Ative a opção <strong>"Gráficos de Fundo"</strong> (Background Graphics) nas configurações de cabeçalhos/rodapés de impressão.
                                                   </p>
                                               </li>
                                               <li className="flex items-start gap-2.5">
-                                                  <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
-                                                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                                                  <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
+                                                  <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
                                                       Defina as Margens como <strong>"Nenhuma"</strong> (None) para preservar o alinhamento exato de refile e sangria.
                                                   </p>
                                               </li>
                                           </ul>
                                       </div>
                                       
-                                      <p className="text-[9px] text-gray-400/80 leading-normal text-center italic">
+                                      <p className="text-[9px] text-slate-500 leading-normal text-center italic">
                                           Dica: Se estiver no painel do AI Studio, abra em "Nova Guia" de antemão para ter total controle sobre o menu de impressão do seu navegador.
                                       </p>
                                   </div>
                               ) : (
                                   <div className="w-full space-y-4 mb-5 flex-1">
                                       <div className="w-full space-y-2.5 text-left">
-                                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">Opção de Velocidade & Qualidade:</label>
+                                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Opção de Velocidade & Qualidade:</label>
                                   
                                           {/* Fast choice */}
                                           <button 
                                               key="pdf-speed-fast"
                                               type="button"
                                               onClick={() => setPdfScaleMode('fast')}
-                                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'fast' ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
+                                              className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${pdfScaleMode === 'fast' ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-2 ring-[#b84a56]/20' : 'border-[#eedad5] hover:border-[#b84a56]/40 bg-[#faf6f4]'}`}
                                           >
-                                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'fast' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
+                                              <div className={`p-2 rounded-xl ${pdfScaleMode === 'fast' ? 'bg-[#fdeeed] text-[#b84a56]' : 'bg-white text-slate-400'} shrink-0 border border-[#eedad5]`}>
                                                   <Clock className="w-4 h-4" />
                                               </div>
                                               <div className="flex-1 min-w-0">
                                                   <div className="flex items-center justify-between">
-                                                      <span className="text-xs font-bold text-gray-900 block">⚡ Modo Relâmpago (Super Rápido)</span>
-                                                      <span className="text-[9px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded uppercase font-mono">Até 4x mais rápido</span>
+                                                      <span className="text-xs font-bold text-slate-900 block">⚡ Modo Relâmpago (Super Rápido)</span>
+                                                      <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Até 4x mais rápido</span>
                                                   </div>
-                                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
                                                       Gera o PDF em segundos com resolução padrão (Escala 1.0x). Perfeito para celulares, computadores básicos ou testes rápidos.
                                                   </p>
                                               </div>
@@ -10214,17 +10390,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                               key="pdf-speed-standard"
                                               type="button"
                                               onClick={() => setPdfScaleMode('standard')}
-                                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'standard' ? 'border-indigo-500 bg-indigo-50/25 ring-2 ring-indigo-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
+                                              className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${pdfScaleMode === 'standard' ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-2 ring-[#b84a56]/20' : 'border-[#eedad5] hover:border-[#b84a56]/40 bg-[#faf6f4]'}`}
                                           >
-                                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'standard' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
+                                              <div className={`p-2 rounded-xl ${pdfScaleMode === 'standard' ? 'bg-[#fdeeed] text-[#b84a56]' : 'bg-white text-slate-400'} shrink-0 border border-[#eedad5]`}>
                                                   <Smartphone className="w-4 h-4" />
                                               </div>
                                               <div className="flex-1 min-w-0">
                                                   <div className="flex items-center justify-between">
-                                                      <span className="text-xs font-bold text-gray-900 block">🚀 Modo Equilibrado (Recomendado)</span>
-                                                      <span className="text-[9px] font-black text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded uppercase font-mono">Mais estável</span>
+                                                      <span className="text-xs font-bold text-slate-900 block">🚀 Modo Equilibrado (Recomendado)</span>
+                                                      <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Mais estável</span>
                                                   </div>
-                                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
                                                       Resolução otimizada para telas e leitura digital (Escala 1.5x) e arquivos mais leves. Rapidez combinada a uma excelente nitidez.
                                                   </p>
                                               </div>
@@ -10235,26 +10411,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                               key="pdf-speed-high"
                                               type="button"
                                               onClick={() => setPdfScaleMode('high')}
-                                              className={`w-full p-3 rounded-xl border text-left flex items-start gap-3 transition-all ${pdfScaleMode === 'high' ? 'border-emerald-500 bg-emerald-50/20 ring-2 ring-emerald-500/25' : 'border-gray-200 hover:border-gray-300 bg-gray-50/50'}`}
+                                              className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${pdfScaleMode === 'high' ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-2 ring-[#b84a56]/20' : 'border-[#eedad5] hover:border-[#b84a56]/40 bg-[#faf6f4]'}`}
                                           >
-                                              <div className={`p-2 rounded-lg ${pdfScaleMode === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'} shrink-0`}>
+                                              <div className={`p-2 rounded-xl ${pdfScaleMode === 'high' ? 'bg-[#fdeeed] text-[#b84a56]' : 'bg-white text-slate-400'} shrink-0 border border-[#eedad5]`}>
                                                   <CheckSquare className="w-4 h-4" />
                                               </div>
                                               <div className="flex-1 min-w-0">
                                                   <div className="flex items-center justify-between">
-                                                      <span className="text-xs font-bold text-gray-900 block">💎 Alta Fidelidade (Impressão Física)</span>
-                                                      <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded uppercase">Alta Resolução</span>
+                                                      <span className="text-xs font-bold text-slate-900 block">💎 Alta Fidelidade (Impressão Física)</span>
+                                                      <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Alta Resolução</span>
                                                   </div>
-                                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
                                                       Suporte de alta fidelidade e escala máxima (2.22x) idêntico ao original. O processamento consome mais recursos e tempo.
                                                   </p>
                                               </div>
                                           </button>
                                       </div>
 
-                                      <div className="w-full bg-indigo-50/50 border border-indigo-100/50 rounded-xl p-3 text-left flex items-start gap-2">
-                                          <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-                                          <p className="text-[11px] text-indigo-900 leading-relaxed">
+                                      <div className="w-full bg-[#fdeeed]/60 border border-[#f5ded9] rounded-2xl p-3.5 text-left flex items-start gap-2.5">
+                                          <Info className="w-4 h-4 text-[#b84a56] shrink-0 mt-0.5" />
+                                          <p className="text-[11px] text-[#9f3d4a] leading-relaxed font-medium">
                                               Nosso motor foi otimizado para renderizar em lotes simultâneos. Independente do modo acima, a compilação agora está <strong>até 4x mais rápida</strong> que antes!
                                           </p>
                                       </div>
@@ -10262,10 +10438,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                               )}
                           </div>
 
-                          <div className="flex gap-3 w-full shrink-0 pt-4 border-t border-gray-100 mt-4">
+                          <div className="flex gap-3 w-full shrink-0 pt-4 border-t border-[#eedad5] mt-4">
                               <button 
                                   onClick={cancelPrint} 
-                                  className="flex-1 py-3 px-4 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors"
+                                  className="flex-1 py-3 px-4 rounded-xl bg-[#faf5f3] hover:bg-[#f5ded9] text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors border border-[#eedad5] cursor-pointer"
                               >
                                   Cancelar
                               </button>
@@ -10273,14 +10449,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                               {pdfExportMethod === 'vector' ? (
                                   <button 
                                       onClick={executeVectorPrint}
-                                      className="flex-1 py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2"
+                                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white font-black text-xs uppercase tracking-wider transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                                   >
                                       <Printer className="w-4 h-4"/> Salvar Vetorial (Imprimir)
                                   </button>
                               ) : (
                                   <button 
                                       onClick={executePrint}
-                                      className="flex-1 py-3 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2"
+                                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white font-black text-xs uppercase tracking-wider transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                                   >
                                       <FileDown className="w-4 h-4"/> Baixar PDF Agora
                                   </button>
@@ -10292,9 +10468,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                   cancelPrint();
                                   setActiveTab('mockup');
                               }}
-                              className="w-full mt-3 py-2.5 px-4 rounded-xl border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-800 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                              className="w-full mt-3 py-2.5 px-4 rounded-xl border border-[#eedad5] bg-[#fdeeed] hover:bg-[#faf5f3] text-[#9f3d4a] font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
                           >
-                              <Box className="w-4 h-4 text-orange-600"/>
+                              <Box className="w-4 h-4 text-[#b84a56]"/>
                               <span>Estúdio 3D: Criar Mockup deste Miolo</span>
                           </button>
                       </div>
@@ -10815,154 +10991,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           </div>
       )}
 
-      {quotesModalOpen && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={() => setQuotesModalOpen(false)}>
-              <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-[780px] max-w-full m-4 flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gray-50/50">
-                      <div className="flex items-center gap-2">
-                          <div className="bg-amber-500 p-1.5 rounded-lg shadow-sm"><Sparkles className="w-4 h-4 text-white"/></div>
-                          <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Personalizar Frases Motivacionais</h3>
-                      </div>
-                      <button onClick={() => setQuotesModalOpen(false)} className="text-gray-400 hover:text-red-500 transition-colors p-1 hover:bg-red-50 rounded-full"><X className="w-5 h-5"/></button>
-                  </div>
-                  
-                  <div className="p-5 overflow-y-auto max-h-[80vh] space-y-4">
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 leading-relaxed">
-                          <p className="font-bold mb-1 flex items-center gap-1.5">
-                              <Star className="w-4 h-4 text-amber-500 fill-amber-300 shrink-0" />
-                              Quer usar suas próprias Frases e Mensagens Motivacionais na sua agenda?
-                          </p>
-                          <p>
-                              Substitua as frases inspiradoras dos meses e dias por uma lista personalizada feita por você! Você pode importar facilmente do seu <strong>Excel</strong>, <strong>Google Sheets</strong> ou colar o texto abaixo.
-                          </p>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-left">
-                          {/* Coluna Esquerda: Instrucoes & Arquivo */}
-                          <div className="space-y-4 text-left">
-                              <div className="space-y-2">
-                                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">Opção 1: Upload de Arquivo</h4>
-                                  <p className="text-[11px] text-gray-500 leading-normal">
-                                      Selecione um arquivo de texto (<code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold">.txt</code> ou <code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold">.csv</code>) contendo uma frase por linha, ou uma lista em <code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold">.json</code>.
-                                  </p>
-                                  
-                                  <div className="flex items-center gap-2">
-                                      <button
-                                          type="button"
-                                          onClick={() => document.getElementById('quote-file-input')?.click()}
-                                          className="flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-700 bg-white hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700 rounded text-xs font-bold transition-all cursor-pointer"
-                                      >
-                                          <Upload className="w-3.5 h-3.5" />
-                                          <span>Escolher Arquivo</span>
-                                      </button>
-                                      <input
-                                          id="quote-file-input"
-                                          type="file"
-                                          accept=".txt,.csv,.json"
-                                          onChange={handleImportQuotesFile}
-                                          className="hidden"
-                                      />
-                                  </div>
-                              </div>
-
-                              <div className="pt-2 space-y-2">
-                                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">Opção 2: Como colar do Excel / Planilha</h4>
-                                  <ol className="list-decimal list-inside text-[11px] text-gray-600 space-y-1 leading-normal">
-                                      <li>Abra sua planilha (Excel, Sheets ou bloco de notas).</li>
-                                      <li>Selecione e <strong>Copie (Ctrl+C)</strong> a coluna de frases.</li>
-                                      <li>Insira os dados na caixa ao lado e clique em salvar.</li>
-                                  </ol>
-                              </div>
-
-                              <div className="pt-2 border-t border-gray-100 space-y-2">
-                                  <div className="flex items-center justify-between text-xs">
-                                      <span className="font-bold text-gray-600">Estado atual:</span>
-                                      {customQuotes.length > 0 ? (
-                                          <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[10px]">Ativo (Frases Próprias)</span>
-                                      ) : (
-                                          <span className="bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded text-[10px]">Ativo (Frases Padrão)</span>
-                                      )}
-                                  </div>
-                                  <p className="text-[10px] text-gray-400 leading-relaxed">
-                                      {customQuotes.length > 0 
-                                          ? `Você tem ${customQuotes.length} frase(s) cadastrada(s). Elas serão exibidas de forma rotativa nas páginas e meses.` 
-                                          : `O sistema conta com frases motivacionais e inspiradoras cuidadosamente selecionadas.`}
-                                  </p>
-                                  {customQuotes.length > 0 && (
-                                      <button 
-                                          type="button"
-                                          onClick={clearCustomQuotes}
-                                          className="text-[10px] font-bold text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1.5 rounded transition-all flex items-center gap-1 cursor-pointer"
-                                      >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                          <span>Voltar às frases originais</span>
-                                      </button>
-                                  )}
-                              </div>
-                          </div>
-
-                          {/* Coluna Direita: Caixa de Texto */}
-                          <div className="flex flex-col gap-3 text-left">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 flex items-center justify-between">
-                                  <span>Colar diretamente</span>
-                                  {customQuotes.length > 0 && <span className="text-[10px] text-gray-400 normal-case font-medium">Dica: Cole para atualizar</span>}
-                              </h4>
-                              
-                              <textarea
-                                  id="pasted-quotes-textarea"
-                                  placeholder="Cole suas frases motivacionais aqui (uma por linha)&#13;&#10;Exemplo:&#13;&#10;A persistência é o caminho do êxito.&#13;&#10;Grandes jornadas começam com um único passo.&#13;&#10;Foque no progresso, não na perfeição."
-                                  className="w-full h-44 p-3 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none resize-none font-mono text-gray-700 bg-gray-50/50"
-                              ></textarea>
-
-                              <button
-                                  type="button"
-                                  onClick={() => {
-                                      const txt = (document.getElementById('pasted-quotes-textarea') as HTMLTextAreaElement)?.value || '';
-                                      handlePasteQuotesText(txt);
-                                      if (txt.trim()) {
-                                          (document.getElementById('pasted-quotes-textarea') as HTMLTextAreaElement).value = '';
-                                      }
-                                  }}
-                                  className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded shadow transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                  <CheckSquare className="w-4 h-4" />
-                                  <span>Salvar Texto Colado</span>
-                              </button>
-                          </div>
-                      </div>
-
-                      {/* Preview das Frases Atuais */}
-                      {customQuotes.length > 0 && (
-                          <div className="pt-3 border-t border-gray-100 text-left">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Visualização rápida (Primeiras 5 frases salvas)</h4>
-                              <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-200/50 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
-                                  {customQuotes.slice(0, 5).map((q, idx) => (
-                                      <div key={idx} className="text-[10px] text-gray-600 border-b border-gray-100 last:border-0 pb-1 last:pb-0 font-sans truncate" title={q}>
-                                          <span className="font-mono text-gray-400 font-bold mr-1 bg-gray-200/50 px-1 py-0.2 rounded text-[9px]">{idx + 1}</span>
-                                          {q}
-                                      </div>
-                                  ))}
-                                  {customQuotes.length > 5 && (
-                                      <div className="text-[9px] text-gray-400 italic text-center pt-1 animate-pulse">
-                                          ... e mais {customQuotes.length - 5} frases cadastradas.
-                                      </div>
-                                  )}
-                              </div>
-                          </div>
-                      )}
-                  </div>
-
-                  <div className="p-3 border-t border-gray-100 bg-gray-50/50 flex justify-end">
-                      <button 
-                          onClick={() => setQuotesModalOpen(false)}
-                          className="px-4 py-1.5 bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 text-xs font-bold rounded shadow-sm transition-all focus:ring-2 focus:ring-amber-500 uppercase tracking-wider"
-                      >
-                          Fechar
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
+      <MotivationalQuotesModal
+        isOpen={quotesModalOpen}
+        onClose={() => setQuotesModalOpen(false)}
+        currentCategory={config.quoteCategory || 'feminine_strength'}
+        initialTab={quotesModalInitialTab}
+        onSetProjectCategory={(cat) => {
+          pushHistory();
+          setConfig(prev => ({ ...prev, quoteCategory: cat }));
+          setRenderedPreviewCount(prev => prev + 1);
+        }}
+        onInsertQuoteElement={(options) => handleInsertQuoteElement(options)}
+        customQuotes={customQuotes}
+        onSaveCustomQuotes={(newQuotes) => {
+          pushHistory();
+          setCustomQuotes(newQuotes);
+          localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(newQuotes));
+          setConfig(prev => ({ ...prev, quoteCustomList: newQuotes }));
+          setRenderedPreviewCount(prev => prev + 1);
+          setToastMessage(`${newQuotes.length} frases motivacionais salvas com sucesso!`);
+        }}
+        onClearCustomQuotes={clearCustomQuotes}
+      />
 
       <TemplateGalleryModal
           isOpen={templateModal}
@@ -10977,6 +11027,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           importCustomTemplates={importCustomTemplates}
           deleteCustomTemplate={deleteCustomTemplate}
           applyCustomTemplate={applyCustomTemplate}
+          saveCurrentMioloAsTemplate={saveCurrentMioloAsTemplate}
           templateFileInputRef={templateFileInputRef}
           setPdfImportModalOpen={setPdfImportModalOpen}
           setConfig={setConfig}
@@ -11053,10 +11104,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 onClick={() => onConfigure && onConfigure(config)}
                 title="Configurações do Projeto"
               >
-                <div className="bg-indigo-600 p-1.5 rounded text-white shrink-0 shadow-xs">
+                <div className="bg-gradient-to-br from-[#b84a56] to-[#c45663] p-1.5 rounded-lg text-white shrink-0 shadow-xs">
                   <Calendar className="h-4 w-4" />
                 </div>
-                <span className="font-bold text-gray-800 hidden xl:block text-xs sm:text-sm whitespace-nowrap">AgendaMaster</span>
+                <span className="font-black text-slate-800 hidden xl:block text-xs sm:text-sm whitespace-nowrap">AgendaMaster</span>
               </div>
 
               <div className="flex items-center gap-1 group min-w-0">
@@ -11064,23 +11115,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   type="text"
                   value={config.name || 'Sem Nome'}
                   onChange={(e) => setConfig({ ...config, name: e.target.value })}
-                  className="bg-transparent border-none focus:ring-0 text-xs sm:text-sm font-bold text-gray-700 hover:bg-gray-50 px-1 py-0.5 rounded transition-colors w-16 sm:w-20 md:w-24 lg:w-28 truncate"
+                  className="bg-transparent border-none focus:ring-0 text-xs sm:text-sm font-bold text-slate-800 hover:bg-[#faf5f3] px-1 py-0.5 rounded-lg transition-colors w-16 sm:w-20 md:w-24 lg:w-28 truncate"
                   placeholder="Nome do Projeto"
                   title="Clique para renomear o projeto"
                 />
               </div>
 
-              <div className="hidden 2xl:flex items-center text-[9px] text-gray-400 font-medium bg-gray-50 px-1.5 py-0.5 rounded-full border border-gray-100 shrink-0">
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full mr-1 animate-pulse"></div>
+              <div className="hidden 2xl:flex items-center text-[9px] text-slate-500 font-medium bg-[#fdeeed] px-2 py-0.5 rounded-full border border-[#f5ded9] shrink-0">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5 animate-pulse"></div>
                 Auto-salvo
               </div>
             </div>
 
             {/* Center Group: Mode Navigation Tabs */}
-            <div className="flex items-center space-x-0.5 bg-gray-100 p-0.5 rounded-xl shrink-0">
+            <div className="flex items-center space-x-0.5 bg-[#fdeeed] p-0.5 rounded-xl shrink-0 border border-[#f5ded9]">
               <button 
                 onClick={() => setActiveTab('editor')} 
-                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'editor' ? 'bg-white shadow-xs text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'editor' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                 title="Modo de Edição do Miolo"
               >
                 <Layout className="w-3.5 h-3.5 shrink-0" />
@@ -11091,7 +11142,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   clearSimulationMode();
                   setActiveTab('preview');
                 }} 
-                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'preview' ? 'bg-white shadow-xs text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'preview' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                 title="Visualizar Miolo Completo"
               >
                 <Eye className="w-3.5 h-3.5 shrink-0" />
@@ -11099,18 +11150,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               </button>
               <button 
                 onClick={() => setActiveTab('opentype')} 
-                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'opentype' ? 'bg-white shadow-xs text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'opentype' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                 title="Ver letras decorativas, swashes e glifos especiais"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <Sparkles className="w-3.5 h-3.5 text-[#b84a56] shrink-0" />
                 <span className="hidden sm:inline">Glifos</span>
               </button>
               <button 
                 onClick={() => setActiveTab('mockup')} 
-                className={`flex items-center gap-1 px-1.5 sm:px-2 md:px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'mockup' ? 'bg-white shadow-xs text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-1 text-xs font-bold rounded-lg transition-all ${activeTab === 'mockup' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                 title="Estúdio de Mockup 3D: exiba e exporte fotos realistas da agenda com wire-o e cenários"
               >
-                <Box className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                <Box className="w-3.5 h-3.5 text-[#b84a56] shrink-0" />
                 <span className="hidden md:inline">Mockup</span>
               </button>
             </div>
@@ -11120,41 +11171,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 <button 
                     onClick={handleUndo} 
                     disabled={history.length === 0}
-                    className={`p-1.5 rounded-md transition-colors shrink-0 ${history.length === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-100 hover:text-indigo-600'}`}
+                    className={`p-1.5 rounded-xl transition-colors shrink-0 cursor-pointer ${history.length === 0 ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-[#fdeeed] hover:text-[#b84a56]'}`}
                     title="Desfazer última alteração (Ctrl+Z)"
                 >
                     <Undo className="w-4 h-4" />
                 </button>
 
-                <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0"></div>
+                <div className="h-4 w-px bg-[#eedad5] mx-0.5 shrink-0"></div>
 
                 {/* Project File Actions */}
-                <div className="flex items-center space-x-0.5 bg-gray-50 p-0.5 rounded-md border border-gray-200 shrink-0">
+                <div className="flex items-center space-x-0.5 bg-[#fdeeed] p-1 rounded-xl border border-[#eedad5] shrink-0">
                     <button 
                         onClick={handleExport} 
-                        className="flex items-center px-1.5 sm:px-2 py-1 text-xs font-bold uppercase tracking-tight text-indigo-600 hover:bg-white rounded transition-all shadow-2xs bg-white/50 cursor-pointer" 
+                        className="flex items-center px-2 py-1 text-xs font-bold uppercase tracking-tight text-[#9f3d4a] hover:text-[#b84a56] hover:bg-white rounded-lg transition-all shadow-2xs bg-white/70 cursor-pointer" 
                         title="Salvar alterações no computador (.json)"
                     >
-                        <icons.Save className="w-3.5 h-3.5" />
-                        <span className="hidden min-[1800px]:inline ml-1">Salvar</span>
+                        <icons.Save className="w-3.5 h-3.5 text-[#b84a56]" />
+                        <span className="hidden min-[1800px]:inline ml-1 font-black">Salvar</span>
                     </button>
-                    <div className="w-px h-3 bg-gray-200"></div>
+                    <div className="w-px h-3 bg-[#eedad5]"></div>
                     <button 
                         onClick={handleImportClick} 
-                        className="flex items-center px-1.5 sm:px-2 py-1 text-xs font-bold uppercase tracking-tight text-gray-600 hover:text-indigo-600 hover:bg-white rounded transition-all cursor-pointer" 
+                        className="flex items-center px-2 py-1 text-xs font-bold uppercase tracking-tight text-slate-700 hover:text-[#b84a56] hover:bg-white rounded-lg transition-all cursor-pointer" 
                         title="Abrir um arquivo de projeto (.json)"
                     >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span className="hidden min-[1800px]:inline ml-1">Abrir</span>
+                        <Upload className="w-3.5 h-3.5 text-[#b84a56]" />
+                        <span className="hidden min-[1800px]:inline ml-1 font-black">Abrir</span>
                     </button>
-                    <div className="w-px h-3 bg-gray-200"></div>
+                    <div className="w-px h-3 bg-[#eedad5]"></div>
                     <button 
                         onClick={() => setPdfImportModalOpen(true)} 
-                        className="flex items-center px-1.5 sm:px-2 py-1 text-xs font-bold uppercase tracking-tight text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 rounded transition-all border border-indigo-200/80 shadow-2xs cursor-pointer" 
+                        className="flex items-center px-2 py-1 text-xs font-black uppercase tracking-tight text-[#9f3d4a] bg-white hover:bg-[#fff9f8] hover:text-[#b84a56] rounded-lg transition-all border border-[#f5ded9] shadow-2xs cursor-pointer" 
                         title="Importar layout editável de PDF (CorelDraw, Canva, Illustrator)"
                     >
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                        <span className="ml-1 text-[11px] font-bold">PDF</span>
+                        <Sparkles className="w-3.5 h-3.5 text-[#b84a56]" />
+                        <span className="ml-1 text-[11px] font-black">PDF</span>
                     </button>
                 </div>
 
@@ -11184,22 +11235,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 <button 
                   onClick={handlePrintRequest} 
                   disabled={printStatus !== 'idle'} 
-                  className="flex items-center gap-1 sm:gap-1.5 text-xs font-bold text-white hover:bg-indigo-700 bg-indigo-600 px-2 sm:px-2.5 md:px-3 py-1.5 rounded-lg border border-indigo-600 disabled:opacity-50 shadow-md shadow-indigo-600/30 transition-all shrink-0 cursor-pointer active:scale-95 ring-2 ring-indigo-400/20"
+                  className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] px-3 sm:px-4 py-1.5 rounded-xl border border-[#b84a56] disabled:opacity-50 shadow-md shadow-[#b84a56]/25 transition-all shrink-0 cursor-pointer active:scale-95 ring-2 ring-[#b84a56]/20 uppercase tracking-wide"
                   title="Baixar Arquivo PDF Pronto para Impressão"
                 >
-                  <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white shrink-0" />
-                  <span className="whitespace-nowrap">Baixar PDF</span>
+                  <FileDown className="w-4 h-4 text-white shrink-0" />
+                  <span className="whitespace-nowrap font-black">Baixar PDF</span>
                 </button>
 
-                <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0"></div>
+                <div className="h-4 w-px bg-[#eedad5] mx-0.5 shrink-0"></div>
 
                 {/* Design and Layout Tool Toggles */}
                 <button
                   onClick={() => setShowStylesPanel(!showStylesPanel)}
-                  className={`p-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${
+                  className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${
                     showStylesPanel
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-200'
-                      : 'bg-indigo-50/70 text-indigo-700 border-indigo-200/80 hover:bg-indigo-100'
+                      ? 'bg-[#b84a56] text-white border-[#b84a56] shadow-xs ring-2 ring-[#b84a56]/20'
+                      : 'bg-[#fdeeed] text-[#9f3d4a] border-[#eedad5] hover:bg-[#f9e2df]'
                   }`}
                   title="Estilos Globais de Cor, Caractere e Parágrafo"
                 >
@@ -11209,14 +11260,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 <button
                   onClick={() => setIsSpecialDatesModalOpen(true)}
-                  className={`p-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${
+                  className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${
                     (config.specialDates && config.specialDates.length > 0)
-                      ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100 shadow-2xs'
-                      : 'bg-stone-50/70 text-stone-700 border-stone-200/80 hover:bg-stone-100'
+                      ? 'bg-[#b84a56] text-white border-[#b84a56] shadow-xs'
+                      : 'bg-[#fdeeed] text-[#9f3d4a] border-[#eedad5] hover:bg-[#f9e2df]'
                   }`}
                   title="Datas Importantes, Férias da Cliente e Contagem Regressiva"
                 >
-                  <CalendarHeart className="w-4 h-4 text-rose-500" />
+                  <CalendarHeart className="w-4 h-4 text-[#b84a56]" />
                   {config.specialDates && config.specialDates.length > 0 && (
                     <span className="w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
                       {config.specialDates.length}
@@ -11416,24 +11467,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         animate={isMobile ? { y: 0 } : { x: 0, opacity: 1 }}
                         exit={isMobile ? { y: '100%' } : { x: -288, opacity: 0 }}
                         transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-                        className={`${isMobile ? 'fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[80vh] border-t border-indigo-100 flex flex-col no-print' : 'w-64 xl:w-72 bg-white border-r border-gray-200 flex flex-col shrink-0 z-20 overflow-hidden shadow-sm'}`}
+                        className={`${isMobile ? 'fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[80vh] border-t border-[#eedad5] flex flex-col no-print' : 'w-64 xl:w-72 bg-white border-r border-[#eedad5] flex flex-col shrink-0 z-20 overflow-hidden shadow-xs'}`}
                     >
                         {isMobile ? (
-                            <div className="flex items-center justify-between p-4 border-b">
-                                <span className="text-xs font-black uppercase tracking-widest text-indigo-600">Configuração e Estrutura</span>
-                                <button onClick={() => setMobileDrawer('none')} className="p-1"><X className="w-5 h-5 text-gray-400" /></button>
+                            <div className="flex items-center justify-between p-4 border-b border-[#eedad5]">
+                                <span className="text-xs font-black uppercase tracking-widest text-[#b84a56]">Configuração e Estrutura</span>
+                                <button onClick={() => setMobileDrawer('none')} className="p-1"><X className="w-5 h-5 text-slate-400" /></button>
                             </div>
                         ) : (
-                            <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-gray-200 bg-gray-50/80 shrink-0">
+                            <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-[#eedad5] bg-[#faf6f4] shrink-0">
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                    <div className="bg-indigo-600 text-white p-1 rounded">
+                                    <div className="bg-[#b84a56] text-white p-1 rounded-lg shadow-2xs">
                                         <Layout className="w-3.5 h-3.5" />
                                     </div>
-                                    <span className="text-[11px] font-black uppercase tracking-wider text-gray-700 truncate">Ferramentas & Miolo</span>
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 truncate">Ferramentas & Miolo</span>
                                 </div>
                                 <button 
                                     onClick={() => setShowSidebar(false)} 
-                                    className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors cursor-pointer"
+                                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-[#fdeeed] rounded-lg transition-colors cursor-pointer"
                                     title="Recolher Painel Lateral (Mais espaço para a tela)"
                                 >
                                     <X className="w-4 h-4" />
@@ -11441,24 +11492,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
                         <div className={`${isMobile ? 'flex-1 overflow-y-auto pb-20' : 'flex-1 overflow-y-auto custom-scrollbar'}`}>
-                            <div className="p-3.5 border-b border-gray-200 bg-gray-50/70">
+                            <div className="p-3.5 border-b border-[#eedad5] bg-[#faf6f4]/60">
                                 <button
                                     type="button"
                                     onClick={() => setIsProjectConfigOpen(prev => !prev)}
-                                    className="w-full flex items-center justify-between text-indigo-700 hover:text-indigo-900 transition-all cursor-pointer select-none group"
+                                    className="w-full flex items-center justify-between text-[#9f3d4a] hover:text-[#b84a56] transition-all cursor-pointer select-none group"
                                     title={isProjectConfigOpen ? "Recolher Configuração do Projeto" : "Expandir Configuração do Projeto"}
                                 >
-                                    <div className="flex items-center text-indigo-700 min-w-0">
-                                        <Settings2 className="w-4 h-4 mr-2 text-indigo-700 shrink-0 group-hover:rotate-45 transition-transform duration-200" />
-                                        <h3 className="text-xs font-black uppercase tracking-wider text-indigo-900 truncate">Configuração do Projeto</h3>
+                                    <div className="flex items-center text-[#9f3d4a] min-w-0">
+                                        <Settings2 className="w-4 h-4 mr-2 text-[#b84a56] shrink-0 group-hover:rotate-45 transition-transform duration-200" />
+                                        <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 truncate">Configuração do Projeto</h3>
                                     </div>
                                     <div className="flex items-center gap-1.5 shrink-0 ml-2">
                                         {!isProjectConfigOpen && (
-                                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 border border-indigo-200 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+                                            <span className="text-[10px] font-bold text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-2 py-0.5 rounded-full truncate max-w-[130px]">
                                                 {config.year} • {getLayoutTypeShortLabel(config.layoutType)}
                                             </span>
                                         )}
-                                        <ChevronDown className={`w-4 h-4 text-indigo-700 transition-transform duration-200 ${isProjectConfigOpen ? 'rotate-180' : ''}`} />
+                                        <ChevronDown className={`w-4 h-4 text-[#b84a56] transition-transform duration-200 ${isProjectConfigOpen ? 'rotate-180' : ''}`} />
                                     </div>
                                 </button>
                                 {isProjectConfigOpen && (
@@ -11796,14 +11847,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         <span className="text-[10px] bg-gray-200 text-gray-900 px-2 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
                                                     )}
                                                 </div>
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => setQuotesModalOpen(true)}
-                                                    className="w-full py-2 px-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg justify-center font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
-                                                >
-                                                    <Sparkles className="w-3.5 h-3.5 text-white" />
-                                                    <span>Personalizar Frases</span>
-                                                </button>
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => { setQuotesModalInitialTab('custom'); setQuotesModalOpen(true); }}
+                                                        className="w-full py-2 px-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg justify-center font-black text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
+                                                        title="Subir arquivo ou colar frases do Excel"
+                                                    >
+                                                        <Upload className="w-3.5 h-3.5 text-white" />
+                                                        <span>Subir Frases</span>
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => { setQuotesModalInitialTab('feminine_strength'); setQuotesModalOpen(true); }}
+                                                        className="w-full py-2 px-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg justify-center font-black text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
+                                                        title="Explorar categorias e frases prontas"
+                                                    >
+                                                        <Sparkles className="w-3.5 h-3.5 text-white" />
+                                                        <span>Catálogo</span>
+                                                    </button>
+                                                </div>
+                                                {customQuotes.length > 0 && (
+                                                    <button 
+                                                        type="button"
+                                                        onClick={clearCustomQuotes}
+                                                        className="text-[10px] font-bold text-red-500 hover:text-red-700 hover:bg-red-50 py-1 rounded transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                        <span>Voltar às frases originais</span>
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     )}
@@ -11813,13 +11886,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 )}
                             </div>
 
-                    <div className="p-4 border-b border-gray-100">
-                        <div className="flex items-center mb-3 text-gray-400"><Book className="w-4 h-4 mr-2" /><h3 className="text-xs font-semibold uppercase tracking-wider">Estrutura</h3></div>
-                        <div className="flex bg-gray-100 p-1 rounded-lg gap-0.5 mb-2">
-                            <button onClick={() => { setEditMode('daily'); setSelectedIds([]); }} className={`flex-1 py-1.5 px-1 text-[9px] font-bold uppercase rounded-md transition-all truncate ${editMode === 'daily' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <div className="p-4 border-b border-[#eedad5]">
+                        <div className="flex items-center mb-3 text-[#9f3d4a] font-bold text-xs uppercase tracking-wider"><Book className="w-4 h-4 mr-2 text-[#b84a56]" /><span>Estrutura</span></div>
+                        <div className="flex bg-[#fdeeed] p-1 rounded-2xl gap-1 mb-2 border border-[#eedad5]">
+                            <button onClick={() => { setEditMode('daily'); setSelectedIds([]); }} className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'daily' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}>
                                 {config.projectType === 'notebook' || config.projectType === 'devotional' ? 'Miolo' : (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal' ? 'Semanal' : 'Diário')}
                             </button>
-                            <button onClick={() => { setEditMode('intro'); setSelectedIds([]); if (!currentIntroPageId && config.introPages.length > 0) setCurrentIntroPageId(config.introPages[0].id); }} className={`flex-1 py-1.5 px-1 text-[9px] font-bold uppercase rounded-md transition-all truncate ${editMode === 'intro' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>Iniciais</button>
+                            <button onClick={() => { setEditMode('intro'); setSelectedIds([]); if (!currentIntroPageId && config.introPages.length > 0) setCurrentIntroPageId(config.introPages[0].id); }} className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'intro' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}>Iniciais</button>
                             <button 
                                 onClick={() => { 
                                     setEditMode('monthly_intro'); 
@@ -11830,7 +11903,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         setCurrentMonthlyIntroPageId('');
                                     }
                                 }} 
-                                className={`flex-1 py-1.5 px-1 text-[9px] font-bold uppercase rounded-md transition-all truncate ${editMode === 'monthly_intro' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'monthly_intro' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                             >
                                 Mensais
                             </button>
@@ -11872,7 +11945,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         }));
                                     }
                                 }} 
-                                className={`flex-1 py-1.5 px-1 text-[9px] font-bold uppercase rounded-md transition-all truncate ${editMode === 'divider' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'divider' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                             >
                                 Divisórias
                             </button>
@@ -11885,10 +11958,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             setPdfImportInitialDestination('miolo_default'); 
                                             setPdfImportModalOpen(true); 
                                         }}
-                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#fdeeed] text-[#9f3d4a] rounded-xl border border-[#f5ded9] hover:bg-[#faf5f3] transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
                                         title="Importar objetos de um PDF para usar como layout do Miolo"
                                     >
-                                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                        <Sparkles className="w-3.5 h-3.5 text-[#b84a56]" />
                                         <span>Layout Miolo (PDF)</span>
                                     </button>
                                     {!(config.projectType === 'notebook' || config.projectType === 'devotional') && (
@@ -11897,22 +11970,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 setTemplateCategory(config.projectType === 'planner' ? 'planner' : config.projectType === 'notebook' ? 'notebook' : 'agenda'); 
                                                 setTemplateModal(true); 
                                             }}
-                                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-rose-50 text-rose-800 rounded-lg border border-rose-200 hover:bg-rose-100 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#fdeeed] text-[#b84a56] rounded-xl border border-[#eedad5] hover:bg-[#faf5f3] transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
                                             title="Escolher variação de Miolo Pastel (Agendamento, Planner Comum, Financeiro, Semanal, etc.)"
                                         >
-                                            <Layout className="w-3.5 h-3.5 text-rose-600" />
+                                            <Layout className="w-3.5 h-3.5 text-[#b84a56]" />
                                             <span>Modelos Miolo</span>
                                         </button>
                                     )}
+                                </div>
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        type="button"
+                                        onClick={saveCurrentMioloAsTemplate}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white rounded-xl transition-all text-[10px] font-black uppercase tracking-wider shadow-2xs cursor-pointer active:scale-95"
+                                        title="Salvar o desenho e layout do Miolo atual em 'Meus Modelos' para reaproveitar ou exportar"
+                                    >
+                                        <Star className="w-3.5 h-3.5 fill-white text-white" />
+                                        <span>Salvar Miolo Atual</span>
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            setTemplateCategory('custom');
+                                            setTemplateModal(true);
+                                        }}
+                                        className="flex items-center justify-center gap-1 py-1.5 px-2.5 bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] hover:bg-[#faf5f3] rounded-xl transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                        title="Abrir 'Meus Modelos' para gerenciar layouts salvos"
+                                    >
+                                        <Bookmark className="w-3.5 h-3.5 text-[#b84a56]" />
+                                        <span className="hidden sm:inline">Modelos</span>
+                                    </button>
                                 </div>
                                 <button 
                                     onClick={() => {
                                         applyLibraryLayout(config.projectType === 'planner' ? 'planner-em-branco' : 'layout-em-branco', true);
                                     }}
-                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-amber-50/70 text-amber-900 rounded-lg border border-amber-200/90 hover:bg-amber-100/80 transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer active:scale-95"
+                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#faf6f4] text-slate-700 rounded-xl border border-[#eedad5] hover:bg-[#fdeeed] transition-colors text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer active:scale-95"
                                     title="Limpa todos os elementos atuais da página para desenhar do zero em uma folha em branco com margens prontas"
                                 >
-                                    <Square className="w-3.5 h-3.5 text-amber-600" />
+                                    <Square className="w-3.5 h-3.5 text-[#b84a56]" />
                                     <span>Começar com Miolo em Branco</span>
                                 </button>
                             </div>
@@ -12269,6 +12365,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <p className="text-[10px] text-indigo-700">Clique em qualquer elemento abaixo para adicioná-lo à página do verso.</p>
                             </div>
                         )}
+                        {/* Frase Motivacional Diária - Card Rápido */}
+                        <div className="mb-2.5 p-2.5 rounded-xl border border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] shadow-2xs">
+                            <div className="flex items-center justify-between gap-1 mb-1.5">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                    <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-[#b84a56] to-[#d98b95] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                                        <Sparkles className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <span className="text-[11px] font-bold text-slate-800 block truncate">Frases Motivacionais</span>
+                                        <span className="text-[9px] text-[#9f3d4a] font-semibold block truncate">
+                                            {QUOTE_CATEGORIES_METADATA.find(c => c.id === (config.quoteCategory || 'feminine_strength'))?.shortName || 'Força Feminina'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setQuotesModalOpen(true)}
+                                    className="px-2 py-0.5 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] hover:text-[#7e2d38] border border-[#eedad5] rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1 shrink-0"
+                                    title="Escolher categoria ou ver todas as frases"
+                                >
+                                    <span>Temas</span>
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-[#eedad5]/60">
+                                <button
+                                    type="button"
+                                    onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'bottom' })}
+                                    className="py-1 px-1 bg-[#b84a56] hover:bg-[#9f3d4a] text-white text-[9px] font-bold rounded-lg transition-all text-center truncate cursor-pointer shadow-2xs active:scale-95"
+                                    title="Inserir Frase Motivacional no Rodapé da Página"
+                                >
+                                    + No Rodapé
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'top' })}
+                                    className="py-1 px-1 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] border border-[#eedad5] text-[9px] font-bold rounded-lg transition-all text-center truncate cursor-pointer active:scale-95"
+                                    title="Inserir Frase Motivacional no Topo da Página"
+                                >
+                                    + No Topo
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-4 gap-2">
                                 {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
                                     <>
@@ -12314,7 +12453,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                                 <button onClick={() => addElement('image', 'Imagem')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Upload de Imagem"><Upload className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Versículo Bíblico"><BookOpen className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('quote', 'Frase Inspiradora', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Frase Motivacional"><Sparkles className="w-4 h-4 text-indigo-600"/></button>
+                                <button onClick={() => setQuotesModalOpen(true)} className="h-10 flex items-center justify-center border border-[#eedad5] bg-[#fff5f5] hover:bg-[#fdeeed] hover:border-[#b84a56] rounded text-[#b84a56] transition-colors" title="Frases Motivacionais Diárias (Força Feminina, Fé, Motivação, Amor-Próprio...)"><Sparkles className="w-4 h-4 text-[#b84a56]"/></button>
                                 
                                 <button onClick={() => addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linha Divisória"><Minus className="w-4 h-4 text-indigo-600"/></button>
                                 <button onClick={() => addElement('permanent_day_header', 'Agenda Permanente', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Agenda Permanente"><List className="w-4 h-4 text-indigo-600"/></button>
@@ -12363,7 +12502,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             <main 
                 ref={workspaceRef} 
-                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-gray-200 p-2 sm:p-4 md:p-6'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'lg:pr-[290px] xl:pr-[300px]' : ''}`}
+                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-[#f5ede8] p-2 sm:p-4 md:p-6'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'lg:pr-[290px] xl:pr-[300px]' : ''}`}
                 onMouseDown={(e) => {
                   if (e.button !== 0) return;
                   const targetEl = e.target as HTMLElement;
@@ -12450,37 +12589,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 {activeTab === 'editor' && (
                     <div className={`flex flex-col items-center w-full max-w-full h-full min-h-0 ${isMobile ? 'h-full flex-1 touch-none' : ''}`}>
-                        <div className="mb-2 md:mb-4 bg-white p-1 rounded-xl shadow-sm flex items-center space-x-1 z-10 no-print border border-gray-100 max-w-full overflow-x-auto custom-scrollbar shrink-0">
-                            <button onClick={() => handleUndo()} disabled={history.length === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 disabled:opacity-30 flex items-center gap-1 shrink-0" title="Desfazer (Ctrl+Z)"><Undo className="w-4 h-4" /><span className="text-[10px] font-bold hidden sm:inline">Undo</span></button>
+                        <div className="mb-2 md:mb-4 bg-white/95 backdrop-blur-sm p-1.5 rounded-2xl shadow-xs flex items-center space-x-1.5 z-10 no-print border border-[#eedad5] max-w-full overflow-x-auto custom-scrollbar shrink-0">
+                            <button onClick={() => handleUndo()} disabled={history.length === 0} className="p-1.5 hover:bg-[#fdeeed] rounded-xl text-slate-400 hover:text-[#b84a56] disabled:opacity-30 flex items-center gap-1 shrink-0 cursor-pointer" title="Desfazer (Ctrl+Z)"><Undo className="w-4 h-4" /><span className="text-[10px] font-bold hidden sm:inline">Undo</span></button>
                             
-                            <div className="w-px h-4 bg-gray-200 mx-0.5 shrink-0"></div>
+                            <div className="w-px h-4 bg-[#eedad5] mx-0.5 shrink-0"></div>
 
-                            <button onClick={() => setPanMode(false)} className={`p-1.5 rounded transition-all shrink-0 ${!panMode ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-400 hover:text-gray-600'}`} title="Seleção"><MousePointer2 className="w-4 h-4" /></button>
-                            <button onClick={() => setPanMode(true)} className={`p-1.5 rounded transition-all shrink-0 ${panMode ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-400 hover:text-gray-600'}`} title="Mão / Arrastar"><Hand className="w-4 h-4" /></button>
+                            <button onClick={() => setPanMode(false)} className={`p-1.5 rounded-xl transition-all shrink-0 cursor-pointer ${!panMode ? 'bg-[#fdeeed] text-[#b84a56] font-black shadow-2xs' : 'text-slate-400 hover:text-slate-700'}`} title="Seleção"><MousePointer2 className="w-4 h-4" /></button>
+                            <button onClick={() => setPanMode(true)} className={`p-1.5 rounded-xl transition-all shrink-0 cursor-pointer ${panMode ? 'bg-[#fdeeed] text-[#b84a56] font-black shadow-2xs' : 'text-slate-400 hover:text-slate-700'}`} title="Mão / Arrastar"><Hand className="w-4 h-4" /></button>
 
-                            <div className="w-px h-4 bg-gray-200 mx-0.5 shrink-0"></div>
+                            <div className="w-px h-4 bg-[#eedad5] mx-0.5 shrink-0"></div>
 
-                            <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 shrink-0" title="Diminuir Zoom"><Minus className="w-4 h-4" /></button>
-                            <div className="flex flex-col items-center min-w-[36px] px-1 shrink-0"><span className="text-[7px] font-bold text-gray-400 uppercase leading-none">Zoom</span><span className="text-[10px] font-bold text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span></div>
-                            <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 shrink-0" title="Aumentar Zoom"><Plus className="w-4 h-4" /></button>
+                            <button onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} className="p-1.5 hover:bg-[#fdeeed] rounded-xl text-slate-500 hover:text-[#b84a56] shrink-0 cursor-pointer" title="Diminuir Zoom"><Minus className="w-4 h-4" /></button>
+                            <div className="flex flex-col items-center min-w-[36px] px-1 shrink-0"><span className="text-[7px] font-black text-slate-400 uppercase leading-none">Zoom</span><span className="text-[10px] font-black text-[#b84a56] tabular-nums">{Math.round(zoom * 100)}%</span></div>
+                            <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-[#fdeeed] rounded-xl text-slate-500 hover:text-[#b84a56] shrink-0 cursor-pointer" title="Aumentar Zoom"><Plus className="w-4 h-4" /></button>
                             
                             <button 
                                 onClick={handleFitToScreen} 
-                                className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors border border-indigo-200/60 cursor-pointer" 
+                                className="px-2.5 py-1 bg-[#fdeeed] hover:bg-[#faf5f3] text-[#9f3d4a] rounded-xl text-[10px] font-black flex items-center gap-1 shrink-0 transition-colors border border-[#f5ded9] cursor-pointer shadow-2xs" 
                                 title="Ajustar à Tela (Calcula o zoom perfeito para o tamanho do seu monitor)"
                             >
-                                <Maximize2 className="w-3.5 h-3.5 text-indigo-600" />
+                                <Maximize2 className="w-3.5 h-3.5 text-[#b84a56]" />
                                 <span>Ajustar</span>
                             </button>
                             
-                            <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-gray-400 hover:text-indigo-600 px-1 shrink-0" title="Tamanho Real (100%)">100%</button>
+                            <button onClick={() => setZoom(1)} className="text-[9px] font-bold text-slate-400 hover:text-[#b84a56] px-1 shrink-0 cursor-pointer" title="Tamanho Real (100%)">100%</button>
 
-                            <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
+                            <div className="w-px h-4 bg-[#eedad5] mx-1 shrink-0"></div>
 
                             {/* Controle de Deslocamento das Setas */}
-                            <div className="flex items-center gap-1 bg-gray-50/90 border border-gray-200/80 rounded-md px-1.5 py-0.5 shrink-0" title="Controle de Deslocamento">
-                                <Move className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tight hidden sm:inline">Deslocar:</span>
+                            <div className="flex items-center gap-1 bg-[#faf6f4] border border-[#eedad5] rounded-xl px-2 py-0.5 shrink-0" title="Controle de Deslocamento">
+                                <Move className="w-3.5 h-3.5 text-[#b84a56] shrink-0" />
+                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-tight hidden sm:inline">Deslocar:</span>
                                 <input 
                                     type="number" 
                                     step={nudgeUnit === 'mm' ? '0.5' : '1'} 
@@ -12488,31 +12627,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     max="500" 
                                     value={nudgeValue} 
                                     onChange={(e) => setNudgeValue(Math.max(0.01, parseFloat(e.target.value) || 0.1))} 
-                                    className="w-10 text-[10px] font-bold text-indigo-700 bg-white border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none"
+                                    className="w-10 text-[10px] font-black text-[#9f3d4a] bg-white border border-[#eedad5] rounded-lg px-1 py-0.5 text-center focus:outline-none"
                                 />
                                 <button 
                                     onClick={() => setNudgeUnit(nudgeUnit === 'mm' ? 'px' : 'mm')} 
-                                    className="text-[9px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/60 px-1 py-0.5 rounded uppercase"
+                                    className="text-[9px] font-black text-[#b84a56] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-lg uppercase cursor-pointer"
                                 >
                                     {nudgeUnit}
                                 </button>
                             </div>
 
-                            <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
+                            <div className="w-px h-4 bg-[#eedad5] mx-1 shrink-0"></div>
 
                             <button
                                 type="button"
                                 onClick={() => setShowStylesPanel(!showStylesPanel)}
-                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer border ${
+                                className={`px-3 py-1 rounded-xl text-[10px] font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer border ${
                                     showStylesPanel
-                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                                        : 'bg-indigo-50/70 text-indigo-700 border-indigo-200/80 hover:bg-indigo-100'
+                                        ? 'bg-[#b84a56] text-white border-[#b84a56] shadow-xs'
+                                        : 'bg-[#fdeeed] text-[#9f3d4a] border-[#eedad5] hover:bg-[#faf5f3]'
                                 }`}
                                 title="Abrir Painel de Estilos (Cores, Caracteres e Parágrafos)"
                             >
                                 <icons.Palette className="w-3.5 h-3.5" />
                                 <span>Estilos</span>
                             </button>
+
+                            {editMode === 'daily' && (
+                                <>
+                                    <div className="w-px h-4 bg-[#eedad5] mx-1 shrink-0"></div>
+                                    <button
+                                        type="button"
+                                        onClick={saveCurrentMioloAsTemplate}
+                                        className="px-3 py-1 bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white rounded-xl text-[10px] font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer shadow-xs hover:opacity-95 active:scale-95"
+                                        title="Salvar layout do Miolo que você está editando agora em 'Meus Modelos'"
+                                    >
+                                        <Star className="w-3.5 h-3.5 fill-white text-white" />
+                                        <span>Salvar Miolo</span>
+                                    </button>
+                                </>
+                            )}
                         </div>
 
                         {config.layoutType === '1_per_page_weekend_shared' && editMode === 'daily' && (
@@ -12858,12 +13012,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     initial={isMobile ? { y: '100%' } : { opacity: 0, x: 20 }}
                                     animate={isMobile ? { y: 0 } : { opacity: 1, x: 0 }}
                                     exit={isMobile ? { y: '100%' } : { opacity: 0, x: 20 }}
-                                    className={isMobile ? "fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col no-print" : "absolute right-0 top-0 bottom-0 w-72 bg-white border-l border-gray-200 flex flex-col h-full z-40 no-print shadow-sm"}
+                                    className={isMobile ? "fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col no-print border-t border-[#eedad5]" : "absolute right-0 top-0 bottom-0 w-72 bg-white border-l border-[#eedad5] flex flex-col h-full z-40 no-print shadow-xs"}
                                 >
-                                    <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50 shrink-0">
-                                        <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-widest flex items-center gap-2"><icons.Settings2 className="w-4 h-4" /> Ajustes</h3>
+                                    <div className="flex items-center justify-between p-3 border-b border-[#eedad5] bg-[#faf6f4] shrink-0">
+                                        <h3 className="text-xs font-black text-[#b84a56] uppercase tracking-widest flex items-center gap-2"><icons.Settings2 className="w-4 h-4 text-[#b84a56]" /> Ajustes</h3>
                                         <div className="flex items-center gap-1">
-                                            <button onClick={() => isMobile ? setMobileDrawer('none') : setShowProperties(false)} className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-red-500"><X className="w-4 h-4" /></button>
+                                            <button onClick={() => isMobile ? setMobileDrawer('none') : setShowProperties(false)} className="p-1 hover:bg-[#fdeeed] rounded-lg transition-colors text-slate-400 hover:text-red-500 cursor-pointer"><X className="w-4 h-4" /></button>
                                         </div>
                                     </div>
                                     <div className="overflow-y-auto custom-scrollbar flex-1 pb-20 md:pb-4">
@@ -17274,9 +17428,203 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         </button>
                                                     )}
                                                     {selectedElement.type === 'quote' && (
-                                                        <button onClick={() => setQuotesModalOpen(true)} className="w-full mb-2 py-1.5 px-3 bg-amber-50 text-amber-700 text-xs font-bold rounded border border-amber-200 hover:bg-amber-100 transition-colors flex items-center justify-center gap-1.5">
-                                                            <Sparkles className="w-3.5 h-3.5 text-amber-600"/> Personalizar Frases Motivacionais
-                                                        </button>
+                                                        <div className="space-y-2.5 mb-3 p-3 bg-gradient-to-b from-[#fff5f5] to-white rounded-2xl border border-[#eedad5] shadow-2xs">
+                                                            <div className="flex items-center justify-between pb-2 border-b border-[#eedad5]">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <div className="w-5 h-5 rounded-md bg-[#b84a56] text-white flex items-center justify-center">
+                                                                        <Sparkles className="w-3 h-3 text-white" />
+                                                                    </div>
+                                                                    <span className="text-[11px] font-bold text-slate-800">Frase Motivacional</span>
+                                                                </div>
+                                                                <span className="text-[10px] text-slate-400 font-medium">366+ Frases / Ano</span>
+                                                            </div>
+
+                                                            {/* Botões de Ação Rápida: Subir Frases Próprias e Catálogo */}
+                                                            <div className="grid grid-cols-2 gap-1.5">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => { setQuotesModalInitialTab('custom'); setQuotesModalOpen(true); }}
+                                                                    className="w-full py-1.5 px-2 bg-emerald-50 text-emerald-800 text-xs font-bold rounded-lg border border-emerald-300 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                                                                    title="Subir arquivo ou colar frases do Excel"
+                                                                >
+                                                                    <Upload className="w-3.5 h-3.5 text-emerald-600"/>
+                                                                    <span>Subir Frases {customQuotes.length > 0 ? `(${customQuotes.length})` : ''}</span>
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => { 
+                                                                        setQuotesModalInitialTab((selectedElement.style.quoteCategory as QuoteCategory) || 'feminine_strength'); 
+                                                                        setQuotesModalOpen(true); 
+                                                                    }}
+                                                                    className="w-full py-1.5 px-2 bg-[#fff5f5] text-[#b84a56] text-xs font-bold rounded-lg border border-[#eedad5] hover:bg-[#fdeeed] transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                                                                    title="Explorar temas e catálogo de frases"
+                                                                >
+                                                                    <Sparkles className="w-3.5 h-3.5 text-[#b84a56]"/>
+                                                                    <span>Ver Catálogo</span>
+                                                                </button>
+                                                            </div>
+
+                                                            {/* Categoria do Tema */}
+                                                            <div className="space-y-1">
+                                                                <label className="block text-[10px] font-bold text-slate-600 uppercase">Tema / Categoria</label>
+                                                                <select
+                                                                    value={selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength'}
+                                                                    onChange={(e) => {
+                                                                        const newCat = e.target.value as QuoteCategory;
+                                                                        updateElementStyle(selectedElement.id, { quoteCategory: newCat });
+                                                                        if (newCat === 'custom' && customQuotes.length === 0) {
+                                                                            setQuotesModalInitialTab('custom');
+                                                                            setQuotesModalOpen(true);
+                                                                        }
+                                                                        if (selectedElement.style.quoteDisplayMode === 'fixed') {
+                                                                            const sample = getRandomQuote(newCat, customQuotes);
+                                                                            updateElementStyle(selectedElement.id, { quoteFixedText: sample });
+                                                                            updateElementContent(selectedElement.id, sample);
+                                                                        }
+                                                                    }}
+                                                                    className="w-full text-xs p-2 border border-[#eedad5] rounded-xl bg-white text-slate-800 font-medium focus:ring-1 focus:ring-[#b84a56] outline-none"
+                                                                >
+                                                                    <option value="custom" className="font-bold text-emerald-800 bg-emerald-50">
+                                                                        📝 Minhas Frases Importadas {customQuotes.length > 0 ? `(${customQuotes.length} salvas)` : '(Vazio - subir frases)'}
+                                                                    </option>
+                                                                    {QUOTE_CATEGORIES_METADATA.map(cat => (
+                                                                        <option key={cat.id} value={cat.id}>
+                                                                            {cat.icon} {cat.name}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+
+                                                            {/* Modo de Exibição */}
+                                                            <div className="space-y-1">
+                                                                <label className="block text-[10px] font-bold text-slate-600 uppercase">Modo de Exibição</label>
+                                                                <div className="grid grid-cols-2 gap-1 p-1 bg-[#faf6f4] rounded-xl border border-[#eedad5]">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => updateElementStyle(selectedElement.id, { quoteDisplayMode: 'daily_rotating' })}
+                                                                        className={`py-1.5 px-1.5 text-[9.5px] font-bold rounded-lg transition-all cursor-pointer text-center ${
+                                                                            selectedElement.style.quoteDisplayMode !== 'fixed'
+                                                                                ? 'bg-[#b84a56] text-white shadow-2xs'
+                                                                                : 'text-slate-600 hover:text-slate-900'
+                                                                        }`}
+                                                                        title="Alterna uma frase diferente a cada um dos 365 dias do ano"
+                                                                    >
+                                                                        🔄 365 Dias (Rotativa)
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            const currentCat = selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength';
+                                                                            const text = selectedElement.style.quoteFixedText || selectedElement.content || getRandomQuote(currentCat);
+                                                                            updateElementStyle(selectedElement.id, { quoteDisplayMode: 'fixed', quoteFixedText: text });
+                                                                            updateElementContent(selectedElement.id, text);
+                                                                        }}
+                                                                        className={`py-1.5 px-1.5 text-[9.5px] font-bold rounded-lg transition-all cursor-pointer text-center ${
+                                                                            selectedElement.style.quoteDisplayMode === 'fixed'
+                                                                                ? 'bg-[#b84a56] text-white shadow-2xs'
+                                                                                : 'text-slate-600 hover:text-slate-900'
+                                                                        }`}
+                                                                        title="Mantém uma única frase fixa escolhida em todas as páginas"
+                                                                    >
+                                                                        📌 Frase Fixa
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Se modo fixo: Textarea de edição + botão sortear */}
+                                                            {selectedElement.style.quoteDisplayMode === 'fixed' ? (
+                                                                <div className="space-y-1.5">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <label className="text-[10px] font-bold text-slate-600 uppercase">Texto da Frase Fixa</label>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const currentCat = selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength';
+                                                                                const randomQ = getRandomQuote(currentCat);
+                                                                                updateElementStyle(selectedElement.id, { quoteFixedText: randomQ });
+                                                                                updateElementContent(selectedElement.id, randomQ);
+                                                                            }}
+                                                                            className="text-[10px] font-bold text-[#b84a56] hover:text-[#9f3d4a] flex items-center gap-1 cursor-pointer"
+                                                                            title="Sortear outra frase desta categoria"
+                                                                        >
+                                                                            <span>🎲 Sortear</span>
+                                                                        </button>
+                                                                    </div>
+                                                                    <textarea
+                                                                        rows={2}
+                                                                        value={selectedElement.style.quoteFixedText || selectedElement.content || ''}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            updateElementStyle(selectedElement.id, { quoteFixedText: val });
+                                                                            updateElementContent(selectedElement.id, val);
+                                                                        }}
+                                                                        placeholder="Digite ou cole sua frase personalizada aqui..."
+                                                                        className="w-full text-xs p-2 border border-[#eedad5] rounded-xl bg-white text-slate-800 italic leading-relaxed focus:ring-1 focus:ring-[#b84a56] outline-none"
+                                                                    />
+                                                                </div>
+                                                            ) : (
+                                                                <div className="p-2 rounded-xl bg-white border border-[#eedad5] text-[10px] text-slate-600 space-y-1">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="font-bold text-[#b84a56] flex items-center gap-1">
+                                                                            <span>✨ Rotação Diária Ativa</span>
+                                                                        </span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setRenderedPreviewCount(prev => prev + 1)}
+                                                                            className="text-[9.5px] font-bold text-[#9f3d4a] hover:underline cursor-pointer"
+                                                                            title="Alternar frase na prévia"
+                                                                        >
+                                                                            Trocar prévia
+                                                                        </button>
+                                                                    </div>
+                                                                    <p className="text-[9.5px] text-slate-500 leading-tight">
+                                                                        Cada dia do ano receberá automaticamente uma frase motivacional única da categoria selecionada.
+                                                                    </p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Estilo / Preset Visual */}
+                                                            <div className="space-y-1">
+                                                                <label className="block text-[10px] font-bold text-slate-600 uppercase">Estilo Visual</label>
+                                                                <div className="grid grid-cols-3 gap-1">
+                                                                    {[
+                                                                        { id: 'minimal', label: 'Minimalista' },
+                                                                        { id: 'quotation_marks', label: 'Com Aspas “ ”' },
+                                                                        { id: 'divider_card', label: 'Cartão ✦' }
+                                                                    ].map(preset => {
+                                                                        const activePreset = selectedElement.style.quoteStylePreset || 'quotation_marks';
+                                                                        const isSelected = activePreset === preset.id;
+                                                                        return (
+                                                                            <button
+                                                                                key={preset.id}
+                                                                                type="button"
+                                                                                onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                    quoteStylePreset: preset.id as any,
+                                                                                    showQuoteMarks: preset.id === 'quotation_marks'
+                                                                                })}
+                                                                                className={`py-1 px-1 text-[9px] font-bold rounded-lg border transition-all text-center truncate cursor-pointer ${
+                                                                                    isSelected
+                                                                                        ? 'bg-[#fff5f5] text-[#b84a56] border-[#b84a56]'
+                                                                                        : 'bg-white text-slate-600 border-[#eedad5] hover:bg-[#faf6f4]'
+                                                                                }`}
+                                                                            >
+                                                                                {preset.label}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Botão de Ação: Abrir Modal Completo */}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setQuotesModalOpen(true)}
+                                                                className="w-full py-1.5 px-2 bg-gradient-to-r from-[#b84a56] to-[#d98b95] hover:from-[#9f3d4a] hover:to-[#b84a56] text-white text-[10.5px] font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+                                                            >
+                                                                <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+                                                                <span>Abrir Catálogo Completo & Categorias</span>
+                                                            </button>
+                                                        </div>
                                                     )}
                                                     {renderTypographyControls({
                                                         fontFamily: selectedElement.style.fontFamily || 'Inter',
@@ -18474,68 +18822,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                         {/* Controles de Zoom */}
                         {!isMobile && (
-                            <div className={`fixed bottom-4 sm:bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 px-3 sm:px-4 py-1.5 sm:py-2 gap-2 sm:gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 max-w-[calc(100vw-32px)] overflow-x-auto no-scrollbar ${showProperties && activeTab === 'editor' ? 'right-4 lg:right-[304px]' : 'right-4 sm:right-6'}`}>
+                            <div className={`fixed bottom-4 sm:bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-[0_10px_30px_rgba(184,74,86,0.12)] border border-[#eedad5] px-3 sm:px-4 py-1.5 sm:py-2 gap-2 sm:gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 max-w-[calc(100vw-32px)] overflow-x-auto no-scrollbar ${showProperties && activeTab === 'editor' ? 'right-4 lg:right-[304px]' : 'right-4 sm:right-6'}`}>
                                 {activeTab === 'editor' && (
                                     <>
-                                        <div className="flex bg-gray-100 p-0.5 rounded-full border border-gray-200 select-none">
+                                        <div className="flex bg-[#fff5f5] p-0.5 rounded-full border border-[#eedad5] select-none">
                                             <button
                                                 onClick={() => setPanMode(false)}
-                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${!panMode ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${!panMode ? 'bg-[#b84a56] shadow-xs text-white' : 'text-slate-500 hover:text-[#9f3d4a]'}`}
                                                 title="Ferramenta Seleção (Atalho: V)"
                                             >
                                                 <MousePointer2 className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => setPanMode(true)}
-                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${panMode ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${panMode ? 'bg-[#b84a56] shadow-xs text-white' : 'text-slate-500 hover:text-[#9f3d4a]'}`}
                                                 title="Ferramenta Mão / Arrastar (Atalho: H ou Segurar Espaço)"
                                             >
                                                 <Hand className="w-4 h-4" />
                                             </button>
                                         </div>
-                                        <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                        <div className="w-px h-6 bg-[#eedad5] mx-1"></div>
                                     </>
                                 )}
                                 <button 
                                     onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} 
-                                    className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                    className="p-1.5 hover:bg-[#fff5f5] rounded-full transition-colors text-slate-500 hover:text-[#b84a56] disabled:opacity-30 cursor-pointer"
                                     title="Diminuir Zoom"
                                     disabled={zoom <= 0.3}
                                 >
                                     <Minus className="w-4 h-4" />
                                 </button>
                                 <div className="flex flex-col items-center min-w-[50px] select-none">
-                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight leading-none mb-0.5">Zoom</span>
-                                    <span className="text-xs font-bold text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight leading-none mb-0.5">Zoom</span>
+                                    <span className="text-xs font-black text-[#9f3d4a] tabular-nums">{Math.round(zoom * 100)}%</span>
                                 </div>
                                 <button 
                                     onClick={() => setZoom(Math.min(3, zoom + 0.1))} 
-                                    className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                    className="p-1.5 hover:bg-[#fff5f5] rounded-full transition-colors text-slate-500 hover:text-[#b84a56] disabled:opacity-30 cursor-pointer"
                                     title="Aumentar Zoom"
                                     disabled={zoom >= 3}
                                 >
                                     <Plus className="w-4 h-4" />
                                 </button>
-                                <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                <div className="w-px h-6 bg-[#eedad5] mx-1"></div>
                                 <button 
                                     onClick={handleFitToScreen} 
-                                    className="px-2.5 py-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-colors flex items-center gap-1 cursor-pointer"
+                                    className="px-2.5 py-1 text-[10px] font-bold text-[#9f3d4a] bg-[#fff5f5] hover:bg-[#fdeeed] rounded-full transition-colors flex items-center gap-1 border border-[#eedad5] cursor-pointer"
                                     title="Ajustar à Tela (Tamanho ideal para seu monitor)"
                                 >
-                                    <Maximize2 className="w-3 h-3" />
+                                    <Maximize2 className="w-3 h-3 text-[#b84a56]" />
                                     <span>Ajustar</span>
                                 </button>
                                 <button 
                                     onClick={() => setZoom(1)} 
-                                    className="text-[9px] font-bold text-gray-500 hover:text-indigo-600 uppercase tracking-widest px-2 py-1 hover:bg-gray-50 rounded transition-colors cursor-pointer"
+                                    className="text-[9px] font-bold text-slate-500 hover:text-[#b84a56] uppercase tracking-widest px-2 py-1 hover:bg-[#fff5f5] rounded transition-colors cursor-pointer"
                                 >
                                     100%
                                 </button>
-                                <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                <div className="w-px h-6 bg-[#eedad5] mx-1"></div>
                                 <button 
                                     onClick={handlePrintRequest} 
                                     disabled={printStatus !== 'idle'} 
-                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-xs font-bold shadow-md shadow-indigo-600/20 cursor-pointer transition-all active:scale-95 shrink-0"
+                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-full text-xs font-bold shadow-md shadow-[#b84a56]/20 cursor-pointer transition-all active:scale-95 shrink-0"
                                     title="Baixar PDF do Miolo Pronto para Impressão"
                                 >
                                     <FileDown className="w-3.5 h-3.5 text-white" />
@@ -18546,38 +18894,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                 )}
                 {activeTab === 'preview' && (
-                    <div className="flex-1 w-full overflow-auto p-8 custom-scrollbar bg-gray-500">
+                    <div className="flex-1 w-full overflow-auto p-8 custom-scrollbar bg-[#2b2224]">
                         <div className="max-w-[95vw] md:max-w-6xl mx-auto">
                             <div id="print-area">
                                 {generatedData.length === 0 ? (<div className="text-center py-20 text-white">Carregando visualização...</div>) : (
                                     <div className="space-y-4">
-                                        <div className="p-2 bg-white/90 backdrop-blur-sm rounded-lg shadow-md sticky top-2 z-50 flex items-center justify-between no-print border border-gray-100 max-w-3xl mx-auto mb-6">
+                                        <div className="p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-[0_10px_30px_rgba(184,74,86,0.12)] sticky top-2 z-50 flex items-center justify-between no-print border border-[#eedad5] max-w-3xl mx-auto mb-6">
                                             <div className="flex items-center gap-3 pl-2">
-                                                <div className="w-1.5 h-6 bg-indigo-600 rounded-full"></div>
+                                                <div className="w-1.5 h-6 bg-[#b84a56] rounded-full"></div>
                                                 <div className="flex flex-col">
-                                                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Visualizando</span>
-                                                    <span className="text-sm font-black text-indigo-700 leading-tight">
+                                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">Visualizando</span>
+                                                    <span className="text-sm font-black text-[#9f3d4a] leading-tight">
                                                         {actualTotalPagesCount} Páginas
                                                     </span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-3">
                                                 {/* Zoom nos controles superiores do modo visualizar */}
-                                                <div className="flex items-center gap-1 bg-gray-100/90 p-1 rounded-lg border border-gray-200 shadow-xs">
+                                                <div className="flex items-center gap-1 bg-[#fff5f5] p-1 rounded-xl border border-[#eedad5] shadow-xs">
                                                     <button
                                                         onClick={() => setZoom(Math.max(0.3, zoom - 0.1))}
-                                                        className="p-1 hover:bg-white rounded transition-colors text-gray-600 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                                        className="p-1 hover:bg-white rounded-lg transition-colors text-slate-600 hover:text-[#b84a56] disabled:opacity-30 cursor-pointer"
                                                         title="Diminuir Zoom"
                                                         disabled={zoom <= 0.3}
                                                     >
                                                         <Minus className="w-3.5 h-3.5" />
                                                     </button>
                                                     <div className="px-1.5 text-center min-w-[46px] select-none">
-                                                        <span className="text-xs font-black text-indigo-600 tabular-nums">{Math.round(zoom * 100)}%</span>
+                                                        <span className="text-xs font-black text-[#9f3d4a] tabular-nums">{Math.round(zoom * 100)}%</span>
                                                     </div>
                                                     <button
                                                         onClick={() => setZoom(Math.min(3, zoom + 0.1))}
-                                                        className="p-1 hover:bg-white rounded transition-colors text-gray-600 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                                        className="p-1 hover:bg-white rounded-lg transition-colors text-slate-600 hover:text-[#b84a56] disabled:opacity-30 cursor-pointer"
                                                         title="Aumentar Zoom"
                                                         disabled={zoom >= 3}
                                                     >
@@ -18585,7 +18933,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     </button>
                                                     <button
                                                         onClick={() => setZoom(1)}
-                                                        className="text-[9px] font-bold text-gray-500 hover:text-indigo-600 uppercase px-2 py-0.5 hover:bg-white rounded transition-colors border-l border-gray-200 ml-0.5 cursor-pointer"
+                                                        className="text-[9px] font-bold text-slate-500 hover:text-[#b84a56] uppercase px-2 py-0.5 hover:bg-white rounded-lg transition-colors border-l border-[#eedad5] ml-0.5 cursor-pointer"
                                                         title="Resetar Zoom"
                                                     >
                                                         100%
@@ -18593,9 +18941,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 </div>
 
                                                 <div className="relative">
-                                                    <Search className="w-3 h-3 absolute left-2 top-2 text-gray-400 pointer-events-none" />
+                                                    <Search className="w-3 h-3 absolute left-2 top-2 text-[#b84a56] pointer-events-none" />
                                                     <select 
-                                                        className="text-[10px] pl-7 pr-3 py-1.5 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition-all cursor-pointer" 
+                                                        className="text-[10px] pl-7 pr-3 py-1.5 border border-[#eedad5] rounded-xl bg-white focus:ring-1 focus:ring-[#b84a56] outline-none transition-all cursor-pointer text-slate-700 font-semibold" 
                                                         onChange={(e) => handleScrollToMonth(parseInt(e.target.value))}
                                                     >
                                                         <option value="">Pular para Mês...</option>
@@ -18615,17 +18963,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                                                 <button
                                                     onClick={() => setActiveTab('mockup')}
-                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all cursor-pointer"
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#fdeeed] hover:bg-[#f5ded9] text-[#9f3d4a] border border-[#eedad5] rounded-xl text-[10px] font-bold shadow-xs transition-all cursor-pointer"
                                                     title="Abrir no Estúdio de Mockup 3D"
                                                 >
-                                                    <Box className="w-3.5 h-3.5" />
+                                                    <Box className="w-3.5 h-3.5 text-[#b84a56]" />
                                                     <span className="hidden sm:inline">Mockup 3D</span>
                                                 </button>
 
                                                 <button
                                                     onClick={handlePrintRequest}
                                                     disabled={printStatus !== 'idle'}
-                                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-md shadow-indigo-600/30 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
+                                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-xl text-xs font-bold shadow-md shadow-[#b84a56]/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
                                                     title="Baixar PDF do Miolo Pronto para Impressão"
                                                 >
                                                     <FileDown className="w-3.5 h-3.5 text-white" />
@@ -18798,6 +19146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     <button onClick={() => { addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Moon className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Lua</span></button>
                                     <button onClick={() => { addElement('holiday', 'Feriado'); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><Flag className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Feriado</span></button>
                                     <button onClick={() => { handleInsertSpecialElement(); setIsSpecialDatesModalOpen(true); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-rose-100 rounded-xl bg-rose-50/50 gap-1 shadow-2xs hover:border-rose-300 active:scale-95 transition-transform"><CalendarHeart className="w-5 h-5 text-rose-600"/><span className="text-[9px] font-bold text-rose-700 uppercase">Datas & Contagem</span></button>
+                                    <button onClick={() => { setQuotesModalOpen(true); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-[#eedad5] rounded-xl bg-[#fff5f5] gap-1 shadow-2xs hover:border-[#b84a56] active:scale-95 transition-transform"><Sparkles className="w-5 h-5 text-[#b84a56]"/><span className="text-[9px] font-bold text-[#9f3d4a] uppercase">Frases</span></button>
                                     <button onClick={() => { addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><BookOpen className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Versículo</span></button>
                                     <button onClick={() => { addElement('permanent_day_header', 'Agenda Perm.', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 }); setMobileDrawer('none'); }} className="p-2.5 flex flex-col items-center justify-center border border-gray-100 rounded-xl bg-white gap-1 shadow-2xs hover:border-indigo-300 active:scale-95 transition-transform"><List className="w-5 h-5 text-indigo-600"/><span className="text-[9px] font-bold text-gray-600 uppercase">Agenda Perm.</span></button>
 

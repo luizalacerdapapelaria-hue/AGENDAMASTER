@@ -191,19 +191,19 @@ export const NOTEBOOK_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
 
 export const renderObjectiveIcon = (iconName: ObjectiveModelOption['iconName']) => {
   switch (iconName) {
-    case 'calendar': return <Calendar className="w-6 h-6 text-orange-400" />;
-    case 'dollar': return <DollarSign className="w-6 h-6 text-emerald-400" />;
-    case 'clock': return <Clock className="w-6 h-6 text-amber-400" />;
-    case 'sparkles': return <Sparkles className="w-6 h-6 text-rose-400" />;
-    case 'columns': return <Columns className="w-6 h-6 text-amber-400" />;
-    case 'check': return <CheckSquare className="w-6 h-6 text-orange-400" />;
-    case 'wallet': return <Wallet className="w-6 h-6 text-emerald-400" />;
-    case 'book': return <BookOpen className="w-6 h-6 text-purple-400" />;
-    case 'lines': return <FileText className="w-6 h-6 text-stone-300" />;
-    case 'dots': return <Grid3X3 className="w-6 h-6 text-stone-300" />;
-    case 'grid': return <Grid className="w-6 h-6 text-stone-300" />;
-    case 'square': return <Square className="w-6 h-6 text-amber-400" />;
-    default: return <Sparkles className="w-6 h-6 text-orange-400" />;
+    case 'calendar': return <Calendar className="w-6 h-6 text-[#b84a56]" />;
+    case 'dollar': return <DollarSign className="w-6 h-6 text-[#9f3d4a]" />;
+    case 'clock': return <Clock className="w-6 h-6 text-[#b84a56]" />;
+    case 'sparkles': return <Sparkles className="w-6 h-6 text-[#c45663]" />;
+    case 'columns': return <Columns className="w-6 h-6 text-[#b84a56]" />;
+    case 'check': return <CheckSquare className="w-6 h-6 text-[#b84a56]" />;
+    case 'wallet': return <Wallet className="w-6 h-6 text-[#9f3d4a]" />;
+    case 'book': return <BookOpen className="w-6 h-6 text-[#b84a56]" />;
+    case 'lines': return <FileText className="w-6 h-6 text-[#b84a56]" />;
+    case 'dots': return <Grid3X3 className="w-6 h-6 text-[#b84a56]" />;
+    case 'grid': return <Grid className="w-6 h-6 text-[#b84a56]" />;
+    case 'square': return <Square className="w-6 h-6 text-[#b84a56]" />;
+    default: return <Sparkles className="w-6 h-6 text-[#c45663]" />;
   }
 };
 
@@ -616,6 +616,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               includeHolidays: true,
               includeMoonPhases: defaultValues?.includeMoonPhases ?? true,
               includeQuotes: true,
+              quoteCategory: defaultValues?.quoteCategory || 'feminine_strength',
               includeVerses: true,
               municipalHolidays,
               elements: finalElements,
@@ -666,6 +667,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           includeHolidays: defaultValues?.includeHolidays ?? true,
           includeMoonPhases: defaultValues?.includeMoonPhases ?? true,
           includeQuotes: defaultValues?.includeQuotes ?? true,
+          quoteCategory: defaultValues?.quoteCategory || 'feminine_strength',
           includeVerses: defaultValues?.includeVerses ?? true,
           municipalHolidays,
           elements,
@@ -707,29 +709,29 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
   if (step === 'type') {
     return (
-      <div className="min-h-screen bg-stone-950 text-stone-100 flex items-center justify-center p-6 font-sans relative">
+      <div className="min-h-screen bg-gradient-to-b from-[#faf6f4] via-[#fffbf9] to-[#f9f1ee] text-slate-800 flex items-center justify-center p-6 font-sans antialiased relative">
         {/* Background glow */}
-        <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+        <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-80 bg-[#b84a56]/5 rounded-full blur-3xl pointer-events-none z-0" />
 
         {onLogout && (
           <button
             onClick={onLogout}
-            className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-stone-400 hover:text-white bg-stone-900 hover:bg-stone-850 border border-stone-800 rounded-xl transition-all shadow-sm cursor-pointer z-50"
+            className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-[#eedad5] rounded-xl transition-all shadow-xs cursor-pointer z-50"
           >
-            <LogOut className="w-4 h-4 text-orange-400" />
+            <LogOut className="w-4 h-4 text-[#b84a56]" />
             <span>Sair do Aplicativo</span>
           </button>
         )}
         <div className="max-w-5xl w-full flex flex-col gap-8 relative z-10">
           <div className="text-center space-y-2.5">
-            <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 px-4 py-1.5 rounded-full text-xs font-bold text-orange-400 uppercase tracking-widest shadow-xs">
-              <Sparkles className="w-3.5 h-3.5 text-orange-400" />
-              <span>Agenda Master AI</span>
+            <div className="inline-flex items-center gap-2 bg-[#fdeeed] border border-[#f5ded9] px-4 py-1.5 rounded-full text-xs font-bold text-[#9f3d4a] uppercase tracking-widest shadow-2xs">
+              <Sparkles className="w-3.5 h-3.5 text-[#b84a56]" />
+              <span>Agenda Master</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
               O que você vai criar hoje?
             </h1>
-            <p className="text-sm text-stone-400 font-medium max-w-lg mx-auto">
+            <p className="text-sm text-slate-600 font-normal max-w-lg mx-auto leading-relaxed">
               Escolha o tipo de projeto que deseja criar para começar a personalizar no Agenda Master.
             </p>
           </div>
@@ -738,18 +740,18 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             {/* Agenda */}
             <button 
               onClick={() => handleProjectTypeSelect('agenda')}
-              className="group bg-stone-900 p-7 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-orange-500/10 border-2 border-stone-800 hover:border-orange-500 transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-white p-7 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-14 h-14 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-orange-400 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-orange-500 group-hover:to-amber-500 group-hover:text-white transition-all shadow-md">
+              <div className="w-14 h-14 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
                 <Calendar className="w-7 h-7 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-orange-400 transition-colors mb-1.5">
+                <h3 className="text-lg font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1.5">
                   Agenda
                 </h3>
-                <p className="text-xs text-stone-400 leading-relaxed font-medium">Layouts diários. 1 ou 2 dias por página com horários ou pautado.</p>
+                <p className="text-xs text-slate-500 leading-relaxed font-normal">Layouts diários. 1 ou 2 dias por página com horários ou pautado.</p>
               </div>
-              <div className="mt-auto px-4 py-2 bg-stone-800 border border-stone-700 rounded-full text-[10px] font-bold text-orange-400 group-hover:bg-orange-600 group-hover:text-white transition-all uppercase">
+              <div className="mt-auto px-5 py-2 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[11px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
                 Criar Agenda
               </div>
             </button>
@@ -757,18 +759,18 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             {/* Planner */}
             <button 
               onClick={() => handleProjectTypeSelect('planner')}
-              className="group bg-stone-900 p-7 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-amber-500/10 border-2 border-stone-800 hover:border-amber-500 transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-white p-7 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-14 h-14 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-amber-400 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-amber-500 group-hover:to-orange-500 group-hover:text-white transition-all shadow-md">
+              <div className="w-14 h-14 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
                 <BookOpen className="w-7 h-7 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-amber-400 transition-colors mb-1.5">
+                <h3 className="text-lg font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1.5">
                   Planner
                 </h3>
-                <p className="text-xs text-stone-400 leading-relaxed font-medium">Visão semanal em duas páginas. Metas, hábitos e finanças.</p>
+                <p className="text-xs text-slate-500 leading-relaxed font-normal">Visão semanal em duas páginas. Metas, hábitos e finanças.</p>
               </div>
-              <div className="mt-auto px-4 py-2 bg-stone-800 border border-stone-700 rounded-full text-[10px] font-bold text-amber-400 group-hover:bg-amber-600 group-hover:text-white transition-all uppercase">
+              <div className="mt-auto px-5 py-2 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[11px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
                 Criar Planner
               </div>
             </button>
@@ -776,18 +778,18 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             {/* Caderno */}
             <button 
               onClick={() => handleProjectTypeSelect('notebook')}
-              className="group bg-stone-900 p-7 rounded-3xl shadow-xl hover:shadow-2xl hover:shadow-orange-500/10 border-2 border-stone-800 hover:border-orange-500 transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-white p-7 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-14 h-14 bg-stone-800 border border-stone-700 rounded-2xl flex items-center justify-center text-stone-300 group-hover:scale-110 group-hover:bg-gradient-to-br group-hover:from-stone-700 group-hover:to-stone-900 group-hover:text-white transition-all shadow-md">
+              <div className="w-14 h-14 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
                 <PenTool className="w-7 h-7 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-stone-300 transition-colors mb-1.5">
+                <h3 className="text-lg font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1.5">
                   Caderno
                 </h3>
-                <p className="text-xs text-stone-400 leading-relaxed font-medium">Pautados, quadriculados, pontilhados ou em branco.</p>
+                <p className="text-xs text-slate-500 leading-relaxed font-normal">Pautados, quadriculados, pontilhados ou em branco.</p>
               </div>
-              <div className="mt-auto px-4 py-2 bg-stone-800 border border-stone-700 rounded-full text-[10px] font-bold text-stone-300 group-hover:bg-stone-700 group-hover:text-white transition-all uppercase">
+              <div className="mt-auto px-5 py-2 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[11px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
                 Criar Caderno
               </div>
             </button>
@@ -796,9 +798,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           <div className="flex justify-center mt-2">
             <button 
               onClick={handleImportClick}
-              className="flex items-center gap-2 px-6 py-3 bg-stone-900 hover:bg-stone-850 rounded-2xl text-xs font-bold text-stone-300 hover:text-orange-400 transition-all border border-stone-800 hover:border-orange-500/50 shadow-md cursor-pointer"
+              className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
             >
-              <Upload className="w-4 h-4 text-orange-400" />
+              <Upload className="w-4 h-4 text-[#b84a56]" />
               <span>OU IMPORTAR PROJETO EXISTENTE (.JSON)</span>
             </button>
             <input 
@@ -839,17 +841,17 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       : 'Escolha o estilo de miolo para as páginas do seu caderno.';
 
     return (
-      <div className="min-h-screen bg-stone-950 text-stone-100 flex items-center justify-center p-6 font-sans relative">
+      <div className="min-h-screen bg-gradient-to-b from-[#faf6f4] via-[#fffbf9] to-[#f9f1ee] text-slate-800 flex items-center justify-center p-6 font-sans antialiased relative">
         {/* Background glow */}
-        <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+        <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-80 bg-[#b84a56]/5 rounded-full blur-3xl pointer-events-none z-0" />
 
         {/* Top actions */}
         <div className="absolute top-6 left-6 z-50">
           <button
             onClick={() => setStep('type')}
-            className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-stone-400 hover:text-white bg-stone-900 hover:bg-stone-850 border border-stone-800 rounded-xl transition-all shadow-sm cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-[#eedad5] rounded-xl transition-all shadow-xs cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4 text-orange-400" />
+            <ArrowLeft className="w-4 h-4 text-[#b84a56]" />
             <span>Voltar</span>
           </button>
         </div>
@@ -857,9 +859,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
         {onLogout && (
           <button
             onClick={onLogout}
-            className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-stone-400 hover:text-white bg-stone-900 hover:bg-stone-850 border border-stone-800 rounded-xl transition-all shadow-sm cursor-pointer z-50"
+            className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-[#eedad5] rounded-xl transition-all shadow-xs cursor-pointer z-50"
           >
-            <LogOut className="w-4 h-4 text-orange-400" />
+            <LogOut className="w-4 h-4 text-[#b84a56]" />
             <span>Sair do Aplicativo</span>
           </button>
         )}
@@ -867,14 +869,14 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
         <div className="max-w-4xl w-full flex flex-col gap-8 relative z-10 py-10">
           {/* Header */}
           <div className="text-center space-y-2.5">
-            <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 px-4 py-1.5 rounded-full text-xs font-bold text-orange-400 uppercase tracking-widest shadow-xs">
-              <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+            <div className="inline-flex items-center gap-2 bg-[#fdeeed] border border-[#f5ded9] px-4 py-1.5 rounded-full text-xs font-bold text-[#9f3d4a] uppercase tracking-widest shadow-2xs">
+              <Sparkles className="w-3.5 h-3.5 text-[#b84a56]" />
               <span>Passo 2 • Escolha do Modelo</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
               {title}
             </h1>
-            <p className="text-sm text-stone-400 font-medium max-w-lg mx-auto">
+            <p className="text-sm text-slate-600 font-normal max-w-lg mx-auto leading-relaxed">
               {subtitle}
             </p>
           </div>
@@ -887,47 +889,33 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 <button
                   key={opt.id}
                   onClick={() => handleSelectObjectiveModel(opt)}
-                  className={`group bg-stone-900 hover:bg-stone-850 p-6 rounded-3xl border-2 transition-all flex flex-col text-left gap-4 relative overflow-hidden cursor-pointer shadow-lg hover:shadow-2xl active:scale-99 ${
+                  className={`group bg-white hover:bg-[#fff9f8] p-6 rounded-3xl border-2 transition-all flex flex-col text-left gap-4 relative overflow-hidden cursor-pointer shadow-xs hover:shadow-lg active:scale-99 ${
                     isBlank 
-                      ? 'border-amber-500/40 hover:border-amber-400 hover:shadow-amber-500/10' 
-                      : 'border-stone-800 hover:border-orange-500 hover:shadow-orange-500/10'
+                      ? 'border-[#eedad5] hover:border-[#b84a56]' 
+                      : 'border-[#eedad5] hover:border-[#b84a56]'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className={`w-13 h-13 bg-stone-800 border rounded-2xl flex items-center justify-center transition-all shadow-inner ${
-                      isBlank
-                        ? 'border-amber-500/30 group-hover:scale-105 group-hover:bg-amber-500/15 group-hover:border-amber-500/50'
-                        : 'border-stone-700/80 group-hover:scale-105 group-hover:bg-orange-500/15 group-hover:border-orange-500/40'
-                    }`}>
+                    <div className="w-13 h-13 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center transition-all shadow-xs text-[#b84a56] group-hover:scale-105 group-hover:bg-[#b84a56] group-hover:text-white">
                       {renderObjectiveIcon(opt.iconName)}
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors border ${
-                      isBlank
-                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 group-hover:border-amber-400'
-                        : 'bg-stone-800 text-stone-300 border-stone-700 group-hover:border-orange-500/40 group-hover:text-orange-300'
-                    }`}>
+                    <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors border bg-[#fcedea] text-[#9f3d4a] border-[#f8d4ce]">
                       {opt.tag}
                     </span>
                   </div>
 
                   <div className="space-y-1.5 flex-1">
-                    <h3 className={`text-lg font-black transition-colors ${
-                      isBlank ? 'text-white group-hover:text-amber-300' : 'text-white group-hover:text-orange-400'
-                    }`}>
+                    <h3 className="text-lg font-black transition-colors text-slate-900 group-hover:text-[#b84a56]">
                       {opt.title}
                     </h3>
-                    <p className="text-xs text-stone-400 leading-relaxed font-medium">
+                    <p className="text-xs text-slate-500 leading-relaxed font-normal">
                       {opt.subtitle}
                     </p>
                   </div>
 
-                  <div className={`pt-2 border-t flex items-center justify-between text-xs font-bold transition-colors ${
-                    isBlank
-                      ? 'border-stone-800 text-stone-400 group-hover:text-amber-300'
-                      : 'border-stone-800/80 text-stone-400 group-hover:text-orange-400'
-                  }`}>
+                  <div className="pt-2 border-t border-[#f2deda] flex items-center justify-between text-xs font-bold transition-colors text-slate-500 group-hover:text-[#b84a56]">
                     <span>Avançar para Configuração</span>
-                    <ArrowRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform" />
+                    <ArrowRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform text-[#b84a56]" />
                   </div>
                 </button>
               );
@@ -935,7 +923,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           </div>
 
           <div className="text-center pt-2">
-            <p className="text-xs text-stone-500 font-medium">
+            <p className="text-xs text-slate-500 font-medium">
               Na próxima página de configuração você definirá layout (1 ou 2 dias por página, semanal), tamanho do papel, datas e margens.
             </p>
           </div>
@@ -945,28 +933,28 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6 font-sans relative">
+    <div className="min-h-screen bg-gradient-to-b from-[#faf6f4] via-[#fffbf9] to-[#f9f1ee] flex items-center justify-center p-6 font-sans antialiased relative">
       {onLogout && (
         <button
           onClick={onLogout}
-          className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-gray-600 hover:text-red-650 bg-white hover:bg-red-50/50 border border-gray-200 hover:border-red-200 rounded-xl transition-all shadow-sm cursor-pointer z-50"
+          className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-[#eedad5] rounded-xl transition-all shadow-xs cursor-pointer z-50"
         >
-          <LogOut className="w-4 h-4 text-gray-400" />
+          <LogOut className="w-4 h-4 text-[#b84a56]" />
           <span>Sair do Aplicativo</span>
         </button>
       )}
-      <div className="max-w-5xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row">
+      <div className="max-w-5xl w-full bg-white rounded-3xl shadow-[0_16px_50px_rgba(184,74,86,0.08)] border border-[#eedad5] overflow-hidden flex flex-col md:flex-row">
         {/* Left Side: Visual Preview */}
-        <div className="w-full md:w-1/3 bg-orange-600 p-8 text-white flex flex-col justify-between">
+        <div className="w-full md:w-1/3 bg-gradient-to-b from-[#b84a56] via-[#c45663] to-[#9f3d4a] p-8 text-white flex flex-col justify-between">
             <div>
                 <button 
                   onClick={() => setStep('template')}
-                  className="mb-6 flex items-center gap-2 text-orange-100 hover:text-white transition-colors text-xs font-black uppercase tracking-widest cursor-pointer"
+                  className="mb-6 flex items-center gap-2 text-rose-100 hover:text-white transition-colors text-xs font-black uppercase tracking-widest cursor-pointer"
                 >
                   <ArrowLeft className="w-4 h-4" /> Voltar para Modelos
                 </button>
                 <h2 className="text-2xl font-black mb-2 text-white">{defaultValues ? 'Editar Projeto' : 'Novo Projeto'}</h2>
-                <div className="text-orange-100 text-sm font-semibold">
+                <div className="text-rose-100 text-sm font-semibold">
                   {getSelectedModelName()}
                 </div>
                 
@@ -997,7 +985,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                     }}
                 >
                     {/* Margins Visualization */}
-                    <div className="absolute border-2 border-dashed border-orange-400"
+                    <div className="absolute border-2 border-dashed border-[#b84a56]/50"
                         style={{
                             top: `${margins.top/2}px`,
                             bottom: `${margins.bottom/2}px`,
@@ -1006,16 +994,16 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                         }}
                     >
                         {/* Layout Visualization Placeholder */}
-                        <div className="w-full h-full flex flex-col p-2 gap-1 opacity-30">
-                            {layoutType === '1_per_page' && <div className="flex-1 bg-orange-950 rounded"></div>}
-                            {layoutType === '2_per_page' && <><div className="flex-1 bg-orange-950 rounded"></div><div className="flex-1 bg-orange-950 rounded"></div></>}
-                            {layoutType === '1_per_page_weekend_shared' && <div className="flex-1 bg-orange-950 rounded border-2 border-white"></div>}
-                            {layoutType === 'weekly_vertical' && <div className="flex-1 flex gap-1"><div className="flex-1 bg-orange-950 rounded"></div><div className="flex-1 bg-orange-950 rounded"></div><div className="flex-1 bg-orange-950 rounded"></div></div>}
-                            {layoutType === 'weekly_horizontal' && <div className="flex-1 flex flex-col gap-1"><div className="flex-1 bg-orange-950 rounded"></div><div className="flex-1 bg-orange-950 rounded"></div><div className="flex-1 bg-orange-950 rounded"></div></div>}
-                            {(projectType === 'notebook' || projectType === 'devotional') && <div className="flex-1 bg-orange-950/60 rounded flex flex-col p-1 gap-1">
-                                <div className="h-0.5 bg-orange-400 w-1/2"></div>
-                                <div className="h-0.5 bg-orange-400/70 w-3/4"></div>
-                                <div className="h-0.5 bg-orange-400/70 w-full"></div>
+                        <div className="w-full h-full flex flex-col p-2 gap-1 opacity-40">
+                            {layoutType === '1_per_page' && <div className="flex-1 bg-[#b84a56] rounded"></div>}
+                            {layoutType === '2_per_page' && <><div className="flex-1 bg-[#b84a56] rounded"></div><div className="flex-1 bg-[#b84a56] rounded"></div></>}
+                            {layoutType === '1_per_page_weekend_shared' && <div className="flex-1 bg-[#b84a56] rounded border-2 border-white"></div>}
+                            {layoutType === 'weekly_vertical' && <div className="flex-1 flex gap-1"><div className="flex-1 bg-[#b84a56] rounded"></div><div className="flex-1 bg-[#b84a56] rounded"></div><div className="flex-1 bg-[#b84a56] rounded"></div></div>}
+                            {layoutType === 'weekly_horizontal' && <div className="flex-1 flex flex-col gap-1"><div className="flex-1 bg-[#b84a56] rounded"></div><div className="flex-1 bg-[#b84a56] rounded"></div><div className="flex-1 bg-[#b84a56] rounded"></div></div>}
+                            {(projectType === 'notebook' || projectType === 'devotional') && <div className="flex-1 bg-[#b84a56]/60 rounded flex flex-col p-1 gap-1">
+                                <div className="h-0.5 bg-[#b84a56] w-1/2"></div>
+                                <div className="h-0.5 bg-[#b84a56]/70 w-3/4"></div>
+                                <div className="h-0.5 bg-[#b84a56]/70 w-full"></div>
                             </div>}
                         </div>
                     </div>
@@ -1025,7 +1013,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 </div>
             </div>
 
-            <div className="text-xs text-white font-medium bg-black/20 px-3 py-1.5 rounded-lg border border-white/10">
+            <div className="text-xs text-white font-medium bg-black/20 px-3 py-1.5 rounded-xl border border-white/10">
                 Usuário: <span className="font-bold text-white">{userEmail}</span>
             </div>
         </div>
@@ -1035,25 +1023,25 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             <div className="space-y-8">
                 
                 {/* Nome do Projeto */}
-                <div className="bg-orange-50/80 p-6 rounded-2xl border-2 border-orange-200 mb-2 shadow-xs">
-                    <label className="flex items-center text-sm font-black text-orange-950 uppercase mb-3 gap-2">
-                        <FileText className="w-4 h-4 text-orange-600" /> Nome do Projeto
+                <div className="bg-[#fdeeed] p-6 rounded-2xl border-2 border-[#f5ded9] mb-2 shadow-2xs">
+                    <label className="flex items-center text-sm font-black text-[#9f3d4a] uppercase mb-3 gap-2">
+                        <FileText className="w-4 h-4 text-[#b84a56]" /> Nome do Projeto
                     </label>
                     <input 
                         type="text" 
                         value={projectName} 
                         onChange={(e) => setProjectName(e.target.value)} 
-                        placeholder="Ex: Agenda 2025 Florada"
-                        className="w-full p-3.5 border-2 border-orange-300 focus:border-orange-600 bg-white rounded-xl focus:ring-2 focus:ring-orange-500/30 outline-none text-lg font-black text-gray-950 placeholder:text-gray-400 shadow-sm"
+                        placeholder="Ex: Agenda 2026 Florada"
+                        className="w-full p-3.5 border-2 border-[#eedad5] focus:border-[#b84a56] bg-white rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 outline-none text-lg font-black text-slate-900 placeholder:text-slate-400 shadow-xs"
                     />
-                    <p className="text-xs text-orange-950 mt-2 font-bold">Esse nome será usado para salvar o arquivo no seu computador.</p>
+                    <p className="text-xs text-slate-600 mt-2 font-medium">Esse nome será usado para salvar o arquivo no seu computador.</p>
                 </div>
 
                 {/* Layout Type Selection (New) - Esconder se for notebook ou devotional */}
                 {!(projectType === 'notebook' || projectType === 'devotional') && (
                     <div>
-                        <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                            <Grid className="w-4 h-4 text-orange-600" /> Layout do Miolo
+                        <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                            <Grid className="w-4 h-4 text-[#b84a56]" /> Layout do Miolo
                         </label>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             {projectType === 'agenda' ? (
@@ -1061,38 +1049,38 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('1_per_page')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex items-center justify-center ${layoutType === '1_per_page' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`w-4 h-6 rounded-xs ${layoutType === '1_per_page' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex items-center justify-center ${layoutType === '1_per_page' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`w-4 h-6 rounded-xs ${layoutType === '1_per_page' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page' ? 'text-orange-950' : 'text-gray-900'}`}>1 Dia / Pág</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>1 Dia / Pág</span>
                                     </button>
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('2_per_page')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '2_per_page' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '2_per_page' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '2_per_page' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`flex-1 rounded-xs ${layoutType === '2_per_page' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className="h-0.5 bg-gray-400"></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === '2_per_page' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '2_per_page' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`flex-1 rounded-xs ${layoutType === '2_per_page' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className="h-0.5 bg-gray-300"></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === '2_per_page' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === '2_per_page' ? 'text-orange-950' : 'text-gray-900'}`}>2 Dias / Pág</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === '2_per_page' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>2 Dias / Pág</span>
                                     </button>
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('1_per_page_weekend_shared')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page_weekend_shared' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '1_per_page_weekend_shared' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`flex-[2] rounded-xs border border-dashed ${layoutType === '1_per_page_weekend_shared' ? 'bg-orange-400/80 border-orange-600' : 'bg-gray-500 border-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '1_per_page_weekend_shared' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`flex-[2] rounded-xs border border-dashed ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]/60 border-[#b84a56]' : 'bg-gray-400 border-gray-500'}`}></div>
                                             <div className="flex-1 flex gap-0.5">
-                                                <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-orange-600' : 'bg-gray-700'}`}></div>
-                                                <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-orange-600' : 'bg-gray-700'}`}></div>
+                                                <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]' : 'bg-gray-600'}`}></div>
+                                                <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]' : 'bg-gray-600'}`}></div>
                                             </div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page_weekend_shared' ? 'text-orange-950' : 'text-gray-900'}`}>Fim de Semana Dividido</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page_weekend_shared' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Fim de Semana Dividido</span>
                                     </button>
                                 </>
                             ) : (
@@ -1100,79 +1088,79 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('weekly_vertical')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_vertical' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_vertical' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex p-0.5 gap-0.5 ${layoutType === 'weekly_vertical' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_vertical' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_vertical' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_vertical' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex p-0.5 gap-0.5 ${layoutType === 'weekly_vertical' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_vertical' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_vertical' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_vertical' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_vertical' ? 'text-orange-950' : 'text-gray-900'}`}>Semanal Vertical (2 Págs)</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_vertical' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Semanal Vertical (2 Págs)</span>
                                     </button>
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('weekly_horizontal')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_horizontal' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_horizontal' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === 'weekly_horizontal' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_horizontal' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_horizontal' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_horizontal' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === 'weekly_horizontal' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_horizontal' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_horizontal' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_horizontal' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_horizontal' ? 'text-orange-950' : 'text-gray-900'}`}>Semanal Horizontal (2 Págs)</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_horizontal' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Semanal Horizontal (2 Págs)</span>
                                     </button>
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('weekly_one_page_vertical')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_one_page_vertical' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_one_page_vertical' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex p-0.5 gap-0.5 ${layoutType === 'weekly_one_page_vertical' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_vertical' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_vertical' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_vertical' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex p-0.5 gap-0.5 ${layoutType === 'weekly_one_page_vertical' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_vertical' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_vertical' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_vertical' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_one_page_vertical' ? 'text-orange-950' : 'text-gray-900'}`}>Semanal 1 Pág (Colunas)</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_one_page_vertical' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Semanal 1 Pág (Colunas)</span>
                                     </button>
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('weekly_one_page_horizontal')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_one_page_horizontal' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === 'weekly_one_page_horizontal' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === 'weekly_one_page_horizontal' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_horizontal' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_horizontal' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
-                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_horizontal' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === 'weekly_one_page_horizontal' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_horizontal' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_horizontal' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
+                                            <div className={`flex-1 rounded-xs ${layoutType === 'weekly_one_page_horizontal' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_one_page_horizontal' ? 'text-orange-950' : 'text-gray-900'}`}>Semanal 1 Pág (Linhas)</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === 'weekly_one_page_horizontal' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Semanal 1 Pág (Linhas)</span>
                                     </button>
                                     <button 
                                         type="button"
                                         onClick={() => setLayoutType('1_per_page')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page' ? 'bg-orange-50 border-orange-600 ring-2 ring-orange-500/30 shadow-md' : 'border-gray-300 hover:border-orange-400 bg-white hover:bg-orange-50/20'}`}
+                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex items-center justify-center ${layoutType === '1_per_page' ? 'border-orange-600' : 'border-gray-500'}`}>
-                                            <div className={`w-4 h-6 rounded-xs ${layoutType === '1_per_page' ? 'bg-orange-500' : 'bg-gray-600'}`}></div>
+                                        <div className={`w-8 h-10 border-2 rounded bg-white flex items-center justify-center ${layoutType === '1_per_page' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                            <div className={`w-4 h-6 rounded-xs ${layoutType === '1_per_page' ? 'bg-[#b84a56]' : 'bg-gray-500'}`}></div>
                                         </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page' ? 'text-orange-950' : 'text-gray-900'}`}>Planner Diário (1 Dia/Pág)</span>
+                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Planner Diário (1 Dia/Pág)</span>
                                     </button>
                                 </>
                             )}
                         </div>
                         {(projectType === 'agenda' || projectType === 'planner') && (
-                            <div className="mt-4 p-4 rounded-2xl bg-orange-50/70 border-2 border-orange-200/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                            <div className="mt-4 p-4 rounded-2xl bg-[#fdeeed] border-2 border-[#f5ded9] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-xl bg-orange-500/15 text-orange-600 flex items-center justify-center shrink-0">
-                                        <Sparkles className="w-5 h-5 text-orange-600" />
+                                    <div className="w-10 h-10 rounded-xl bg-white text-[#b84a56] border border-[#f5ded9] flex items-center justify-center shrink-0 shadow-2xs">
+                                        <Sparkles className="w-5 h-5 text-[#b84a56]" />
                                     </div>
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <span className="text-[10px] font-black uppercase tracking-wider text-orange-800">Modelo Selecionado</span>
-                                            <span className="px-2 py-0.5 bg-orange-600 text-white text-[9px] font-black uppercase rounded-full">Ativo</span>
+                                            <span className="text-[10px] font-black uppercase tracking-wider text-[#9f3d4a]">Modelo Selecionado</span>
+                                            <span className="px-2 py-0.5 bg-[#b84a56] text-white text-[9px] font-black uppercase rounded-full">Ativo</span>
                                         </div>
-                                        <h4 className="text-sm font-black text-gray-950 mt-0.5">
+                                        <h4 className="text-sm font-black text-slate-900 mt-0.5">
                                             {getSelectedModelName()}
                                         </h4>
-                                        <p className="text-[11px] text-gray-600 font-medium">
+                                        <p className="text-[11px] text-slate-500 font-medium">
                                             Páginas iniciais, divisórias mensais e páginas mensais já inclusas.
                                         </p>
                                     </div>
@@ -1180,7 +1168,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                 <button
                                     type="button"
                                     onClick={() => setStep('template')}
-                                    className="px-3.5 py-2 bg-white hover:bg-orange-100/60 text-orange-950 font-black text-xs rounded-xl border-2 border-orange-200 hover:border-orange-500 transition-all shadow-xs cursor-pointer shrink-0"
+                                    className="px-3.5 py-2 bg-white hover:bg-[#faf5f3] text-[#b84a56] font-black text-xs rounded-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all shadow-2xs cursor-pointer shrink-0"
                                 >
                                     Alterar Modelo
                                 </button>
@@ -1196,20 +1184,20 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-4">
                             <div>
-                                <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                                    <Settings className="w-4 h-4 text-orange-600" /> Ano de Referência
+                                <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                    <Settings className="w-4 h-4 text-[#b84a56]" /> Ano de Referência
                                 </label>
                                 <input 
                                     type="number" 
                                     value={year} 
                                     onChange={(e) => setYear(parseInt(e.target.value) || 2027)} 
-                                    className={`w-full p-3 border-2 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-lg font-black bg-white ${
+                                    className={`w-full p-3 border-2 rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 outline-none text-lg font-black bg-white ${
                                       isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan)
-                                         ? 'border-amber-500 bg-amber-50/40 text-amber-950' 
-                                         : 'border-gray-300 text-gray-950 focus:border-orange-600'
+                                         ? 'border-amber-400 bg-amber-50/40 text-amber-950' 
+                                         : 'border-[#eedad5] text-slate-900 focus:border-[#b84a56]'
                                     }`}
                                 />
-                                <p className="text-xs text-gray-800 mt-1.5 font-bold">Define os feriados nacionais automaticamente.</p>
+                                <p className="text-xs text-slate-600 mt-1.5 font-medium">Define os feriados nacionais automaticamente.</p>
 
                                 {isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan) && (
                                     <div className="mt-3 p-4 bg-amber-50 border-2 border-amber-300 rounded-xl text-xs text-amber-950 leading-relaxed shadow-sm">
@@ -1222,14 +1210,14 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                             <button 
                                                 type="button"
                                                 onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(12); }} 
-                                                className="bg-orange-600 hover:bg-orange-700 text-white font-black py-1.5 px-3 rounded-lg text-xs transition-colors shadow-sm cursor-pointer"
+                                                className="bg-[#b84a56] hover:bg-[#9f3d4a] text-white font-black py-1.5 px-3 rounded-lg text-xs transition-colors shadow-sm cursor-pointer"
                                             >
                                                 Ajustar para 2027 (12 meses)
                                             </button>
                                             <button 
                                                 type="button"
                                                 onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(13); }} 
-                                                className="bg-white hover:bg-gray-100 text-gray-950 font-black py-1.5 px-3 rounded-lg text-xs border-2 border-gray-300 transition-colors shadow-xs cursor-pointer"
+                                                className="bg-white hover:bg-slate-50 text-slate-800 font-black py-1.5 px-3 rounded-lg text-xs border-2 border-[#eedad5] transition-colors shadow-xs cursor-pointer"
                                             >
                                                 Jan/27 a Jan/28 (13 meses)
                                             </button>
@@ -1239,57 +1227,57 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                             </div>
 
                             <div>
-                                <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                                    <Calendar className="w-4 h-4 text-orange-600" /> Mês Inicial da Agenda
+                                <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                    <Calendar className="w-4 h-4 text-[#b84a56]" /> Mês Inicial da Agenda
                                 </label>
                                 <select
                                     value={startMonth}
                                     onChange={(e) => setStartMonth(parseInt(e.target.value))}
-                                    className="w-full p-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-600 outline-none text-sm font-black text-gray-950 bg-white shadow-xs cursor-pointer"
+                                    className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-sm font-black text-slate-900 bg-white shadow-xs cursor-pointer"
                                 >
                                     {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((mName, idx) => (
-                                        <option key={idx} value={idx} className="text-gray-950 font-bold bg-white">{mName}</option>
+                                        <option key={idx} value={idx} className="text-slate-900 font-bold bg-white">{mName}</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div>
-                                <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                                    <Settings className="w-4 h-4 text-orange-600" /> Duração da Agenda
+                                <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                    <Settings className="w-4 h-4 text-[#b84a56]" /> Duração da Agenda
                                 </label>
                                 <select
                                     value={durationMonths}
                                     onChange={(e) => setDurationMonths(parseInt(e.target.value))}
-                                    className="w-full p-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-600 outline-none text-sm font-black text-gray-950 bg-white shadow-xs cursor-pointer"
+                                    className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-sm font-black text-slate-900 bg-white shadow-xs cursor-pointer"
                                 >
                                     {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
-                                        <option key={m} value={m} className="text-gray-950 font-bold bg-white">{m} {m === 1 ? 'mês' : 'meses'}</option>
+                                        <option key={m} value={m} className="text-slate-900 font-bold bg-white">{m} {m === 1 ? 'mês' : 'meses'}</option>
                                     ))}
                                 </select>
                             </div>
                         </div>
 
                         <div>
-                            <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                                <Calendar className="w-4 h-4 text-orange-600" /> Feriados Municipais
+                            <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                <Calendar className="w-4 h-4 text-[#b84a56]" /> Feriados Municipais
                             </label>
                             <div className="space-y-2">
                                 {municipalHolidays.map((holiday, index) => (
-                                    <div key={index} className="flex gap-2 items-center bg-gray-100 p-2.5 rounded-xl border-2 border-gray-300">
+                                    <div key={index} className="flex gap-2 items-center bg-[#faf6f4] p-2.5 rounded-xl border-2 border-[#eedad5]">
                                         <input 
                                             type="date" 
                                             value={holiday.date} 
                                             onChange={(e) => updateHoliday(index, 'date', e.target.value)}
-                                            className="text-xs p-2 border-2 border-gray-300 rounded-lg focus:ring-1 focus:ring-orange-500 outline-none text-gray-950 font-black bg-white"
+                                            className="text-xs p-2 border-2 border-[#eedad5] rounded-lg focus:ring-1 focus:ring-[#b84a56] outline-none text-slate-900 font-black bg-white"
                                         />
                                         <input 
                                             type="text" 
                                             placeholder="Nome do Feriado"
                                             value={holiday.name} 
                                             onChange={(e) => updateHoliday(index, 'name', e.target.value)}
-                                            className="flex-1 text-xs p-2 border-2 border-gray-300 rounded-lg focus:ring-1 focus:ring-orange-500 outline-none text-gray-950 font-bold bg-white placeholder-gray-500"
+                                            className="flex-1 text-xs p-2 border-2 border-[#eedad5] rounded-lg focus:ring-1 focus:ring-[#b84a56] outline-none text-slate-900 font-bold bg-white placeholder-slate-400"
                                         />
-                                        <button onClick={() => removeHoliday(index)} className="text-red-600 hover:text-red-800 p-1.5 cursor-pointer">
+                                        <button onClick={() => removeHoliday(index)} className="text-[#b84a56] hover:text-[#9f3d4a] p-1.5 cursor-pointer">
                                             <Trash2 className="w-4 h-4" />
                                         </button>
                                     </div>
@@ -1297,9 +1285,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                 <button 
                                     type="button"
                                     onClick={addHoliday}
-                                    className="w-full py-2.5 border-2 border-dashed border-gray-400 hover:border-orange-500 rounded-xl text-xs font-black text-gray-800 hover:text-orange-700 transition-all flex items-center justify-center gap-1.5 bg-gray-50 hover:bg-orange-50/30 cursor-pointer shadow-xs"
+                                    className="w-full py-2.5 border-2 border-dashed border-[#eedad5] hover:border-[#b84a56] rounded-xl text-xs font-black text-slate-700 hover:text-[#b84a56] transition-all flex items-center justify-center gap-1.5 bg-white hover:bg-[#fdeeed] cursor-pointer shadow-xs"
                                 >
-                                    <Plus className="w-4 h-4 text-orange-600" /> Adicionar Feriado Municipal
+                                    <Plus className="w-4 h-4 text-[#b84a56]" /> Adicionar Feriado Municipal
                                 </button>
                             </div>
                         </div>
@@ -1309,20 +1297,20 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 {/* Tamanho e Orientação */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                            <FileText className="w-4 h-4 text-orange-600" /> Tamanho da Página
+                        <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                            <FileText className="w-4 h-4 text-[#b84a56]" /> Tamanho da Página
                         </label>
                         <div className="space-y-2.5">
                             {(Object.keys(PAGE_SIZES) as PageSize[]).map((size) => (
-                                <label key={size} className={`flex items-center p-3.5 border-2 rounded-xl cursor-pointer transition-all ${pageSize === size ? 'border-orange-600 bg-orange-50/80 ring-2 ring-orange-500/30 shadow-sm' : 'border-gray-300 hover:border-orange-300 bg-white hover:bg-gray-50/80'}`}>
+                                <label key={size} className={`flex items-center p-3.5 border-2 rounded-xl cursor-pointer transition-all ${pageSize === size ? 'border-[#b84a56] bg-[#fdeeed] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-[#eedad5] hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}>
                                     <input type="radio" name="pageSize" className="hidden" checked={pageSize === size} onChange={() => setPageSize(size)} />
-                                    <div className={`w-5 h-5 rounded-full border-2 mr-3 flex items-center justify-center transition-all ${pageSize === size ? 'border-orange-600 bg-orange-600' : 'border-gray-400 bg-white'}`}>
+                                    <div className={`w-5 h-5 rounded-full border-2 mr-3 flex items-center justify-center transition-all ${pageSize === size ? 'border-[#b84a56] bg-[#b84a56]' : 'border-slate-300 bg-white'}`}>
                                         {pageSize === size && <div className="w-2 h-2 rounded-full bg-white" />}
                                     </div>
                                     <div className="flex-1">
-                                        <div className={`text-sm ${pageSize === size ? 'text-orange-950 font-black' : 'text-gray-950 font-bold'}`}>{PAGE_SIZES[size].name}</div>
+                                        <div className={`text-sm ${pageSize === size ? 'text-[#9f3d4a] font-black' : 'text-slate-800 font-bold'}`}>{PAGE_SIZES[size].name}</div>
                                         {size !== 'Custom' && (
-                                            <div className={`text-xs font-bold ${pageSize === size ? 'text-orange-900' : 'text-gray-700'}`}>{PAGE_SIZES[size].w}mm x {PAGE_SIZES[size].h}mm</div>
+                                            <div className={`text-xs font-bold ${pageSize === size ? 'text-[#b84a56]' : 'text-slate-600'}`}>{PAGE_SIZES[size].w}mm x {PAGE_SIZES[size].h}mm</div>
                                         )}
                                     </div>
                                 </label>
@@ -1330,23 +1318,23 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                         </div>
 
                         {pageSize === 'Custom' && (
-                            <div className="mt-4 grid grid-cols-2 gap-4 bg-orange-50/40 p-4 rounded-xl border-2 border-orange-200">
+                            <div className="mt-4 grid grid-cols-2 gap-4 bg-[#fdeeed]/60 p-4 rounded-xl border-2 border-[#f5ded9]">
                                 <div>
-                                    <label className="block text-[11px] uppercase font-black text-gray-900 mb-1">Largura (mm)</label>
+                                    <label className="block text-[11px] uppercase font-black text-slate-800 mb-1">Largura (mm)</label>
                                     <input 
                                         type="number" 
                                         value={customWidth} 
                                         onChange={(e) => setCustomWidth(parseInt(e.target.value) || 0)} 
-                                        className="w-full p-2.5 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-gray-950 font-black bg-white text-sm"
+                                        className="w-full p-2.5 border-2 border-[#eedad5] rounded-lg focus:ring-2 focus:ring-[#b84a56]/20 outline-none text-slate-900 font-black bg-white text-sm"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-[11px] uppercase font-black text-gray-900 mb-1">Altura (mm)</label>
+                                    <label className="block text-[11px] uppercase font-black text-slate-800 mb-1">Altura (mm)</label>
                                     <input 
                                         type="number" 
                                         value={customHeight} 
                                         onChange={(e) => setCustomHeight(parseInt(e.target.value) || 0)} 
-                                        className="w-full p-2.5 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-gray-950 font-black bg-white text-sm"
+                                        className="w-full p-2.5 border-2 border-[#eedad5] rounded-lg focus:ring-2 focus:ring-[#b84a56]/20 outline-none text-slate-900 font-black bg-white text-sm"
                                     />
                                 </div>
                             </div>
@@ -1354,24 +1342,24 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                     </div>
 
                     <div>
-                        <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                            <Columns className="w-4 h-4 text-orange-600" /> Orientação
+                        <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                            <Columns className="w-4 h-4 text-[#b84a56]" /> Orientação
                         </label>
                         <div className="flex gap-3">
                             <button 
                                 type="button"
                                 onClick={() => setOrientation('portrait')}
-                                className={`flex-1 p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${orientation === 'portrait' ? 'bg-orange-50 border-orange-600 text-orange-950 ring-2 ring-orange-500/30 shadow-md font-black' : 'bg-white border-gray-300 text-gray-900 hover:border-orange-300 hover:bg-gray-50 font-bold'}`}
+                                className={`flex-1 p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${orientation === 'portrait' ? 'bg-[#fdeeed] border-[#b84a56] text-[#9f3d4a] ring-2 ring-[#b84a56]/20 shadow-xs font-black' : 'bg-white border-[#eedad5] text-slate-700 hover:border-[#b84a56]/50 hover:bg-[#faf5f3] font-bold'}`}
                             >
-                                <div className={`w-6 h-8 border-2 rounded-xs ${orientation === 'portrait' ? 'border-orange-600 bg-orange-100' : 'border-gray-600 bg-gray-100'}`}></div>
+                                <div className={`w-6 h-8 border-2 rounded-xs ${orientation === 'portrait' ? 'border-[#b84a56] bg-[#fdeeed]' : 'border-slate-400 bg-slate-100'}`}></div>
                                 <span className="text-xs">Retrato</span>
                             </button>
                             <button 
                                 type="button"
                                 onClick={() => setOrientation('landscape')}
-                                className={`flex-1 p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${orientation === 'landscape' ? 'bg-orange-50 border-orange-600 text-orange-950 ring-2 ring-orange-500/30 shadow-md font-black' : 'bg-white border-gray-300 text-gray-900 hover:border-orange-300 hover:bg-gray-50 font-bold'}`}
+                                className={`flex-1 p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${orientation === 'landscape' ? 'bg-[#fdeeed] border-[#b84a56] text-[#9f3d4a] ring-2 ring-[#b84a56]/20 shadow-xs font-black' : 'bg-white border-[#eedad5] text-slate-700 hover:border-[#b84a56]/50 hover:bg-[#faf5f3] font-bold'}`}
                             >
-                                <div className={`w-8 h-6 border-2 rounded-xs ${orientation === 'landscape' ? 'border-orange-600 bg-orange-100' : 'border-gray-600 bg-gray-100'}`}></div>
+                                <div className={`w-8 h-6 border-2 rounded-xs ${orientation === 'landscape' ? 'border-[#b84a56] bg-[#fdeeed]' : 'border-slate-400 bg-slate-100'}`}></div>
                                 <span className="text-xs">Paisagem</span>
                             </button>
                         </div>
@@ -1380,45 +1368,45 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
                 {/* Margens */}
                 <div>
-                    <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-3 gap-2">
-                        <BookOpen className="w-4 h-4 text-orange-600" /> Margens e Sangria (mm)
+                    <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                        <BookOpen className="w-4 h-4 text-[#b84a56]" /> Margens e Sangria (mm)
                     </label>
-                    <div className="grid grid-cols-4 gap-3 bg-gray-100 p-4 rounded-xl border-2 border-gray-300">
+                    <div className="grid grid-cols-4 gap-3 bg-[#faf6f4] p-4 rounded-xl border-2 border-[#eedad5]">
                         <div>
-                            <span className="block text-[11px] uppercase font-black text-gray-900 mb-1">Topo</span>
+                            <span className="block text-[11px] uppercase font-black text-slate-700 mb-1">Topo</span>
                             <input 
                                 type="number" 
                                 value={margins.top} 
                                 onChange={(e) => setMargins({...margins, top: parseInt(e.target.value) || 0})} 
-                                className="w-full p-2.5 text-sm border-2 border-gray-300 rounded-lg bg-white text-gray-950 font-black text-center focus:ring-2 focus:ring-orange-500 focus:border-orange-600 outline-none shadow-xs" 
+                                className="w-full p-2.5 text-sm border-2 border-[#eedad5] rounded-lg bg-white text-slate-900 font-black text-center focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none shadow-xs" 
                             />
                         </div>
                         <div>
-                            <span className="block text-[11px] uppercase font-black text-gray-900 mb-1">Base</span>
+                            <span className="block text-[11px] uppercase font-black text-slate-700 mb-1">Base</span>
                             <input 
                                 type="number" 
                                 value={margins.bottom} 
                                 onChange={(e) => setMargins({...margins, bottom: parseInt(e.target.value) || 0})} 
-                                className="w-full p-2.5 text-sm border-2 border-gray-300 rounded-lg bg-white text-gray-950 font-black text-center focus:ring-2 focus:ring-orange-500 focus:border-orange-600 outline-none shadow-xs" 
+                                className="w-full p-2.5 text-sm border-2 border-[#eedad5] rounded-lg bg-white text-slate-900 font-black text-center focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none shadow-xs" 
                             />
                         </div>
                         <div>
-                            <span className="block text-[11px] uppercase font-black text-gray-900 mb-1">Interna</span>
+                            <span className="block text-[11px] uppercase font-black text-slate-700 mb-1">Interna</span>
                             <input 
                                 type="number" 
                                 value={margins.inside} 
                                 onChange={(e) => setMargins({...margins, inside: parseInt(e.target.value) || 0})} 
-                                className="w-full p-2.5 text-sm border-2 border-gray-300 rounded-lg bg-white text-gray-950 font-black text-center focus:ring-2 focus:ring-orange-500 focus:border-orange-600 outline-none shadow-xs" 
+                                className="w-full p-2.5 text-sm border-2 border-[#eedad5] rounded-lg bg-white text-slate-900 font-black text-center focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none shadow-xs" 
                                 title="Margem da Espiral/Lombada" 
                             />
                         </div>
                         <div>
-                            <span className="block text-[11px] uppercase font-black text-gray-900 mb-1">Externa</span>
+                            <span className="block text-[11px] uppercase font-black text-slate-700 mb-1">Externa</span>
                             <input 
                                 type="number" 
                                 value={margins.outside} 
                                 onChange={(e) => setMargins({...margins, outside: parseInt(e.target.value) || 0})} 
-                                className="w-full p-2.5 text-sm border-2 border-gray-300 rounded-lg bg-white text-gray-950 font-black text-center focus:ring-2 focus:ring-orange-500 focus:border-orange-600 outline-none shadow-xs" 
+                                className="w-full p-2.5 text-sm border-2 border-[#eedad5] rounded-lg bg-white text-slate-900 font-black text-center focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none shadow-xs" 
                             />
                         </div>
                     </div>
@@ -1429,21 +1417,21 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                 id="mirror" 
                                 checked={mirrorEvenPages} 
                                 onChange={(e) => setMirrorEvenPages(e.target.checked)} 
-                                className="w-4 h-4 text-orange-600 rounded border-2 border-gray-400 focus:ring-orange-500"
+                                className="w-4 h-4 text-[#b84a56] rounded border-2 border-[#eedad5] focus:ring-[#b84a56]"
                             />
-                            <label htmlFor="mirror" className="ml-2.5 text-sm text-gray-950 font-black cursor-pointer">Espelhar páginas pares no verso (Frente/Verso)</label>
+                            <label htmlFor="mirror" className="ml-2.5 text-sm text-slate-800 font-black cursor-pointer">Espelhar páginas pares no verso (Frente/Verso)</label>
                         </div>
                         {mirrorEvenPages && (
-                            <div className="ml-6 pl-4 border-l-2 border-orange-400 mt-2 space-y-2">
-                                <span className="block text-[11px] uppercase font-black text-gray-800">Modo de Espelhamento no Verso</span>
-                                <div className="flex rounded-xl bg-gray-200 p-1 border-2 border-gray-300">
+                            <div className="ml-6 pl-4 border-l-2 border-[#eedad5] mt-2 space-y-2">
+                                <span className="block text-[11px] uppercase font-black text-slate-700">Modo de Espelhamento no Verso</span>
+                                <div className="flex rounded-xl bg-[#faf6f4] p-1 border-2 border-[#eedad5]">
                                     <button
                                         type="button"
                                         onClick={() => setMirrorContentOnVerso(false)}
                                         className={`flex-1 py-1.5 px-3 text-xs font-black rounded-lg transition-all cursor-pointer ${
                                             !mirrorContentOnVerso 
-                                                ? 'bg-orange-600 text-white shadow-sm' 
-                                                : 'text-gray-800 hover:text-gray-950 hover:bg-gray-100'
+                                                ? 'bg-[#b84a56] text-white shadow-xs' 
+                                                : 'text-slate-700 hover:text-slate-900 hover:bg-white'
                                         }`}
                                     >
                                         Apenas Margens
@@ -1453,14 +1441,14 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                         onClick={() => setMirrorContentOnVerso(true)}
                                         className={`flex-1 py-1.5 px-3 text-xs font-black rounded-lg transition-all cursor-pointer ${
                                             mirrorContentOnVerso 
-                                                ? 'bg-orange-600 text-white shadow-sm' 
-                                                : 'text-gray-800 hover:text-gray-950 hover:bg-gray-100'
+                                                ? 'bg-[#b84a56] text-white shadow-xs' 
+                                                : 'text-slate-700 hover:text-slate-900 hover:bg-white'
                                         }`}
                                     >
                                         Margens + Conteúdo
                                     </button>
                                 </div>
-                                <p className="text-xs text-gray-800 font-semibold leading-relaxed">
+                                <p className="text-xs text-slate-600 font-medium leading-relaxed">
                                     {!mirrorContentOnVerso
                                         ? '✓ Apenas as margens interna/externa invertem para encadernação. O conteúdo mantém a mesma posição da frente.'
                                         : '✓ As margens e a posição horizontal de todos os elementos são invertidas no verso.'}
@@ -1474,20 +1462,20 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                 id="customVerso" 
                                 checked={customVerso} 
                                 onChange={(e) => setCustomVerso(e.target.checked)} 
-                                className="w-4 h-4 text-orange-600 rounded border-2 border-gray-400 focus:ring-orange-500"
+                                className="w-4 h-4 text-[#b84a56] rounded border-2 border-[#eedad5] focus:ring-[#b84a56]"
                             />
-                            <label htmlFor="customVerso" className="ml-2.5 text-sm font-black text-gray-950 cursor-pointer">Diferenciar layout da Frente e do Verso (Costas)</label>
+                            <label htmlFor="customVerso" className="ml-2.5 text-sm font-black text-slate-800 cursor-pointer">Diferenciar layout da Frente e do Verso (Costas)</label>
                         </div>
                         {customVerso && (
-                            <div className="ml-6 flex items-center pl-4 border-l-2 border-orange-400">
+                            <div className="ml-6 flex items-center pl-4 border-l-2 border-[#eedad5]">
                                 <input 
                                     type="checkbox" 
                                     id="versoAdvancesSequence" 
                                     checked={versoAdvancesSequence === false} 
                                     onChange={(e) => setVersoAdvancesSequence(!e.target.checked)} 
-                                    className="w-4 h-4 text-orange-600 rounded border-2 border-gray-400 focus:ring-orange-500"
+                                    className="w-4 h-4 text-[#b84a56] rounded border-2 border-[#eedad5] focus:ring-[#b84a56]"
                                 />
-                                <label htmlFor="versoAdvancesSequence" className="ml-2.5 text-xs text-gray-900 font-bold cursor-pointer">
+                                <label htmlFor="versoAdvancesSequence" className="ml-2.5 text-xs text-slate-700 font-medium cursor-pointer">
                                     Não pular sequência de datas no verso (manter mesma data na frente e verso)
                                 </label>
                             </div>
@@ -1497,19 +1485,19 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
                 {/* Transição de Meses e Alinhamento à Direita */}
                 {!(projectType === 'notebook' || projectType === 'devotional') && (
-                    <div className="space-y-4 pt-4 border-t-2 border-gray-200">
-                        <label className="flex items-center text-sm font-black text-gray-900 uppercase mb-1 gap-2">
-                            <BookOpen className="w-4 h-4 text-orange-600" /> Transição de Meses & Alinhamento
+                    <div className="space-y-4 pt-4 border-t-2 border-[#eedad5]">
+                        <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-1 gap-2">
+                            <BookOpen className="w-4 h-4 text-[#b84a56]" /> Transição de Meses & Alinhamento
                         </label>
-                        <div className="bg-gray-100 p-5 rounded-2xl border-2 border-gray-300 space-y-3.5">
+                        <div className="bg-[#faf6f4] p-5 rounded-2xl border-2 border-[#eedad5] space-y-3.5">
                             <label className="flex items-center gap-3 cursor-pointer">
                                 <input 
                                     type="checkbox" 
                                     checked={includeMonthlyDividers} 
                                     onChange={(e) => setIncludeMonthlyDividers(e.target.checked)} 
-                                    className="rounded text-orange-600 focus:ring-orange-500 h-4 w-4 border-2 border-gray-400" 
+                                    className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
                                 />
-                                <span className="text-xs font-black text-gray-950">Incluir Divisórias de Meses (Capas)</span>
+                                <span className="text-xs font-black text-slate-800">Incluir Divisórias de Meses (Capas)</span>
                             </label>
 
                             <label className="flex items-center gap-3 cursor-pointer">
@@ -1517,22 +1505,22 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     type="checkbox" 
                                     checked={includeMonthlyIntroPages} 
                                     onChange={(e) => setIncludeMonthlyIntroPages(e.target.checked)} 
-                                    className="rounded text-orange-600 focus:ring-orange-500 h-4 w-4 border-2 border-gray-400" 
+                                    className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
                                 />
-                                <span className="text-xs font-black text-gray-950">Incluir Páginas Mensais (Notas/Planejamentos)</span>
+                                <span className="text-xs font-black text-slate-800">Incluir Páginas Mensais (Notas/Planejamentos)</span>
                             </label>
 
-                            <div className="pt-3 border-t-2 border-gray-300">
+                            <div className="pt-3 border-t-2 border-[#eedad5]">
                                 <label className="flex items-center gap-3 cursor-pointer">
                                     <input 
                                         type="checkbox" 
                                         checked={startMonthOnRightPage} 
                                         onChange={(e) => setStartMonthOnRightPage(e.target.checked)} 
-                                        className="rounded text-orange-600 focus:ring-orange-500 h-4 w-4 border-2 border-gray-400" 
+                                        className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
                                     />
-                                    <span className="text-xs font-black text-gray-950">Sempre iniciar o primeiro dia do mês na página direita</span>
+                                    <span className="text-xs font-black text-slate-800">Sempre iniciar o primeiro dia do mês na página direita</span>
                                 </label>
-                                <p className="text-xs text-gray-800 ml-7 mt-1 font-semibold leading-relaxed">
+                                <p className="text-xs text-slate-600 ml-7 mt-1 font-medium leading-relaxed">
                                     Garante que o dia 1 de cada mês comece sempre em página ímpar (direita), inserindo página complementar ao final do período anterior quando necessário.
                                 </p>
                             </div>
@@ -1541,10 +1529,10 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 )}
 
                 {/* Submit */}
-                <div className="pt-4 border-t border-gray-100 flex justify-end">
+                <div className="pt-4 border-t border-[#eedad5] flex justify-end">
                     <button 
                         onClick={handleSubmit}
-                        className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all flex items-center gap-2 transform hover:scale-[1.02]"
+                        className="bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white font-black py-3.5 px-8 rounded-xl shadow-lg hover:shadow-xl shadow-[#b84a56]/20 transition-all flex items-center gap-2 transform hover:scale-[1.02] cursor-pointer"
                     >
                         {defaultValues ? 'Atualizar Layout' : 'Criar Layout'} <ArrowRight className="w-5 h-5" />
                     </button>

@@ -404,19 +404,19 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
       <div
         onPointerDown={onHeaderPointerDown}
         title={onHeaderPointerDown ? 'Arraste pelo cabeçalho para mover a janela' : undefined}
-        className={`flex items-center justify-between px-3.5 py-2.5 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 via-purple-50/50 to-white shrink-0 ${
+        className={`flex items-center justify-between px-3.5 py-2.5 border-b border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-[#fdeeed] to-white shrink-0 ${
           onHeaderPointerDown ? 'cursor-move touch-none' : ''
         }`}
       >
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-2xs">
+          <div className="p-1.5 rounded-xl bg-[#b84a56] text-white shadow-2xs">
             <Palette className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h3 className="text-xs font-black uppercase tracking-wider text-indigo-950 leading-none">
+            <h3 className="text-xs font-black uppercase tracking-wider text-[#9f3d4a] leading-none">
               Estilos Globais
             </h3>
-            <p className="text-[9px] text-indigo-600 font-semibold mt-0.5">
+            <p className="text-[9px] text-[#b84a56] font-semibold mt-0.5">
               Edite uma vez, atualize todo o projeto
             </p>
           </div>
@@ -425,7 +425,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
           type="button"
           onPointerDown={e => e.stopPropagation()}
           onClick={onClose}
-          className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+          className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
           title="Fechar Painel de Estilos"
         >
           <X className="w-4 h-4" />
@@ -433,17 +433,17 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
       </div>
 
       {/* Category Tabs */}
-      <div className="grid grid-cols-3 gap-1 p-1.5 bg-gray-100/80 border-b border-gray-200 shrink-0">
+      <div className="grid grid-cols-3 gap-1 p-1.5 bg-[#fbf6f4] border-b border-[#eedad5] shrink-0">
         <button
           type="button"
           onClick={() => setActiveTab('color')}
           className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer ${
             activeTab === 'color'
-              ? 'bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-100'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
           }`}
         >
-          <Palette className="w-3.5 h-3.5 text-indigo-600" />
+          <Palette className="w-3.5 h-3.5 text-[#b84a56]" />
           <span>Cores ({projectStyles.colorStyles.length})</span>
         </button>
         <button
@@ -451,11 +451,11 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
           onClick={() => setActiveTab('character')}
           className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer ${
             activeTab === 'character'
-              ? 'bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-100'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
           }`}
         >
-          <Type className="w-3.5 h-3.5 text-purple-600" />
+          <Type className="w-3.5 h-3.5 text-[#c45663]" />
           <span>Caractere ({projectStyles.characterStyles.length})</span>
         </button>
         <button
@@ -463,11 +463,11 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
           onClick={() => setActiveTab('paragraph')}
           className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer ${
             activeTab === 'paragraph'
-              ? 'bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-100'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
           }`}
         >
-          <AlignLeft className="w-3.5 h-3.5 text-emerald-600" />
+          <AlignLeft className="w-3.5 h-3.5 text-[#9f3d4a]" />
           <span>Parágrafo ({projectStyles.paragraphStyles.length})</span>
         </button>
       </div>
@@ -477,11 +477,11 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
         {/* ==================== TAB 1: CORES ==================== */}
         {activeTab === 'color' && (
           <div className="space-y-3">
-            <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-xl text-[10px] text-indigo-950 leading-relaxed">
+            <div className="p-2.5 bg-[#fff5f5] border border-[#eedad5] rounded-xl text-[10px] text-[#85313d] leading-relaxed">
               <strong>Como funciona:</strong> Aplique um estilo de cor ao{' '}
-              <span className="underline decoration-indigo-400 font-bold">Texto/Cor</span>,{' '}
-              <span className="underline decoration-indigo-400 font-bold">Fundo</span> ou{' '}
-              <span className="underline decoration-indigo-400 font-bold">Borda</span> de qualquer
+              <span className="underline decoration-[#d98b95] font-bold">Texto/Cor</span>,{' '}
+              <span className="underline decoration-[#d98b95] font-bold">Fundo</span> ou{' '}
+              <span className="underline decoration-[#d98b95] font-bold">Borda</span> de qualquer
               objeto. Quando você trocar a cor aqui, todos os elementos vinculados mudam juntos!
             </div>
 
@@ -489,7 +489,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
               <button
                 type="button"
                 onClick={() => handleAddColorStyle(false)}
-                className="flex-1 py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                className="flex-1 py-1.5 px-2.5 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Nova Cor</span>
@@ -498,7 +498,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => handleAddColorStyle(true)}
-                  className="flex-1 py-1.5 px-2.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                  className="flex-1 py-1.5 px-2.5 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] border border-[#eedad5] rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
                   title="Cria um novo estilo de cor com a cor do elemento selecionado e já o vincula"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-500" />

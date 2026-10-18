@@ -189,30 +189,30 @@ export const SpecialDatesModal: React.FC<SpecialDatesModalProps> = ({
   return (
     <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div 
-        className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        className="bg-white rounded-3xl shadow-[0_20px_60px_rgba(184,74,86,0.15)] border border-[#eedad5] w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-stone-200 bg-stone-50 flex items-center justify-between shrink-0">
+        <div className="px-6 py-4 border-b border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white flex items-center justify-center shadow-md">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#b84a56] to-[#d98b95] text-white flex items-center justify-center shadow-md shadow-[#b84a56]/20">
               <CalendarHeart className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 Informações Importantes & Contagem Regressiva no Miolo
-                <span className="text-[10px] uppercase font-extrabold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] uppercase font-extrabold bg-[#fdeeed] text-[#9f3d4a] px-2.5 py-0.5 rounded-full border border-[#eedad5]">
                   Exclusivo
                 </span>
               </h2>
-              <p className="text-xs text-stone-500">
+              <p className="text-xs text-slate-500">
                 Adicione as férias da cliente (ex: 20 de Fevereiro), contagem regressiva para casamentos, datas de formaturas e lembretes nas páginas da sua agenda.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full hover:bg-stone-200 flex items-center justify-center text-stone-500 transition-colors"
+            className="w-8 h-8 rounded-full hover:bg-[#fff5f5] flex items-center justify-center text-slate-500 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -770,7 +770,7 @@ export const SpecialDatesModal: React.FC<SpecialDatesModalProps> = ({
 
             <button
               onClick={onClose}
-              className="px-5 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+              className="px-5 py-2 bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
             >
               Concluir
             </button>

@@ -3,15 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>AgendaMaster AI</title>
+    <title>AgendaMaster</title>
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#ea580c" />
+    <meta name="theme-color" content="#b84a56" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AgendaMaster" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              indigo: {
+                50: '#fff5f5',
+                100: '#fdeeed',
+                200: '#f5ded9',
+                300: '#eedad5',
+                400: '#d98b95',
+                500: '#c45663',
+                600: '#b84a56',
+                700: '#9f3d4a',
+                800: '#85313d',
+                900: '#6e2731',
+                950: '#43141b',
+              }
+            }
+          }
+        }
+      }
+    </script>
     <!-- Expanded font selection for customization & stationery aesthetics -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,8 +42,8 @@
     <style>
       body {
         font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background-color: #0c0a09;
-        color: #f5f5f4;
+        background-color: #faf6f4;
+        color: #1e293b;
         margin: 0;
         padding: 0;
         min-height: 100vh;
@@ -38,14 +61,14 @@
         height: 8px;
       }
       .custom-scrollbar::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: #faf6f4;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #c7c7c7;
-        border-radius: 4px;
+        background: #eedad5;
+        border-radius: 6px;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: #a8a8a8;
+        background: #d98b95;
       }
       
       /* Mobile specific utility to hide scrollbars but keep functionality */

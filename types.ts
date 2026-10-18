@@ -303,6 +303,14 @@ export interface LayoutElement {
   currentDayHighlightColor?: string;
   currentDayHighlightTextColor?: string;
     
+    // Configurações para Frase Motivacional (quote)
+    quoteCategory?: 'all' | 'feminine_strength' | 'faith' | 'motivational' | 'gratitude_mindfulness' | 'entrepreneurship_creativity' | 'self_care' | 'self_love' | 'success_habits' | 'custom' | string;
+    quoteDisplayMode?: 'daily_rotating' | 'fixed';
+    quoteFixedText?: string;
+    quoteStylePreset?: 'minimal' | 'quotation_marks' | 'divider_card' | 'badge' | 'scripture';
+    showQuoteMarks?: boolean;
+    quoteAuthor?: string;
+    
     // Configurações para Habit Tracker
     habitMarkerType?: 'dot' | 'square' | 'check';
     habitMarkerSize?: number;
@@ -484,6 +492,16 @@ export interface IntroPage {
     background?: BackgroundConfig; // Permite sobrescrever o fundo global nesta página
 }
 
+export interface CustomTemplateItem extends IntroPage {
+    templateType?: 'miolo' | 'page' | 'intro' | 'monthly_intro';
+    layoutType?: PageLayoutType;
+    elementsVerso?: LayoutElement[];
+    elementsWeeklyLeft?: LayoutElement[];
+    elementsWeeklyRight?: LayoutElement[];
+    projectType?: 'agenda' | 'planner' | 'notebook' | 'devotional';
+    createdAt?: string;
+}
+
 export interface PageMargins {
   top: number;    // mm
   bottom: number; // mm
@@ -566,6 +584,8 @@ export interface AgendaConfig {
   specialDates?: SpecialDateItem[]; // Datas Especiais, Férias da Cliente, Contagem Regressiva para Casamento
   showSpecialDateBadges?: boolean; // Exibir badges elegantes nas páginas dos dias com eventos especiais
   specialDateBadgePosition?: 'top' | 'bottom'; // Posição dos badges automáticos nas páginas
+  quoteCategory?: 'all' | 'feminine_strength' | 'faith' | 'motivational' | 'gratitude_mindfulness' | 'entrepreneurship_creativity' | 'self_care' | 'self_love' | 'success_habits' | string; // Categoria padrão de frases motivacionais
+  quoteCustomList?: string[]; // Lista personalizada de frases motivacionais do projeto
 }
 
 export type PdfImportDestination = 

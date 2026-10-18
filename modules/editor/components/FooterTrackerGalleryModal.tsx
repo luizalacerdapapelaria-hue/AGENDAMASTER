@@ -445,30 +445,30 @@ export const FooterTrackerGalleryModal: React.FC<FooterTrackerGalleryModalProps>
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 select-none">
             <div 
-                className="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+                className="bg-white rounded-3xl shadow-[0_20px_60px_rgba(184,74,86,0.15)] border border-[#eedad5] w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
-                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-indigo-50/50 via-white to-pink-50/50 shrink-0">
+                <div className="px-6 py-4 border-b border-[#eedad5] flex items-center justify-between bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] shrink-0">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-100">
+                        <div className="w-10 h-10 rounded-2xl bg-[#b84a56] text-white flex items-center justify-center shadow-md shadow-[#b84a56]/20">
                             <Layers className="w-5 h-5" />
                         </div>
                         <div>
                             <div className="flex items-center gap-2">
-                                <h3 className="text-base font-bold text-gray-900">Elemento Rodapé da Agenda</h3>
-                                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                                <h3 className="text-base font-bold text-slate-900">Elemento Rodapé da Agenda</h3>
+                                <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-[#fdeeed] text-[#9f3d4a] border border-[#eedad5]">
                                     Modelos & Opções
                                 </span>
                             </div>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-slate-500">
                                 Escolha o modelo de rodapé desejado: Copos de Água, Clima, Humor do Dia, Refeições, Sono e Hábitos.
                             </p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
+                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-[#fff5f5] rounded-xl transition-colors cursor-pointer"
                         title="Fechar"
                     >
                         <X className="w-5 h-5" />
@@ -476,25 +476,25 @@ export const FooterTrackerGalleryModal: React.FC<FooterTrackerGalleryModalProps>
                 </div>
 
                 {/* Subheader Toolbar: Categories, Color Palette & Settings */}
-                <div className="px-6 py-3 border-b border-gray-100 bg-gray-50/60 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="px-6 py-3 border-b border-[#eedad5] bg-[#faf6f4] flex flex-wrap items-center justify-between gap-3 shrink-0">
                     {/* Category tabs */}
                     <div className="flex items-center gap-1 overflow-x-auto py-0.5">
                         <button
                             onClick={() => setSelectedCategory('all')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                 selectedCategory === 'all'
-                                    ? 'bg-indigo-600 text-white shadow-xs'
-                                    : 'text-gray-600 hover:bg-gray-200/70'
+                                    ? 'bg-[#b84a56] text-white shadow-xs'
+                                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
                             }`}
                         >
                             Todos ({FOOTER_TRACKER_PRESETS.length})
                         </button>
                         <button
                             onClick={() => setSelectedCategory('water')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                 selectedCategory === 'water'
-                                    ? 'bg-indigo-600 text-white shadow-xs'
-                                    : 'text-gray-600 hover:bg-gray-200/70'
+                                    ? 'bg-[#b84a56] text-white shadow-xs'
+                                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
                             }`}
                         >
                             <Droplets className="w-3.5 h-3.5 text-blue-500" />
@@ -502,10 +502,10 @@ export const FooterTrackerGalleryModal: React.FC<FooterTrackerGalleryModalProps>
                         </button>
                         <button
                             onClick={() => setSelectedCategory('weather')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                 selectedCategory === 'weather'
-                                    ? 'bg-indigo-600 text-white shadow-xs'
-                                    : 'text-gray-600 hover:bg-gray-200/70'
+                                    ? 'bg-[#b84a56] text-white shadow-xs'
+                                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
                             }`}
                         >
                             <Sun className="w-3.5 h-3.5 text-amber-500" />
@@ -513,10 +513,10 @@ export const FooterTrackerGalleryModal: React.FC<FooterTrackerGalleryModalProps>
                         </button>
                         <button
                             onClick={() => setSelectedCategory('mood')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                 selectedCategory === 'mood'
-                                    ? 'bg-indigo-600 text-white shadow-xs'
-                                    : 'text-gray-600 hover:bg-gray-200/70'
+                                    ? 'bg-[#b84a56] text-white shadow-xs'
+                                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
                             }`}
                         >
                             <Smile className="w-3.5 h-3.5 text-pink-500" />

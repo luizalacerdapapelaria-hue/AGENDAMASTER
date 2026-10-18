@@ -324,24 +324,82 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     }
 
     if (element.type === 'quote') {
-        const quoteText = quote || element.content || (isEditor ? '"Frase Inspiradora"' : '');
-        const content = isSentenceOrCapitalize ? applyTextTransform(quoteText, textTransform) : quoteText;
+        let rawQuote = quote || element.content || (isEditor ? 'Frase Inspiradora' : '');
+        if (element.style?.quoteDisplayMode === 'fixed' && element.style?.quoteFixedText) {
+            rawQuote = element.style.quoteFixedText;
+        } else if (element.content && element.style?.quoteDisplayMode === 'fixed') {
+            rawQuote = element.content;
+        }
+
+        if (isEditor && isSelected && isEditing) {
+            return (
+                <div style={{...alignmentStyles, width: '100%', height: '100%'}}>
+                    <textarea 
+                        value={element.style?.quoteFixedText || element.content || rawQuote} 
+                        onChange={(e) => onContentChange && onContentChange(element.id, e.target.value)} 
+                        onBlur={() => setIsEditing(false)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Escape') setIsEditing(false);
+                        }}
+                        style={{ 
+                            fontSize: style.fontSize, 
+                            fontFamily: style.fontFamily, 
+                            fontWeight: style.fontWeight || 'normal',
+                            fontStyle: style.fontStyle || 'italic',
+                            color: style.color, 
+                            textAlign: style.textAlign || 'center', 
+                            lineHeight: style.lineHeight || 1.3, 
+                            width: '100%', 
+                            height: '100%', 
+                            resize: 'none', 
+                            background: 'rgba(255,255,255,0.95)', 
+                            border: '1.5px dashed #b84a56', 
+                            outline: 'none', 
+                            padding: '4px',
+                            boxSizing: 'border-box'
+                        }} 
+                        autoFocus 
+                        onMouseDown={(e) => e.stopPropagation()} 
+                    />
+                </div>
+            );
+        }
+
+        const formattedText = isSentenceOrCapitalize ? applyTextTransform(rawQuote, textTransform) : rawQuote;
+        const preset = element.style?.quoteStylePreset || 'minimal';
+        const showMarks = element.style?.showQuoteMarks ?? (preset === 'quotation_marks');
+
+        let displayContent = formattedText;
+        if (showMarks && displayContent && !displayContent.startsWith('“') && !displayContent.startsWith('"')) {
+            displayContent = `“${displayContent}”`;
+        }
+
         return (
             <div 
+                onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}
+                title={isEditor ? "Clique duplo para editar a frase diretamente" : undefined}
                 style={{
                     ...style, 
                     ...alignmentStyles, 
-                    lineHeight: style.lineHeight || 1.3, 
+                    lineHeight: style.lineHeight || 1.35, 
                     display: 'flex', 
                     width: '100%', 
                     height: '100%', 
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    textTransform: cssTransform as any
+                    whiteSpace: (style as any).whiteSpace || 'normal',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                    textTransform: cssTransform as any,
+                    boxSizing: 'border-box'
                 }}
             >
-                {content}
+                {preset === 'divider_card' ? (
+                    <div className="w-full h-full p-2 rounded-xl border border-[#eedad5] bg-[#fffbf9] flex flex-col justify-center items-center text-center shadow-2xs">
+                        <span className="text-[9px] text-[#b84a56] font-bold uppercase tracking-wider mb-0.5">✦ Inspiração ✦</span>
+                        <div className="italic">{displayContent}</div>
+                    </div>
+                ) : (
+                    <span>{displayContent}</span>
+                )}
             </div>
         );
     }

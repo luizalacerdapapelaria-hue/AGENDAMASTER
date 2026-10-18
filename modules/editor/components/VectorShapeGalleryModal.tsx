@@ -328,7 +328,7 @@ export const VectorShapeGalleryModal: React.FC<VectorShapeGalleryModalProps> = (
                             onClick={() => setActiveTab('components')}
                             className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                 activeTab === 'components'
-                                    ? 'bg-stone-900 text-white shadow-xs'
+                                    ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs'
                                     : 'bg-white text-stone-600 hover:bg-stone-50 border border-stone-200'
                             }`}
                         >
@@ -343,11 +343,11 @@ export const VectorShapeGalleryModal: React.FC<VectorShapeGalleryModalProps> = (
                             onClick={() => setActiveTab('modular_frames')}
                             className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                 activeTab === 'modular_frames'
-                                    ? 'bg-amber-800 text-white shadow-xs'
+                                    ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs'
                                     : 'bg-white text-stone-600 hover:bg-stone-50 border border-stone-200'
                             }`}
                         >
-                            <Layers className="w-3.5 h-3.5 text-amber-500" />
+                            <Layers className="w-3.5 h-3.5 text-white" />
                             <span>Molduras Pré-Montadas</span>
                             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeTab === 'modular_frames' ? 'bg-white/20' : 'bg-stone-100 text-stone-500'}`}>
                                 {MODULAR_FRAME_PRESETS.length}
@@ -358,13 +358,13 @@ export const VectorShapeGalleryModal: React.FC<VectorShapeGalleryModalProps> = (
                             onClick={() => setActiveTab('frame_builder')}
                             className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                 activeTab === 'frame_builder'
-                                    ? 'bg-indigo-700 text-white shadow-xs'
+                                    ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs'
                                     : 'bg-white text-stone-600 hover:bg-stone-50 border border-stone-200'
                             }`}
                         >
-                            <Compass className="w-3.5 h-3.5 text-indigo-400" />
+                            <Compass className="w-3.5 h-3.5 text-white" />
                             <span>Construtor de Moldura</span>
-                            <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-amber-100 text-amber-900 font-bold">
+                            <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-rose-100 text-[#b84a56] font-bold">
                                 Interativo
                             </span>
                         </button>

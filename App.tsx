@@ -24,13 +24,16 @@ const App: React.FC = () => {
       const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
       const search = new URLSearchParams(window.location.search);
       const pageParam = (search.get('page') || '').toLowerCase();
+      const hash = (window.location.hash || '').toLowerCase().replace(/^#\/?/, '').replace(/\/+$/, '');
 
       if (
         path === '/agendamaster' || 
         path.endsWith('/agendamaster') || 
         path.includes('/agendamaster') ||
         pageParam === 'agendamaster' || 
-        pageParam === 'landing'
+        pageParam === 'landing' ||
+        hash === 'agendamaster' ||
+        hash === 'landing'
       ) {
         return AppState.LANDING;
       }
@@ -49,14 +52,27 @@ const App: React.FC = () => {
         pageParam === 'diagnostico' ||
         pageParam === 'raspadinha' ||
         pageParam === 'desconto' ||
-        pageParam === 'oferta'
+        pageParam === 'oferta' ||
+        hash === 'quiz' ||
+        hash === 'diagnostico' ||
+        hash === 'raspadinha' ||
+        hash === 'desconto' ||
+        hash === 'oferta'
       ) {
         return AppState.QUIZ;
       }
-      if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
+      if (
+        path === '/acesso' || 
+        path.endsWith('/acesso') || 
+        path === '/login' || 
+        pageParam === 'acesso' || 
+        pageParam === 'login' ||
+        hash === 'acesso' ||
+        hash === 'login'
+      ) {
         return AppState.LOGIN;
       }
-      if (path === '/welcome' || pageParam === 'welcome') {
+      if (path === '/welcome' || pageParam === 'welcome' || hash === 'welcome') {
         return AppState.WELCOME;
       }
     }
@@ -68,7 +84,12 @@ const App: React.FC = () => {
   const [initialConfig, setInitialConfig] = useState<Partial<AgendaConfig> | undefined>(undefined);
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
-    return localStorage.getItem('agenda_master_exe_url') || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.0/Agenda.Master.Setup.2.0.0.exe';
+    const saved = localStorage.getItem('agenda_master_exe_url');
+    if (saved && (saved.includes('v1.') || saved.includes('1.0.0') || saved.includes('1.0.1') || saved.includes('1.0.2'))) {
+      localStorage.removeItem('agenda_master_exe_url');
+      return 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.0/Agenda.Master.Setup.2.0.0.exe';
+    }
+    return saved || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.0/Agenda.Master.Setup.2.0.0.exe';
   });
 
   const verifiedEmailRef = React.useRef<string | null>(null);
@@ -89,15 +110,23 @@ const App: React.FC = () => {
     }
   };
 
-  // Handle browser back/forward button
+  // Handle browser back/forward button and hash change
   useEffect(() => {
     if (isElectron) return;
-    const handlePopState = () => {
+    const handleNavigationChange = () => {
       const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
       const search = new URLSearchParams(window.location.search);
       const pageParam = (search.get('page') || '').toLowerCase();
+      const hash = (window.location.hash || '').toLowerCase().replace(/^#\/?/, '').replace(/\/+$/, '');
 
-      if (path === '/agendamaster' || path.endsWith('/agendamaster') || pageParam === 'agendamaster' || pageParam === 'landing') {
+      if (
+        path === '/agendamaster' || 
+        path.endsWith('/agendamaster') || 
+        pageParam === 'agendamaster' || 
+        pageParam === 'landing' ||
+        hash === 'agendamaster' ||
+        hash === 'landing'
+      ) {
         setAppState(AppState.LANDING);
       } else if (
         path === '/quiz' || 
@@ -112,18 +141,36 @@ const App: React.FC = () => {
         pageParam === 'quiz' || 
         pageParam === 'diagnostico' || 
         pageParam === 'raspadinha' || 
-        pageParam === 'desconto'
+        pageParam === 'desconto' ||
+        pageParam === 'oferta' ||
+        hash === 'quiz' ||
+        hash === 'diagnostico' ||
+        hash === 'raspadinha' ||
+        hash === 'desconto' ||
+        hash === 'oferta'
       ) {
         setAppState(AppState.QUIZ);
-      } else if (path === '/acesso' || path.endsWith('/acesso') || path === '/login' || pageParam === 'acesso' || pageParam === 'login') {
+      } else if (
+        path === '/acesso' || 
+        path.endsWith('/acesso') || 
+        path === '/login' || 
+        pageParam === 'acesso' || 
+        pageParam === 'login' ||
+        hash === 'acesso' ||
+        hash === 'login'
+      ) {
         setAppState(AppState.LOGIN);
-      } else if (path === '/welcome' || pageParam === 'welcome') {
+      } else if (path === '/welcome' || pageParam === 'welcome' || hash === 'welcome') {
         setAppState(AppState.WELCOME);
       }
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handleNavigationChange);
+    window.addEventListener('hashchange', handleNavigationChange);
+    return () => {
+      window.removeEventListener('popstate', handleNavigationChange);
+      window.removeEventListener('hashchange', handleNavigationChange);
+    };
   }, [isElectron]);
 
   // Global network error fallback interceptor to prevent "Failed to fetch" from bubbling up as uncaught rejections/exceptions

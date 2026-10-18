@@ -483,23 +483,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
   };
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col items-center justify-center p-4 gap-4 md:py-12 relative font-sans">
-      {/* Ambient orange glow */}
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-72 bg-orange-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+    <div className="min-h-screen bg-gradient-to-b from-[#faf6f4] via-[#fffbf9] to-[#f9f1ee] text-slate-800 flex flex-col items-center justify-center p-4 gap-4 md:py-12 relative font-sans antialiased">
+      {/* Ambient feminine glow */}
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-72 bg-[#b84a56]/5 rounded-full blur-3xl pointer-events-none z-0" />
 
-      <div className="bg-stone-900 rounded-3xl shadow-2xl shadow-black/80 w-full max-w-lg overflow-hidden border border-stone-800 flex flex-col shrink-0 relative z-10">
+      <div className="bg-white rounded-3xl shadow-[0_16px_50px_rgba(184,74,86,0.08)] w-full max-w-lg overflow-hidden border border-[#eedad5] flex flex-col shrink-0 relative z-10">
         
         {/* Informative Guidance banner if database keys are not yet stored */}
         {!isSupabaseConfigured && (
-          <div className="mx-6 mt-6 p-4 bg-amber-950/40 rounded-2xl border border-amber-800/50 text-xs text-amber-200 flex flex-col gap-2 shadow-xs">
-            <div className="flex gap-2 font-bold text-amber-300 items-start">
-              <Database className="w-4 h-4 flex-shrink-0 text-amber-400 mt-0.5" />
+          <div className="mx-6 mt-6 p-4 bg-[#fdeeed] rounded-2xl border border-[#f5ded9] text-xs text-[#9f3d4a] flex flex-col gap-2 shadow-2xs">
+            <div className="flex gap-2 font-bold text-[#b84a56] items-start">
+              <Database className="w-4 h-4 flex-shrink-0 text-[#b84a56] mt-0.5" />
               <span>Chaves de API Supabase não detectadas</span>
             </div>
-            <p className="text-amber-200/80 leading-relaxed">
+            <p className="text-slate-600 leading-relaxed">
               O aplicativo está pronto para autenticação via Supabase! Para ativar o login com a lista de alunos cadastrados, declare 
-              <code className="bg-amber-900/60 px-1 py-0.5 rounded mx-1 text-amber-300 font-mono">VITE_SUPABASE_URL</code> e 
-              <code className="bg-amber-900/60 px-1 py-0.5 rounded mx-1 text-amber-300 font-mono">VITE_SUPABASE_ANON_KEY</code> 
+              <code className="bg-[#fcedea] px-1 py-0.5 rounded mx-1 text-[#b84a56] font-mono">VITE_SUPABASE_URL</code> e 
+              <code className="bg-[#fcedea] px-1 py-0.5 rounded mx-1 text-[#b84a56] font-mono">VITE_SUPABASE_ANON_KEY</code> 
               nas configurações do seu projeto e execute um novo deploy.
             </p>
           </div>
@@ -511,41 +511,41 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
           {step === 'email' && (
             <>
               <div className="text-center mb-6">
-                <div className="bg-gradient-to-br from-amber-600 to-orange-600 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-600/20 text-white text-2xl select-none">
-                  <Sparkles className="w-7 h-7 text-white" />
+                <div className="bg-[#fdeeed] border border-[#f5ded9] w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs text-white text-2xl select-none">
+                  <Sparkles className="w-7 h-7 text-[#b84a56]" />
                 </div>
-                <div className="inline-block bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider mb-2">
+                <div className="inline-block bg-[#fcedea] border border-[#f8d4ce] text-[#9f3d4a] text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider mb-2">
                   Portal do Aluno
                 </div>
-                <h1 className="text-2xl font-black font-sans text-white tracking-tight">
+                <h1 className="text-2xl font-black font-sans text-slate-900 tracking-tight">
                   Área do Aluno
                 </h1>
-                <p className="text-stone-400 mt-2 text-xs font-medium max-w-sm mx-auto">
+                <p className="text-slate-500 mt-2 text-xs font-normal max-w-sm mx-auto">
                   Por favor, insira o e-mail que você utilizou para realizar a compra do curso na HeroSpark.
                 </p>
               </div>
 
               <form onSubmit={handleEmailSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1.5">Email de Aluno</label>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Email de Aluno</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Mail className="h-4 w-4 text-orange-400" />
+                      <Mail className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
                       type="email"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500"
+                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400"
                       placeholder="seuemail@exemplo.com"
                     />
                   </div>
                 </div>
 
                 {error && (
-                  <div className="text-red-300 text-xs bg-red-950/50 p-4 rounded-xl border border-red-800/60 flex gap-2.5 items-start leading-relaxed animate-shake">
-                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-700 text-xs bg-red-50 p-4 rounded-xl border border-red-200 flex gap-2.5 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
                     <p className="flex-1 font-medium text-left">{error}</p>
                   </div>
                 )}
@@ -553,7 +553,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/30 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
+                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-rose-900/15 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b84a56] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
                 >
                   {isLoading ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -570,9 +570,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                     href="https://pay.herospark.com/agenda-master-523399"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-orange-400 hover:text-orange-300 font-semibold hover:underline inline-flex items-center gap-1.5 transition-colors"
+                    className="text-xs text-[#b84a56] hover:text-[#9f3d4a] font-semibold hover:underline inline-flex items-center gap-1.5 transition-colors"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                    <Sparkles className="w-3.5 h-3.5 text-[#b84a56]" />
                     <span>Ainda não é aluno? Adquira seu acesso aqui</span>
                   </a>
                 </div>
@@ -584,26 +584,26 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
           {step === 'create_password' && (
             <>
               <div className="text-center mb-6">
-                <div className="bg-orange-500/10 text-orange-400 border border-orange-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-500/10 text-2xl select-none">
-                  <Key className="w-7 h-7 text-orange-400" />
+                <div className="bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs text-2xl select-none">
+                  <Key className="w-7 h-7 text-[#b84a56]" />
                 </div>
-                <h1 className="text-2xl font-black font-sans text-white tracking-tight">
+                <h1 className="text-2xl font-black font-sans text-slate-900 tracking-tight">
                   Seja muito bem-vindo!
                 </h1>
-                <p className="text-stone-400 mt-2 text-xs font-medium max-w-sm mx-auto leading-relaxed">
+                <p className="text-slate-500 mt-2 text-xs font-normal max-w-sm mx-auto leading-relaxed">
                   Identificamos que este é o seu <strong>primeiro acesso</strong>. Por favor, cadastre uma senha segura para proteger sua conta e acessar a plataforma de agora em diante.
                 </p>
-                <div className="mt-3 inline-block bg-stone-950 border border-stone-800 px-3 py-1 rounded-full text-[11px] text-stone-300 font-mono">
-                  E-mail: <span className="font-semibold text-orange-400">{email}</span>
+                <div className="mt-3 inline-block bg-[#faf5f3] border border-[#eedad5] px-3 py-1 rounded-full text-[11px] text-slate-600 font-mono">
+                  E-mail: <span className="font-semibold text-[#b84a56]">{email}</span>
                 </div>
               </div>
 
               <form onSubmit={handleCreatePasswordSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1.5">Escolha uma Senha</label>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Escolha uma Senha</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-orange-400" />
+                      <Lock className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
                       type="password"
@@ -611,17 +611,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                       minLength={6}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500 font-mono"
+                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
                       placeholder="No mínimo 6 caracteres"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1.5">Confirme a Senha</label>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Confirme a Senha</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-orange-400" />
+                      <Lock className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
                       type="password"
@@ -629,22 +629,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                       minLength={6}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500 font-mono"
+                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
                       placeholder="Repita a senha escolhida"
                     />
                   </div>
                 </div>
 
                 {error && (
-                  <div className="text-red-300 text-xs bg-red-950/50 p-3 rounded-xl border border-red-800/60 flex gap-2 items-start leading-relaxed animate-shake">
-                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-700 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
                     <span>{error}</span>
                   </div>
                 )}
 
                 {successMessage && (
-                  <div className="text-emerald-300 text-xs bg-emerald-950/50 p-3 rounded-xl border border-emerald-800/60 flex gap-2 items-start leading-relaxed">
-                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-emerald-800 text-xs bg-emerald-50 p-3 rounded-xl border border-emerald-200 flex gap-2 items-start leading-relaxed">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
                     <span>{successMessage}</span>
                   </div>
                 )}
@@ -653,14 +653,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                   <button
                     type="button"
                     onClick={handleResetStep}
-                    className="flex-1 py-3.5 px-4 border border-stone-750 rounded-xl text-xs font-bold uppercase tracking-wider text-stone-300 bg-stone-800 hover:bg-stone-750 transition-all text-center cursor-pointer"
+                    className="flex-1 py-3.5 px-4 border border-[#eedad5] rounded-xl text-xs font-bold uppercase tracking-wider text-slate-700 bg-white hover:bg-slate-50 transition-all text-center cursor-pointer"
                   >
                     Voltar
                   </button>
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="flex-[2] flex justify-center items-center py-3.5 px-4 rounded-xl shadow-lg shadow-orange-600/30 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                    className="flex-[2] flex justify-center items-center py-3.5 px-4 rounded-xl shadow-lg shadow-rose-900/15 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b84a56] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
                   >
                     {isLoading ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -676,42 +676,42 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
           {step === 'password' && (
             <>
               <div className="text-center mb-6">
-                <div className="bg-gradient-to-br from-amber-600 to-orange-600 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-600/20">
-                  <Lock className="text-white w-6 h-6" />
+                <div className="bg-[#fdeeed] border border-[#f5ded9] w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs text-[#b84a56]">
+                  <Lock className="w-6 h-6 text-[#b84a56]" />
                 </div>
-                <h1 className="text-2xl font-black font-sans text-white tracking-tight">
+                <h1 className="text-2xl font-black font-sans text-slate-900 tracking-tight">
                   Insira sua Senha
                 </h1>
-                <p className="text-stone-400 mt-2 text-xs font-medium max-w-sm mx-auto">
+                <p className="text-slate-500 mt-2 text-xs font-normal max-w-sm mx-auto">
                   A conta já possui senha cadastrada. Digite abaixo para acessar seu painel de criação.
                 </p>
-                <div className="mt-3 inline-block bg-stone-950 border border-stone-800 px-3 py-1 rounded-full text-[11px] text-stone-300 font-mono">
-                  Logado como: <span className="font-semibold text-orange-400">{email}</span>
+                <div className="mt-3 inline-block bg-[#faf5f3] border border-[#eedad5] px-3 py-1 rounded-full text-[11px] text-slate-600 font-mono">
+                  Logado como: <span className="font-semibold text-[#b84a56]">{email}</span>
                 </div>
               </div>
 
               <form onSubmit={handlePasswordSubmit} className="space-y-4">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider">Senha de Aluno</label>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Senha de Aluno</label>
                     <button
                       type="button"
                       onClick={handleResetStep}
-                      className="text-xs text-orange-400 hover:text-orange-300 font-bold cursor-pointer"
+                      className="text-xs text-[#b84a56] hover:text-[#9f3d4a] font-bold cursor-pointer"
                     >
                       Alterar E-mail
                     </button>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-orange-400" />
+                      <Lock className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
                       type="password"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 block w-full bg-stone-950 border-stone-800 rounded-xl border p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all placeholder-stone-500"
+                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400"
                       placeholder="Insira sua senha de acesso"
                       autoFocus
                     />
@@ -721,16 +721,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                     <button
                       type="button"
                       onClick={() => setShowForgotHelp(!showForgotHelp)}
-                      className="text-xs text-orange-400 hover:text-orange-300 hover:underline font-semibold focus:outline-none cursor-pointer"
+                      className="text-xs text-[#b84a56] hover:text-[#9f3d4a] hover:underline font-semibold focus:outline-none cursor-pointer"
                     >
                       Esqueceu sua senha?
                     </button>
                   </div>
 
                   {showForgotHelp && (
-                    <div className="p-4 bg-stone-950/90 border border-stone-800 rounded-2xl text-xs text-stone-300 leading-relaxed shadow-xs mt-3 flex flex-col gap-2 animate-fade-in text-left">
-                      <div className="flex gap-2 font-bold text-white items-center">
-                        <ShieldCheck className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                    <div className="p-4 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl text-xs text-slate-700 leading-relaxed shadow-xs mt-3 flex flex-col gap-2 animate-fade-in text-left">
+                      <div className="flex gap-2 font-bold text-slate-900 items-center">
+                        <ShieldCheck className="w-4 h-4 text-[#b84a56] flex-shrink-0" />
                         <span>Recuperação de Acesso do Aluno</span>
                       </div>
                       <p>
@@ -740,7 +740,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                         Envie uma mensagem para o suporte com o e-mail de compra para que possamos resetar sua senha no banco:
                         <a 
                           href="mailto:luizalacerdaatelie@gmail.com?subject=Recuperar Senha AgendaMaster" 
-                          className="font-bold text-orange-400 hover:underline block mt-1"
+                          className="font-bold text-[#b84a56] hover:underline block mt-1"
                         >
                           luizalacerdaatelie@gmail.com
                         </a>
@@ -748,7 +748,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                       <button
                         type="button"
                         onClick={() => setShowForgotHelp(false)}
-                        className="text-[10px] uppercase font-bold text-orange-400 hover:text-orange-300 self-end mt-1 border border-stone-700 px-2.5 py-1 rounded-lg bg-stone-850 shadow-2xs cursor-pointer"
+                        className="text-[10px] uppercase font-bold text-[#b84a56] hover:text-[#9f3d4a] self-end mt-1 border border-[#f5ded9] px-2.5 py-1 rounded-lg bg-white shadow-2xs cursor-pointer"
                       >
                         Entendi
                       </button>
@@ -757,8 +757,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                 </div>
 
                 {error && (
-                  <div className="text-red-300 text-xs bg-red-950/50 p-3 rounded-xl border border-red-800/60 flex gap-2 items-start leading-relaxed animate-shake">
-                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-700 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
                     <span>{error}</span>
                   </div>
                 )}
@@ -766,7 +766,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/30 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
+                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-rose-900/15 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b84a56] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
                 >
                   {isLoading ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -783,13 +783,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
           )}
 
           {/* Secure transaction notice */}
-          <div className="mt-6 flex justify-center items-center gap-1.5 text-stone-400 text-[10px] font-semibold uppercase tracking-wider">
-            <ShieldCheck className="w-3.5 h-3.5 text-orange-500" />
+          <div className="mt-6 flex justify-center items-center gap-1.5 text-slate-400 text-[10px] font-semibold uppercase tracking-wider">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#b84a56]" />
             <span>Portal do Aluno Protegido e Criptografado</span>
           </div>
 
           {/* Self-healing Cache purger option */}
-          <div className="mt-6 pt-4 border-t border-stone-800 flex flex-col items-center gap-2">
+          <div className="mt-6 pt-4 border-t border-[#f2deda] flex flex-col items-center gap-2">
             <button
               type="button"
               onClick={async () => {
@@ -804,7 +804,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                   window.location.reload();
                 }
               }}
-              className="text-[10px] text-stone-400 hover:text-orange-400 hover:underline font-bold uppercase tracking-wider flex items-center justify-center gap-1 bg-stone-950/60 hover:bg-stone-950 px-3.5 py-2 rounded-xl transition-all border border-stone-800 w-full cursor-pointer"
+              className="text-[10px] text-slate-500 hover:text-[#b84a56] hover:underline font-bold uppercase tracking-wider flex items-center justify-center gap-1 bg-[#faf5f3] hover:bg-[#fae1dc] px-3.5 py-2 rounded-xl transition-all border border-[#eedad5] w-full cursor-pointer"
             >
               🧹 Travamentos ou problemas para carregar? Limpar Cache
             </button>
