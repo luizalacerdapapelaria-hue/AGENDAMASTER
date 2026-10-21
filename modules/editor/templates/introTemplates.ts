@@ -519,10 +519,10 @@ export const INTRO_TEMPLATES: IntroPage[] = [
         elements: [
             // Fundo Aquarela Topo + Ornamento Floral
             { id: 'mc-blob', type: 'vector_shape', name: 'Aquarela Topo Mensal', x: 6, y: 3, w: 38, h: 12, zIndex: 0, style: { shapeType: 'organic_blob_elongated', backgroundColor: '#fce7ec', borderColor: 'transparent', borderWidth: 0, fillOpacity: 0.7 } },
-            { id: 'mc-mno', type: 'month_number', x: 8, y: 5.5, w: 13, h: 8, zIndex: 2, style: { fontSize: 30, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#b56576', textAlign: 'right' } },
+            { id: 'mc-mno', type: 'month_number', x: 8, y: 5.5, w: 13, h: 8, zIndex: 2, style: { fontSize: 22, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#b56576', textAlign: 'right' } },
             { id: 'mc-sep', type: 'lines', x: 23, y: 6, w: 0.5, h: 7.5, zIndex: 2, style: { color: '#f3c6d1', borderWidth: 1.2 } },
-            { id: 'mc-mna', type: 'month_name', x: 25.5, y: 6, w: 44, h: 7.5, zIndex: 2, style: { fontSize: 21, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#6d4352', textTransform: 'uppercase', letterSpacing: 1.5 } },
-            { id: 'mc-yr', type: 'year', x: 72, y: 6, w: 20, h: 7.5, zIndex: 2, style: { fontSize: 20, fontWeight: 'normal', fontFamily: 'Dancing Script', color: '#a47148', textAlign: 'right' } },
+            { id: 'mc-mna', type: 'month_name', x: 25.5, y: 6, w: 44, h: 7.5, zIndex: 2, style: { fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#6d4352', textTransform: 'uppercase', letterSpacing: 1.2 } },
+            { id: 'mc-yr', type: 'year', x: 72, y: 6, w: 20, h: 7.5, zIndex: 2, style: { fontSize: 15, fontWeight: 'normal', fontFamily: 'Dancing Script', color: '#a47148', textAlign: 'right' } },
             { 
                 id: 'mc-cal', 
                 type: 'mini_calendar', 
@@ -550,15 +550,15 @@ export const INTRO_TEMPLATES: IntroPage[] = [
             },
             { id: 'mc-nbx', type: 'box', x: 8, y: 80, w: 84, h: 15, zIndex: 0, style: { borderWidth: 1, borderColor: '#c3d9cc', borderRadius: 10, backgroundColor: '#f2f7f4' } },
             { id: 'mc-ntt', type: 'text', content: 'PRIORIDADES & NOTAS DO MÊS', x: 11, y: 81.5, w: 50, h: 3, zIndex: 1, style: { fontSize: 8, fontWeight: 'bold', color: '#4a705a', fontFamily: 'Playfair Display', letterSpacing: 1 } },
-            { id: 'mc-nls', type: 'lines', x: 11, y: 85.5, w: 78, h: 8, zIndex: 1, style: { color: '#b7d1c2', lineSpacing: 16, borderWidth: 0.5 } }
+            { id: 'mc-nls', type: 'lines', x: 11, y: 85.5, w: 78, h: 8, zIndex: 1, style: { color: '#b7d1c2', lineSpacing: 22, borderWidth: 0.5 } }
         ]
     },
     {
         id: 'tpl-mensal-spread-le',
         name: 'Planner Mensal - Foco (Esquerda)',
         elements: [
-            { id: 'msl-mno', type: 'month_number', x: 10, y: 10, w: 15, h: 10, zIndex: 1, style: { fontSize: 36, fontWeight: 'bold', color: '#b56576', fontFamily: 'Playfair Display' } },
-            { id: 'msl-mna', type: 'month_name', x: 26, y: 10, w: 64, h: 10, zIndex: 1, style: { fontSize: 26, fontWeight: 'bold', color: '#6d4352', fontFamily: 'Playfair Display', textTransform: 'uppercase' } },
+            { id: 'msl-mno', type: 'month_number', x: 10, y: 10, w: 15, h: 10, zIndex: 1, style: { fontSize: 24, fontWeight: 'bold', color: '#b56576', fontFamily: 'Playfair Display' } },
+            { id: 'msl-mna', type: 'month_name', x: 26, y: 10, w: 64, h: 10, zIndex: 1, style: { fontSize: 16, fontWeight: 'bold', color: '#6d4352', fontFamily: 'Playfair Display', textTransform: 'uppercase' } },
             { id: 'msl-bx', type: 'box', x: 10, y: 24, w: 80, h: 66, zIndex: 0, style: { borderWidth: 1, borderColor: '#f3c6d1', borderRadius: 12, backgroundColor: '#fdf2f4' } },
             { id: 'msl-tt', type: 'text', content: 'CONQUISTAS E FOCO DO MÊS', x: 14, y: 27, w: 72, h: 4, zIndex: 1, style: { fontSize: 11, fontWeight: 'bold', color: '#9d4e64', fontFamily: 'Playfair Display', letterSpacing: 1 } },
             { id: 'msl-ls', type: 'lines', x: 14, y: 35, w: 72, h: 50, zIndex: 1, style: { color: '#eabcc8', lineSpacing: 24, borderWidth: 0.5 } }
@@ -569,7 +569,7 @@ export const INTRO_TEMPLATES: IntroPage[] = [
         name: 'Planner Mensal - Calendário (Direita)',
         elements: [
             { id: 'msr-mna', type: 'month_name', x: 10, y: 10, w: 50, h: 10, zIndex: 1, style: { fontSize: 16, fontWeight: 'bold', color: '#9d4e64', fontFamily: 'Playfair Display', textTransform: 'uppercase' } },
-            { id: 'msr-yr', type: 'year', x: 60, y: 10, w: 30, h: 10, zIndex: 1, style: { fontSize: 18, fontWeight: 'normal', color: '#a47148', fontFamily: 'Dancing Script', textAlign: 'right' } },
+            { id: 'msr-yr', type: 'year', x: 60, y: 10, w: 30, h: 10, zIndex: 1, style: { fontSize: 16, fontWeight: 'normal', color: '#a47148', fontFamily: 'Dancing Script', textAlign: 'right' } },
             { 
                 id: 'msr-cal', 
                 type: 'mini_calendar', 
@@ -601,9 +601,9 @@ export const INTRO_TEMPLATES: IntroPage[] = [
         id: 'tpl-mensal-split-esquerda',
         name: 'Calendário Mensal - Esquerda (Seg-Qua)',
         elements: [
-            { id: 'spl-mno', type: 'month_number', x: 10, y: 7, w: 12, h: 8, zIndex: 1, style: { fontSize: 32, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#b56576', textAlign: 'right' } },
+            { id: 'spl-mno', type: 'month_number', x: 10, y: 7, w: 12, h: 8, zIndex: 1, style: { fontSize: 24, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#b56576', textAlign: 'right' } },
             { id: 'spl-sep', type: 'lines', x: 24, y: 7, w: 0.5, h: 8, zIndex: 1, style: { color: '#f3c6d1', borderWidth: 1 } },
-            { id: 'spl-mna', type: 'month_name', x: 27, y: 7, w: 60, h: 8, zIndex: 1, style: { fontSize: 22, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#6d4352', textTransform: 'uppercase', letterSpacing: 1.5 } },
+            { id: 'spl-mna', type: 'month_name', x: 27, y: 7, w: 60, h: 8, zIndex: 1, style: { fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#6d4352', textTransform: 'uppercase', letterSpacing: 1.2 } },
             { 
                 id: 'spl-cal-lh', 
                 type: 'mini_calendar', 

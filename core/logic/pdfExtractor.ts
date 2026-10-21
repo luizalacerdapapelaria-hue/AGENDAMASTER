@@ -13,6 +13,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { LayoutElement, ElementType } from '../../types';
+import { getMonthName } from '../backend/calendar';
 
 let blobWorkerUrl: string | null = null;
 
@@ -618,6 +619,408 @@ export const classifyExtractedTextsAsDynamic = (
   return result;
 };
 
+export interface DetectedCalendarResult {
+  detectedCalendars: LayoutElement[];
+  consumedTextIds: Set<string>;
+  consumedShapeIds: Set<string>;
+}
+
+/**
+ * Detecta automaticamente agrupamentos de dias, cabeçalhos de semana e títulos de mês
+ * que formam Mini-Calendários ou Calendários Anuais, unificando-os em elementos de
+ * Dados Variáveis dinâmicos (mini_calendar / full_calendar) que sincronizam automaticamente
+ * na agenda, eliminando dezenas de caixas de textos estáticos soltos.
+ */
+export const detectCalendarsFromExtractedContent = (
+  texts: ExtractedTextItem[],
+  shapes: ExtractedShapeItem[],
+  viewport: { widthPt: number; heightPt: number }
+): DetectedCalendarResult => {
+  const consumedTextIds = new Set<string>();
+  const consumedShapeIds = new Set<string>();
+  const detectedCalendars: LayoutElement[] = [];
+
+  const widthPt = viewport.widthPt || 595;
+  const heightPt = viewport.heightPt || 842;
+
+  // 1. Filtrar números candidatos a dias de calendário (01 a 31)
+  interface NumberCandidate {
+    item: ExtractedTextItem;
+    num: number;
+  }
+  const numberCandidates: NumberCandidate[] = [];
+  for (const t of texts) {
+    const clean = t.text.trim();
+    if (/^(0?[1-9]|[12]\d|3[01])$/.test(clean)) {
+      const val = parseInt(clean, 10);
+      if (val >= 1 && val <= 31 && t.fontSize <= 16) {
+        numberCandidates.push({ item: t, num: val });
+      }
+    }
+  }
+
+  if (numberCandidates.length < 10) {
+    return { detectedCalendars, consumedTextIds, consumedShapeIds };
+  }
+
+  // 2. Agrupamento espacial por proximidade (componentes conexos)
+  const visited = new Set<string>();
+  const clusters: NumberCandidate[][] = [];
+
+  for (let i = 0; i < numberCandidates.length; i++) {
+    const cand = numberCandidates[i];
+    if (visited.has(cand.item.id)) continue;
+
+    const currentCluster: NumberCandidate[] = [];
+    const queue: NumberCandidate[] = [cand];
+    visited.add(cand.item.id);
+
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      currentCluster.push(curr);
+
+      for (let j = 0; j < numberCandidates.length; j++) {
+        const other = numberCandidates[j];
+        if (visited.has(other.item.id)) continue;
+
+        const dx = Math.abs(curr.item.x - other.item.x);
+        const dy = Math.abs(curr.item.y - other.item.y);
+        const df = Math.abs(curr.item.fontSize - other.item.fontSize);
+
+        // Células de calendário ficam tipicamente a até 48pt no X e 35pt no Y
+        if (dx <= 48 && dy <= 35 && df <= 3.0) {
+          visited.add(other.item.id);
+          queue.push(other);
+        }
+      }
+    }
+
+    if (currentCluster.length >= 10) {
+      clusters.push(currentCluster);
+    }
+  }
+
+  // Ordenar clusters pela ordem de leitura (topo para base, esquerda para direita)
+  clusters.sort((a, b) => {
+    const minYa = Math.min(...a.map(c => c.item.y));
+    const minYb = Math.min(...b.map(c => c.item.y));
+    if (Math.abs(minYa - minYb) > 30) return minYa - minYb;
+    const minXa = Math.min(...a.map(c => c.item.x));
+    const minXb = Math.min(...b.map(c => c.item.x));
+    return minXa - minXb;
+  });
+
+  // 3. Validação e enriquecimento de cada cluster
+  clusters.forEach((cluster, clusterIdx) => {
+    const distinctNums = new Set(cluster.map(c => c.num));
+    if (distinctNums.size < 10) return;
+
+    // Verificar se tem pelo menos 3 linhas horizontais distintas
+    const yLevels: number[] = [];
+    for (const c of cluster) {
+      const matchY = yLevels.find(y => Math.abs(y - c.item.y) <= 4.5);
+      if (!matchY) yLevels.push(c.item.y);
+    }
+    if (yLevels.length < 3) return;
+
+    // Verificar se tem pelo menos 4 colunas verticais distintas
+    const xLevels: number[] = [];
+    for (const c of cluster) {
+      const matchX = xLevels.find(x => Math.abs(x - c.item.x) <= 5.5);
+      if (!matchX) xLevels.push(c.item.x);
+    }
+    if (xLevels.length < 4) return;
+
+    let minX = Math.min(...cluster.map(c => c.item.x));
+    let maxX = Math.max(...cluster.map(c => c.item.x + c.item.width));
+    let minY = Math.min(...cluster.map(c => c.item.y));
+    let maxY = Math.max(...cluster.map(c => c.item.y + c.item.height));
+
+    const clusterW = maxX - minX;
+    const clusterH = maxY - minY;
+
+    // Evitar falsos positivos com a página inteira
+    if (clusterW < 20 || clusterH < 20 || clusterW > widthPt * 0.70 || clusterH > heightPt * 0.65) {
+      return;
+    }
+
+    // Identificar fontes e cores dominantes dos números do dia
+    const dayFont = cluster[0].item.fontFamily || 'Inter';
+    const dayFontSize = Math.round(cluster.reduce((sum, c) => sum + c.item.fontSize, 0) / cluster.length);
+    const dayColor = cluster[0].item.color || '#333333';
+
+    // 4. Buscar cabeçalho de dias da semana imediatamente acima dos dias
+    // (ex: D S T Q Q S S ou DOM SEG TER...)
+    let weekdayFont = dayFont;
+    let weekdayFontSize = Math.max(6, Math.round(dayFontSize * 0.85));
+    let weekdayColor = '#666666';
+    let detectedWeekdayFormat: 'initial' | 'two_letters' | 'short' = 'initial';
+    let detectedStartOfWeekOnMonday: boolean = true;
+    const weekdayTextItems: ExtractedTextItem[] = [];
+
+    const potentialWeekdays = texts.filter(t => {
+      if (cluster.some(c => c.item.id === t.id)) return false;
+      const dy = minY - (t.y + t.height);
+      const dyDirect = minY - t.y;
+      const isAbove = (dy >= -4 && dy <= 30) || (dyDirect >= 0 && dyDirect <= 32);
+      const isWithinX = t.x >= minX - 18 && (t.x + t.width) <= maxX + 18;
+      return isAbove && isWithinX;
+    });
+
+    // Procura cabeçalho que pode ser um texto único concatenado ou letras separadas
+    const singleRowJoined = potentialWeekdays.find(t => {
+      const clean = t.text.trim();
+      const tokens = clean.split(/\s+/);
+      return tokens.length >= 5 && tokens.every(tok => /^[a-zA-ZÀ-ÿ2-6ªº]{1,3}$/.test(tok));
+    });
+
+    if (singleRowJoined) {
+      weekdayTextItems.push(singleRowJoined);
+      weekdayFont = singleRowJoined.fontFamily || dayFont;
+      weekdayFontSize = singleRowJoined.fontSize || weekdayFontSize;
+      weekdayColor = singleRowJoined.color || weekdayColor;
+      minY = Math.min(minY, singleRowJoined.y);
+
+      const tokens = singleRowJoined.text.trim().split(/\s+/);
+      const firstTok = tokens[0].toLowerCase();
+      if (firstTok === 'd' || firstTok === 'dom' || firstTok === 'sun' || firstTok === 'do') {
+        detectedStartOfWeekOnMonday = false;
+      } else {
+        detectedStartOfWeekOnMonday = true;
+      }
+      if (tokens[0].length === 3) detectedWeekdayFormat = 'short';
+      else if (tokens[0].length === 2) detectedWeekdayFormat = 'two_letters';
+      else detectedWeekdayFormat = 'initial';
+    } else {
+      // Letras/tokens individuais na mesma linha
+      const validWeekHeaderItems = potentialWeekdays.filter(t => {
+        const clean = t.text.trim().toLowerCase();
+        if (clean.length > 3) return false;
+        return ['d', 's', 't', 'q', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'sab', 'dom', '2ª', '3ª', '4ª', '5ª', '6ª', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'm', 'w', 'f', 'su', 'mo', 'tu', 'we', 'th', 'fr', 'sa'].includes(clean);
+      });
+
+      if (validWeekHeaderItems.length >= 4) {
+        validWeekHeaderItems.forEach(item => weekdayTextItems.push(item));
+        weekdayFont = validWeekHeaderItems[0].fontFamily || dayFont;
+        weekdayFontSize = validWeekHeaderItems[0].fontSize || weekdayFontSize;
+        weekdayColor = validWeekHeaderItems[0].color || weekdayColor;
+        minY = Math.min(minY, Math.min(...validWeekHeaderItems.map(w => w.y)));
+
+        validWeekHeaderItems.sort((a, b) => a.x - b.x);
+        const firstHeader = validWeekHeaderItems[0].text.trim().toLowerCase();
+        if (firstHeader === 'd' || firstHeader === 'dom' || firstHeader === 'sun' || firstHeader === 'do') {
+          detectedStartOfWeekOnMonday = false;
+        } else {
+          detectedStartOfWeekOnMonday = true;
+        }
+        if (validWeekHeaderItems[0].text.trim().length === 3) detectedWeekdayFormat = 'short';
+        else if (validWeekHeaderItems[0].text.trim().length === 2) detectedWeekdayFormat = 'two_letters';
+        else detectedWeekdayFormat = 'initial';
+      }
+    }
+
+    // 5. Buscar Título do Mês acima do cabeçalho da semana / dias
+    let titleFont = dayFont;
+    let titleFontSize = Math.max(8, Math.round(dayFontSize * 1.25));
+    let titleColor = '#000000';
+    let titleTransform: 'uppercase' | 'capitalize' | 'none' = 'uppercase';
+    let detectedMonthIndex: number | null = null;
+    let detectedMonthFormat: 'full' | 'short' = 'full';
+    let titleTextItem: ExtractedTextItem | null = null;
+
+    const potentialTitles = texts.filter(t => {
+      if (cluster.some(c => c.item.id === t.id)) return false;
+      if (weekdayTextItems.some(w => w.id === t.id)) return false;
+      const dy = minY - (t.y + t.height);
+      const dyDirect = minY - t.y;
+      const isAbove = (dy >= -4 && dy <= 38) || (dyDirect >= 0 && dyDirect <= 42);
+      const isWithinX = t.x >= minX - 35 && (t.x + t.width) <= maxX + 35;
+      return isAbove && isWithinX;
+    });
+
+    for (const pt of potentialTitles) {
+      const clean = pt.text.trim();
+      const monthCheck = matchIsolatedMonth(clean);
+      if (monthCheck) {
+        titleTextItem = pt;
+        detectedMonthIndex = monthCheck.monthIndex;
+        detectedMonthFormat = monthCheck.nameFormat;
+        break;
+      }
+      // Verificar se contém nome de mês composto com ano (ex: "JANEIRO 2026", "Jan / 2026")
+      const monthNames = ['janeiro', 'fevereiro', 'março', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      const shortMonthNames = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+      const lower = clean.toLowerCase();
+      const fullIdx = monthNames.findIndex(m => lower.includes(m));
+      if (fullIdx !== -1) {
+        titleTextItem = pt;
+        detectedMonthIndex = fullIdx;
+        detectedMonthFormat = 'full';
+        break;
+      }
+      const shortIdx = shortMonthNames.findIndex(m => lower.includes(m));
+      if (shortIdx !== -1) {
+        titleTextItem = pt;
+        detectedMonthIndex = shortIdx;
+        detectedMonthFormat = 'short';
+        break;
+      }
+    }
+
+    if (titleTextItem) {
+      titleFont = titleTextItem.fontFamily || dayFont;
+      titleFontSize = titleTextItem.fontSize || titleFontSize;
+      titleColor = titleTextItem.color || titleColor;
+      titleTransform = detectStringCaseTransform(titleTextItem.text) as any;
+      minY = Math.min(minY, titleTextItem.y);
+    }
+
+    // 6. Buscar Forma / Caixa Envolvente (Moldura ou Fundo do Calendário)
+    let boxBg: string | undefined = undefined;
+    let boxBorder: string | undefined = undefined;
+    let boxBorderWidth = 0;
+    let boxBorderRadius = 0;
+    let boxBorderStyle: 'solid' | 'dashed' | 'dotted' = 'solid';
+
+    const enclosingBox = shapes.find(shp => {
+      if (shp.isLine || shp.type === 'lines') return false;
+      const coversX = shp.x <= minX + 8 && (shp.x + shp.width) >= maxX - 8;
+      const coversY = shp.y <= minY + 8 && (shp.y + shp.height) >= maxY - 8;
+      const notTooBig = shp.width <= widthPt * 0.70 && shp.height <= heightPt * 0.65;
+      return coversX && coversY && notTooBig;
+    });
+
+    if (enclosingBox) {
+      consumedShapeIds.add(enclosingBox.id);
+      boxBg = enclosingBox.backgroundColor !== 'transparent' ? enclosingBox.backgroundColor : undefined;
+      boxBorder = enclosingBox.borderColor !== 'transparent' ? enclosingBox.borderColor : undefined;
+      boxBorderWidth = enclosingBox.borderWidth || 0;
+      boxBorderRadius = enclosingBox.borderRadius || 0;
+      boxBorderStyle = enclosingBox.borderStyle || 'solid';
+
+      minX = Math.min(minX, enclosingBox.x);
+      minY = Math.min(minY, enclosingBox.y);
+      maxX = Math.max(maxX, enclosingBox.x + enclosingBox.width);
+      maxY = Math.max(maxY, enclosingBox.y + enclosingBox.height);
+    } else {
+      // Adicionar margem de respiro de 3pt em volta caso não tenha moldura
+      minX = Math.max(0, minX - 3);
+      maxX = Math.min(widthPt, maxX + 3);
+      minY = Math.max(0, minY - 3);
+      maxY = Math.min(heightPt, maxY + 3);
+    }
+
+    // 7. Consumir todos os textos pertencentes ao calendário para não gerar textos soltos
+    cluster.forEach(c => consumedTextIds.add(c.item.id));
+    weekdayTextItems.forEach(w => consumedTextIds.add(w.id));
+    if (titleTextItem) consumedTextIds.add(titleTextItem.id);
+
+    // 8. Calcular dimensões relativas (0 a 100%)
+    const finalW = maxX - minX;
+    const finalH = maxY - minY;
+    const xPct = Math.max(0, Math.min(100, (minX / widthPt) * 100));
+    const yPct = Math.max(0, Math.min(100, (minY / heightPt) * 100));
+    const wPct = Math.max(5, Math.min(100 - xPct, (finalW / widthPt) * 100));
+    const hPct = Math.max(4, Math.min(100 - yPct, (finalH / heightPt) * 100));
+
+    const monthLabel = detectedMonthIndex !== null ? getMonthName(detectedMonthIndex, 'full') : null;
+    const calendarName = monthLabel
+      ? `📅 Mini-Calendário (${monthLabel})`
+      : clusters.length > 1
+      ? `📅 Mini-Calendário ${clusterIdx + 1}`
+      : '📅 Mini-Calendário Dinâmico';
+
+    // 9. Gerar elemento LayoutElement do Agenda Master
+    const calElement: LayoutElement = {
+      id: `imported-cal-${Date.now()}-${clusterIdx}`,
+      name: calendarName,
+      type: 'mini_calendar',
+      x: Number(xPct.toFixed(2)),
+      y: Number(yPct.toFixed(2)),
+      w: Number(wPct.toFixed(2)),
+      h: Number(hPct.toFixed(2)),
+      zIndex: 100 + clusterIdx,
+      style: {
+        calendarOffset: clusterIdx === 0 ? 0 : clusterIdx,
+        calendarMonthMode: detectedMonthIndex !== null ? 'fixed' : 'sequence',
+        calendarFixedMonth: detectedMonthIndex !== null ? detectedMonthIndex : undefined,
+        highlightCurrentDay: true,
+        currentDayHighlightColor: '#4f46e5',
+        currentDayHighlightTextColor: '#ffffff',
+        backgroundColor: boxBg || 'transparent',
+        borderColor: boxBorder || 'transparent',
+        borderWidth: boxBorderWidth,
+        borderStyle: boxBorderStyle,
+        borderRadius: boxBorderRadius,
+        padding: 4,
+        fullCalendar: {
+          title: {
+            fontFamily: titleFont,
+            fontSize: titleFontSize,
+            fontWeight: 'bold',
+            color: titleColor,
+            textAlign: 'center',
+            textTransform: titleTransform,
+            lineHeight: 1.2,
+          },
+          weekDays: {
+            fontFamily: weekdayFont,
+            fontSize: weekdayFontSize,
+            fontWeight: '600',
+            color: weekdayColor,
+            textAlign: 'center',
+            lineHeight: 1.2,
+          },
+          days: {
+            fontFamily: dayFont,
+            fontSize: dayFontSize,
+            fontWeight: 'normal',
+            color: dayColor,
+            textAlign: 'center',
+            lineHeight: 1.2,
+          },
+          monthFormat: detectedMonthFormat,
+          weekdayFormat: detectedWeekdayFormat,
+          startOfWeekOnMonday: detectedStartOfWeekOnMonday,
+          startOfWeekDay: detectedStartOfWeekOnMonday ? 1 : 0,
+          grid: {
+            borderColor: '#e5e7eb',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            cellBackgroundColor: 'transparent',
+            headerBackgroundColor: 'transparent',
+            borders: {
+              top: false,
+              bottom: false,
+              left: false,
+              right: false,
+              insideHorizontal: false,
+              insideVertical: false,
+              headerSeparator: false,
+            },
+          },
+          specialDays: {
+            highlightSundays: true,
+            highlightHolidays: false,
+            style: {
+              color: '#ef4444',
+              fontWeight: 'bold',
+            },
+          },
+        },
+      },
+    };
+
+    detectedCalendars.push(calElement);
+  });
+
+  return {
+    detectedCalendars,
+    consumedTextIds,
+    consumedShapeIds,
+  };
+};
+
 /**
  * Converte um LayoutElement entre texto estático ('text') e qualquer tipo variável dinâmico da agenda,
  * preservando fonte, tamanho, cor, posição e o texto original do PDF.
@@ -726,6 +1129,116 @@ export const convertElementBetweenStaticAndDynamic = (
         ...nextStyle,
         variant,
         dateTemplate: tpl,
+      },
+    };
+  }
+
+  if (targetType === 'mini_calendar') {
+    return {
+      ...el,
+      type: 'mini_calendar',
+      name: el.name && el.name.includes('Mini-Calendário') ? el.name : '📅 Mini-Calendário Dinâmico',
+      style: {
+        ...nextStyle,
+        calendarOffset: el.style?.calendarOffset ?? 0,
+        calendarMonthMode: el.style?.calendarMonthMode || 'sequence',
+        highlightCurrentDay: el.style?.highlightCurrentDay ?? true,
+        currentDayHighlightColor: el.style?.currentDayHighlightColor || '#4f46e5',
+        currentDayHighlightTextColor: el.style?.currentDayHighlightTextColor || '#ffffff',
+        padding: el.style?.padding ?? 4,
+        fullCalendar: el.style?.fullCalendar || {
+          title: {
+            fontFamily: el.style?.fontFamily || 'Inter',
+            fontSize: el.style?.fontSize ? Math.round(el.style.fontSize * 1.1) : 9,
+            fontWeight: 'bold',
+            color: el.style?.color || '#000000',
+            textAlign: 'center',
+            textTransform: 'uppercase',
+          },
+          weekDays: {
+            fontFamily: el.style?.fontFamily || 'Inter',
+            fontSize: el.style?.fontSize ? Math.max(6, Math.round(el.style.fontSize * 0.75)) : 6.5,
+            fontWeight: '600',
+            color: '#666666',
+            textAlign: 'center',
+          },
+          days: {
+            fontFamily: el.style?.fontFamily || 'Inter',
+            fontSize: el.style?.fontSize ? Math.max(7, el.style.fontSize) : 7.5,
+            fontWeight: 'normal',
+            color: el.style?.color || '#333333',
+            textAlign: 'center',
+          },
+          monthFormat: 'full',
+          weekdayFormat: 'initial',
+          startOfWeekOnMonday: true,
+          startOfWeekDay: 1,
+          grid: {
+            borderColor: '#e5e7eb',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            cellBackgroundColor: 'transparent',
+            headerBackgroundColor: 'transparent',
+            borders: {
+              top: false,
+              bottom: false,
+              left: false,
+              right: false,
+              insideHorizontal: false,
+              insideVertical: false,
+              headerSeparator: false,
+            },
+          },
+          specialDays: {
+            highlightSundays: true,
+            highlightHolidays: false,
+            style: {
+              color: '#ef4444',
+              fontWeight: 'bold',
+            },
+          },
+        },
+      },
+    };
+  }
+
+  if (targetType === 'full_calendar') {
+    return {
+      ...el,
+      type: 'full_calendar',
+      name: '📆 Calendário Anual Dinâmico',
+      style: {
+        ...nextStyle,
+        monthsPerRow: el.style?.monthsPerRow || 3,
+        gap: el.style?.gap ?? 10,
+        fullCalendar: el.style?.fullCalendar || {
+          title: {
+            fontFamily: el.style?.fontFamily || 'Inter',
+            fontSize: 11,
+            fontWeight: 'bold',
+            color: el.style?.color || '#000000',
+            textAlign: 'center',
+            textTransform: 'uppercase',
+          },
+          weekDays: {
+            fontFamily: el.style?.fontFamily || 'Inter',
+            fontSize: 7.5,
+            fontWeight: 'bold',
+            color: '#666666',
+            textAlign: 'center',
+          },
+          days: {
+            fontFamily: el.style?.fontFamily || 'Inter',
+            fontSize: 8.5,
+            fontWeight: 'normal',
+            color: el.style?.color || '#333333',
+            textAlign: 'center',
+          },
+          monthFormat: 'full',
+          weekdayFormat: 'initial',
+          startOfWeekOnMonday: true,
+          startOfWeekDay: 1,
+        },
       },
     };
   }
@@ -1894,12 +2407,27 @@ export async function extractPdfObjects(
   // Unifica dezenas ou centenas de pequenos pedacinhos de linhas de tabelas em linhas únicas contínuas
   shapes = mergeAndOptimizeShapes(shapes, widthPt, heightPt);
 
+  // 6. Detecção inteligente de Mini-Calendários e Calendários Anuais como Dados Variáveis
+  let detectedCalendars: LayoutElement[] = [];
+  const consumedCalendarTextIds = new Set<string>();
+  const consumedCalendarShapeIds = new Set<string>();
+
+  if (autoDetectDynamicVariables) {
+    const calResult = detectCalendarsFromExtractedContent(texts, shapes, { widthPt, heightPt });
+    detectedCalendars = calResult.detectedCalendars;
+    calResult.consumedTextIds.forEach(id => consumedCalendarTextIds.add(id));
+    calResult.consumedShapeIds.forEach(id => consumedCalendarShapeIds.add(id));
+  }
+
   const elements: LayoutElement[] = [];
   let currentZIndex = 1;
 
   // A. Formas Vetoriais (Camada inferior: Z-Index 1..99)
   // O usuário pode clicar, mudar a cor de preenchimento, contorno, tamanho e posição
   shapes.forEach((shp, idx) => {
+    // Ignora formas que foram incorporadas diretamente em um mini-calendário como fundo/borda
+    if (consumedCalendarShapeIds.has(shp.id)) return;
+
     const xPct = Math.max(0, Math.min(100, (shp.x / widthPt) * 100));
     const yPct = Math.max(0, Math.min(100, (shp.y / heightPt) * 100));
     const wPct = Math.max(0.1, Math.min(100, (shp.width / widthPt) * 100));
@@ -1996,7 +2524,16 @@ export async function extractPdfObjects(
     });
   });
 
-  // C. Textos e Variáveis Dinâmicas da Agenda (Camada superior: Z-Index 100+ para seleção e edição direta)
+  // C. Calendários Dinâmicos (Dados Variáveis Unificados)
+  detectedCalendars.forEach(cal => {
+    cal.zIndex = currentZIndex++;
+    elements.push(cal);
+  });
+
+  // D. Textos e Variáveis Dinâmicas da Agenda (Camada superior: Z-Index 100+ para seleção e edição direta)
+  // Filtra textos que já foram incorporados no Mini-Calendário dinâmico
+  const activeTexts = texts.filter(t => !consumedCalendarTextIds.has(t.id));
+
   // Se o PDF tiver mais de 1 página e autoDetectDynamicVariables estiver ativo, compara coordenadas com página adjacente
   let otherPageTexts: ExtractedTextItem[] | undefined = undefined;
   if (autoDetectDynamicVariables && totalPages > 1) {
@@ -2039,10 +2576,10 @@ export async function extractPdfObjects(
   }
 
   const dynamicClassifications = autoDetectDynamicVariables
-    ? classifyExtractedTextsAsDynamic(texts, { width: widthPt, height: heightPt }, otherPageTexts)
+    ? classifyExtractedTextsAsDynamic(activeTexts, { width: widthPt, height: heightPt }, otherPageTexts)
     : new Map<string, DetectedDynamicClassification>();
 
-  texts.forEach((txt, idx) => {
+  activeTexts.forEach((txt, idx) => {
     let xPct = Math.max(0, Math.min(100, (txt.x / widthPt) * 100));
     const yPct = Math.max(0, Math.min(100, (txt.y / heightPt) * 100));
     // Margem de segurança de 6% na largura para evitar quebras involuntárias com fontes do sistema
@@ -2162,4 +2699,158 @@ export async function getPdfPageCount(fileOrBuffer: File | ArrayBuffer | string)
 
   const pdf = await loadingTask.promise;
   return pdf.numPages || 1;
+}
+
+export type AgendaPageClassificationType =
+  | 'intro'
+  | 'divider'
+  | 'divider_front'
+  | 'divider_verso'
+  | 'monthly_intro'
+  | 'miolo_front'
+  | 'miolo_verso'
+  | 'unknown';
+
+export interface AgendaPdfStructureSummary {
+  totalPages: number;
+  masterPages: number[];
+  mioloPages: {
+    front?: number;
+    verso?: number;
+  };
+  dividerPages: Array<{ front: number; verso?: number; monthName?: string }>;
+  monthlyIntroPages: number[];
+  introPages: number[];
+  pageAnalysis: Record<number, {
+    pageNumber: number;
+    detectedType: AgendaPageClassificationType;
+    confidence: number;
+    typeConfidence?: number;
+    suggestedName?: string;
+  }>;
+}
+
+/**
+ * Analisa inteligentemente a estrutura de páginas de um arquivo PDF de Agenda
+ */
+export async function analyzeAgendaPdfStructure(
+  fileOrBuffer: File | ArrayBuffer | string,
+  onProgress?: (current: number, total: number) => void
+): Promise<AgendaPdfStructureSummary> {
+  setupPdfWorker();
+  let data: ArrayBuffer | string;
+  if (fileOrBuffer instanceof File) {
+    data = await fileOrBuffer.arrayBuffer();
+  } else {
+    data = fileOrBuffer;
+  }
+
+  const loadingTask = pdfjsLib.getDocument({
+    data,
+    cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
+  });
+
+  const pdf = await loadingTask.promise;
+  const numPages = pdf.numPages || 1;
+
+  const pageAnalysis: AgendaPdfStructureSummary['pageAnalysis'] = {};
+  const introPages: number[] = [];
+  const dividerPages: AgendaPdfStructureSummary['dividerPages'] = [];
+  const monthlyIntroPages: number[] = [];
+  let mioloFront: number | undefined = undefined;
+  let mioloVerso: number | undefined = undefined;
+  const masterPagesSet = new Set<number>();
+
+  const samplePages = new Set<number>();
+  for (let p = 1; p <= Math.min(10, numPages); p++) samplePages.add(p);
+  if (numPages > 10) {
+    samplePages.add(Math.floor(numPages * 0.25));
+    samplePages.add(Math.floor(numPages * 0.5));
+    samplePages.add(Math.floor(numPages * 0.75));
+  }
+
+  const pagesToScan = Array.from(samplePages).sort((a, b) => a - b);
+  let scannedCount = 0;
+
+  for (const pageNum of pagesToScan) {
+    try {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const strings = textContent.items.map((it: any) => (it.str || '').trim().toLowerCase()).filter(Boolean);
+      const combinedText = strings.join(' ');
+
+      let detectedType: AgendaPageClassificationType = 'unknown';
+      let confidence = 0.5;
+
+      const months = ['janeiro', 'fevereiro', 'março', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      const foundMonth = months.find(m => combinedText.includes(m));
+      const isDataOuMeta = combinedText.includes('dados') || combinedText.includes('metas') || combinedText.includes('planejamento') || combinedText.includes('contatos') || combinedText.includes('calendário');
+
+      if (pageNum <= 4 && isDataOuMeta) {
+        detectedType = 'intro';
+        introPages.push(pageNum);
+        masterPagesSet.add(pageNum);
+        confidence = 0.85;
+      } else if (foundMonth && (combinedText.includes('visão') || combinedText.includes('mensal') || combinedText.includes('planner'))) {
+        detectedType = 'monthly_intro';
+        monthlyIntroPages.push(pageNum);
+        masterPagesSet.add(pageNum);
+        confidence = 0.8;
+      } else if (foundMonth && strings.length <= 8) {
+        detectedType = 'divider_front';
+        dividerPages.push({ front: pageNum, monthName: foundMonth });
+        masterPagesSet.add(pageNum);
+        confidence = 0.85;
+      } else {
+        const isEven = pageNum % 2 === 0;
+        detectedType = isEven ? 'miolo_verso' : 'miolo_front';
+        confidence = 0.7;
+        if (!isEven && mioloFront === undefined && pageNum > 2) {
+          mioloFront = pageNum;
+          masterPagesSet.add(pageNum);
+        } else if (isEven && mioloVerso === undefined && pageNum > 2) {
+          mioloVerso = pageNum;
+          masterPagesSet.add(pageNum);
+        }
+      }
+
+      pageAnalysis[pageNum] = { pageNumber: pageNum, detectedType, confidence };
+    } catch {
+      // Ignora erro pontual
+    }
+    scannedCount++;
+    onProgress?.(scannedCount, pagesToScan.length);
+  }
+
+  for (let p = 1; p <= numPages; p++) {
+    if (!pageAnalysis[p]) {
+      const isEven = p % 2 === 0;
+      pageAnalysis[p] = {
+        pageNumber: p,
+        detectedType: isEven ? 'miolo_verso' : 'miolo_front',
+        confidence: 0.5
+      };
+    }
+  }
+
+  if (!mioloFront) {
+    mioloFront = numPages >= 3 ? 3 : 1;
+    masterPagesSet.add(mioloFront);
+  }
+  if (!mioloVerso && numPages >= 2) {
+    mioloVerso = mioloFront % 2 !== 0 && numPages >= mioloFront + 1 ? mioloFront + 1 : 2;
+    masterPagesSet.add(mioloVerso);
+  }
+
+  return {
+    totalPages: numPages,
+    masterPages: Array.from(masterPagesSet).sort((a, b) => a - b),
+    mioloPages: { front: mioloFront, verso: mioloVerso },
+    dividerPages,
+    monthlyIntroPages,
+    introPages,
+    pageAnalysis
+  };
 }

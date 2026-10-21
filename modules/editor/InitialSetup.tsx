@@ -149,8 +149,8 @@ export const PLANNER_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
 export const NOTEBOOK_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
   {
     id: 'notebook_pautado',
-    title: 'Caderno Pautado',
-    subtitle: 'Linhas horizontais clássicas espaçadas para escrita confortável, anotações e resumos.',
+    title: 'Caderno Pautado Clássico',
+    subtitle: 'Pauta espaçosa (24px) para escrita confortável, cabeçalho editorial com assunto, data e página.',
     tag: 'Linhas Clássicas',
     iconName: 'lines',
     defaultLayout: 'notebook',
@@ -159,8 +159,8 @@ export const NOTEBOOK_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
   },
   {
     id: 'notebook_pontilhado',
-    title: 'Caderno Pontilhado',
-    subtitle: 'Grade de micropontos discretos para Bullet Journal, anotações livres e esboços.',
+    title: 'Caderno Pontilhado • Bullet Journal',
+    subtitle: 'Grade de micropontos discretos de 5mm, cabeçalho limpo e legenda de símbolos Bullet Journal.',
     tag: 'Bullet Journal',
     iconName: 'dots',
     defaultLayout: 'notebook',
@@ -169,19 +169,29 @@ export const NOTEBOOK_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
   },
   {
     id: 'notebook_quadriculado',
-    title: 'Caderno Quadriculado',
-    subtitle: 'Grade quadriculada de 5mm para tabelas, cálculos, listas e geometria.',
+    title: 'Caderno Quadriculado (Grid 5mm)',
+    subtitle: 'Grade quadriculada nítida de 5mm para tabelas, cálculos, gráficos, listas e geometria.',
     tag: 'Grid 5mm',
     iconName: 'grid',
     defaultLayout: 'notebook',
     defaultName: 'Meu Caderno Quadriculado',
-    notebookElements: [{ id: 'grid-nb', type: 'note_grid' as const, x: 10, y: 10, w: 80, h: 80, zIndex: 1, style: { variant: 'grid', color: '#e5e7eb' } }]
+    notebookElements: (NOTEBOOK_TEMPLATES.find(t => t.id === 'nb-quadriculado')?.elements || NOTEBOOK_TEMPLATES[0].elements) as LayoutElement[]
+  },
+  {
+    id: 'notebook_cornell',
+    title: 'Caderno Método Cornell',
+    subtitle: 'Estrutura pedagógica com tópicos/palavras-chave na esquerda, anotações de aula e resumo na base.',
+    tag: 'Método Cornell',
+    iconName: 'book',
+    defaultLayout: 'notebook',
+    defaultName: 'Meu Caderno Cornell',
+    notebookElements: (NOTEBOOK_TEMPLATES.find(t => t.id === 'nb-cornell')?.elements || NOTEBOOK_TEMPLATES[0].elements) as LayoutElement[]
   },
   {
     id: 'notebook_liso',
     title: 'Caderno Liso (Em Branco)',
-    subtitle: 'Páginas em branco sem linhas para rascunhos livres, ideias e ilustrações.',
-    tag: 'Páginas em Branco',
+    subtitle: 'Páginas em branco sem linhas para rascunhos livres, ideias, lettering e ilustrações.',
+    tag: 'Folha em Branco',
     iconName: 'square',
     defaultLayout: 'notebook',
     defaultName: 'Meu Caderno Liso',
@@ -365,19 +375,21 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   const getSelectedModelName = (): string => {
       if (projectType === 'notebook') {
           if (selectedTemplateElements && selectedTemplateElements.length === 0) return 'Caderno Liso (Em Branco)';
-          if (selectedTemplateElements?.some(el => el.type === 'note_grid' && (el.style as any)?.variant === 'dots')) return 'Caderno Pontilhado';
-          if (selectedTemplateElements?.some(el => el.type === 'note_grid' && (el.style as any)?.variant === 'grid')) return 'Caderno Quadriculado';
-          return 'Caderno Pautado';
+          if (selectedTemplateElements?.some(el => el.type === 'note_grid' && (el.style as any)?.variant === 'dots')) return 'Caderno Pontilhado • Bullet Journal';
+          if (selectedTemplateElements?.some(el => el.type === 'note_grid' && ((el.style as any)?.variant === 'squared' || (el.style as any)?.variant === 'grid'))) return 'Caderno Quadriculado (Grid 5mm)';
+          if (selectedTemplateElements?.some(el => el.id.startsWith('cor-'))) return 'Caderno Método Cornell';
+          return 'Caderno Pautado Clássico';
       }
       const item = LAYOUT_LIBRARY.find(i => i.id === selectedLibraryItemId);
       if (item) {
           if (item.id === 'planner-financeiro') return 'Agenda Financeira';
           if (item.id === 'agenda-padrao-completa') return 'Agenda Diária';
           if (item.id === 'agenda-agendamento-profissional') return 'Agendamento & Clientes';
-          if (item.id === 'planner-semanal-vertical') return 'Planner Semanal';
+          if (item.id === 'planner-semanal-vertical') return 'Planner Semanal Vertical';
           if (item.id === 'planner-diario-comum') return 'Planner Diário de Foco';
-          if (item.id === 'planner-financeiro-pessoal') return 'Planner Financeiro';
-          if (item.id === 'planner-estudos') return 'Planner de Estudos & Rotina';
+          if (item.id === 'planner-financeiro-pessoal') return 'Planner Financeiro Pessoal';
+          if (item.id === 'planner-estudos' || item.id === 'planner-estudante') return 'Planner de Estudos & Rotina';
+          if (item.id === 'planner-saude') return 'Planner de Saúde & Bem-Estar';
           return item.name.replace(/•.*$/, '').trim();
       }
       if (projectType === 'agenda') return 'Agenda Diária';
@@ -535,9 +547,15 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           const hasPlannerBoxes = elements.some(el => el.type === 'planner_day_box');
           if (shouldRegenerate || hasPlannerBoxes || elements.length === 0) {
               if (projectType === 'notebook' || layoutType === 'notebook') {
-                  elements = NOTEBOOK_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
+                  elements = selectedTemplateElements && selectedTemplateElements.length > 0
+                      ? selectedTemplateElements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+                      : (selectedTemplateElements !== null && selectedTemplateElements?.length === 0)
+                          ? []
+                          : NOTEBOOK_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
               } else if (projectType === 'devotional' || layoutType === 'devotional') {
-                  elements = DEVOTIONAL_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
+                  elements = selectedTemplateElements && selectedTemplateElements.length > 0
+                      ? selectedTemplateElements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+                      : DEVOTIONAL_TEMPLATES[0].elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
               } else {
                   // Agenda (1_per_page, 2_per_page, 1_per_page_weekend_shared)
                   const clean = elements.filter(el => el.type !== 'planner_day_box');

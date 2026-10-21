@@ -155,11 +155,11 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
     }
 
     if (element.type === 'note_grid') {
-        const isSquared = style.variant === 'squared';
-        const gridSize = style.gridSize || style.gridSpacing || 15;
-        const color = style.color || style.borderColor || '#cccccc';
+        const isSquared = style.variant === 'squared' || style.variant === 'grid';
+        const gridSize = style.gridSize || style.gridSpacing || 18;
+        const color = style.color || style.borderColor || '#cbd5e1';
         const borderStyle = style.borderStyle || 'solid';
-        const borderWidth = style.borderWidth !== undefined && style.borderWidth > 0 ? style.borderWidth : 1;
+        const borderWidth = style.borderWidth !== undefined && style.borderWidth > 0 ? style.borderWidth : 0.75;
 
         let gridStyle: React.CSSProperties = {};
 

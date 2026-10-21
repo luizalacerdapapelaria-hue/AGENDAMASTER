@@ -14,6 +14,7 @@ interface WelcomeProps {
 
 export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl, onNavigateToLanding }) => {
   const [showReqModal, setShowReqModal] = useState(false);
+  const [downloadFeedback, setDownloadFeedback] = useState(false);
   const [hardwareInfo, setHardwareInfo] = useState<{
     browser: string;
     os: string;
@@ -67,7 +68,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl, onNav
                   Agenda <span className="text-[#b84a56]">Master</span>
                 </h1>
                 <span className="bg-[#fcedea] text-[#9f3d4a] border border-[#f8d4ce] text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  v2.0.0
+                  v2.0.1
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 font-medium">Sistema Profissional de Personalização de Agendas e Planners</p>
@@ -205,21 +206,41 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl, onNav
               </ul>
             </div>
 
-            <div className="pt-8">
+            <div className="pt-8 space-y-3">
               <a
                 href={exeUrl || '#'}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => {
-                  setTimeout(() => {
-                    onChooseBrowser();
-                  }, 1200);
+                  setDownloadFeedback(true);
                 }}
                 className="w-full bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] text-white font-bold text-xs uppercase tracking-wider py-4 px-6 rounded-2xl shadow-lg shadow-rose-900/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer text-center block"
               >
                 <Download className="w-4 h-4" />
                 <span>Baixar Instalador Oficial (.EXE)</span>
               </a>
+
+              {downloadFeedback && (
+                <div className="bg-[#fdeeed] border border-[#f5ded9] rounded-2xl p-3.5 text-center space-y-1.5 transition-all">
+                  <div className="flex items-center justify-center gap-1.5 text-xs font-black text-[#b84a56]">
+                    <CheckCircle2 className="w-4 h-4 text-[#b84a56]" />
+                    <span>Download iniciado!</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-normal font-medium">
+                    O instalador do Windows <b>Agenda.Master.Setup.exe</b> começou a ser baixado. Quando o download terminar, dê dois cliques para instalar no seu computador.
+                  </p>
+                  <div className="pt-1 border-t border-[#f2deda]">
+                    <button
+                      type="button"
+                      onClick={onChooseBrowser}
+                      className="text-xs text-[#b84a56] hover:text-[#9f3d4a] font-bold hover:underline cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <span>Quer usar no navegador enquanto isso? Clique aqui</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

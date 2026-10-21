@@ -1,13 +1,12 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Sparkles, Trophy, CheckCircle2, RotateCcw, Zap } from 'lucide-react';
+import { Sparkles, Trophy, CheckCircle2, Zap } from 'lucide-react';
 
 interface ScratchCardProps {
   onReveal: () => void;
   isRevealed: boolean;
-  onReset?: () => void;
 }
 
-export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed, onReset }) => {
+export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isScratching, setIsScratching] = useState(false);
@@ -196,14 +195,6 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed, 
     onReveal();
   };
 
-  const handleManualReset = () => {
-    setHasTriggeredReveal(false);
-    isRevealedRef.current = false;
-    setScratchPercent(0);
-    initCanvas();
-    onReset?.();
-  };
-
   // Pointer Event handlers (seamless across Mouse, Pen, Touch on iOS/Android/PC)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -288,8 +279,8 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed, 
           </span>
         </span>
 
-        <div className="flex items-center gap-2">
-          {(!isRevealed && !hasTriggeredReveal) ? (
+        {(!isRevealed && !hasTriggeredReveal) && (
+          <div className="flex items-center gap-2">
             <button
               onClick={triggerCompleteReveal}
               type="button"
@@ -298,18 +289,8 @@ export const ScratchCard: React.FC<ScratchCardProps> = ({ onReveal, isRevealed, 
               <Zap className="w-3.5 h-3.5 text-[#b84a56]" />
               <span>Revelar agora</span>
             </button>
-          ) : (
-            <button
-              onClick={handleManualReset}
-              type="button"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#8c5a61] hover:text-[#b84a56] bg-white border border-[#eedad5] hover:border-[#b84a56]/40 px-2.5 py-1 rounded-lg cursor-pointer transition-all"
-              title="Recarregar a raspadinha"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Raspar de novo</span>
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

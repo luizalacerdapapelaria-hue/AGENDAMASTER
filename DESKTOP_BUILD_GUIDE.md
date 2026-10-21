@@ -22,16 +22,24 @@ Certifique-se de que você tem o **Node.js** instalado em seu computador (baixe 
 ### 2. Baixar os Arquivos do Projeto
 Exporte o código do Agenda Master (usando o botão de download/export no painel superior) e extraia a pasta em seu computador.
 
-### 3. Instalar as Dependências do Electron
-Abra o terminal (Prompt de Comando ou PowerShell no Windows, ou Terminal no Mac) na pasta do projeto e execute o comando:
+### 3. Instalar as Dependências do Projeto
+Abra o terminal (Prompt de Comando ou PowerShell no Windows, ou Terminal no Mac) na pasta do projeto e execute:
 
+```bash
+npm install
+```
+
+> **Atenção Importante:** Sempre execute `npm install` completo para que todas as bibliotecas necessárias (incluindo o gerador de PDF, fontes nativas e o `electron-updater`) sejam instaladas na sua pasta `node_modules`. Se você esquecer este passo, o instalador não empacotará os módulos e causará erro de "Cannot find module".
+
+Se você for rodar ou compilar o Electron pela primeira vez em uma máquina nova:
 ```bash
 npm install electron electron-builder concurrently --save-dev
 ```
 
 ### 4. Arquivos já Configurados no Projeto
 Nós já configuramos os arquivos necessários para você:
-* `electron/main.js`: O arquivo inicializador que cria a janela nativa do Windows, gerencia links externos e otimiza o uso de memória.
+* `electron/main.cjs`: O arquivo inicializador com suporte tolerante a falhas, carregamento em nuvem em tempo real (online-first com fallback offline), exportação PDF vetorial nativa e integração com fontes do Windows.
+* `electron/preload.cjs`: Script de preload seguro com ponte IPC para limpeza de cache e recarga em tempo real.
 * Scripts no `package.json`: Comandos prontos para rodar em modo de desenvolvimento ou compilar para distribuição.
 
 ### 5. Compilar para Windows (.EXE)
@@ -41,10 +49,14 @@ Para gerar o instalador nativo de Windows (`.exe`), basta rodar o comando abaixo
 npm run dist
 ```
 
+> **Dica sobre publicação:**  
+> - Para compilar o arquivo `.exe` sem tentar enviar para o GitHub, utilize apenas `npm run dist`. O instalador será gerado diretamente na pasta `/dist-desktop`.  
+> - Se você quiser publicar a release automaticamente no GitHub com `npm run dist -- --publish always`, lembre-se de configurar a sua variável de ambiente `GH_TOKEN` no terminal (`$env:GH_TOKEN="seu_token"` no PowerShell).
+
 Este comando vai:
 1. Compilar todo o projeto React para a pasta `/dist`.
-2. Empacotar a aplicação em um instalador de Windows otimizado.
-3. Gerar o arquivo final em `/dist-desktop/AgendaMaster Setup.exe`.
+2. Empacotar a aplicação em um instalador de Windows otimizado na pasta `/dist-desktop`.
+3. Gerar o arquivo final em `/dist-desktop/Agenda Master Setup 2.0.1.exe`.
 
 ---
 

@@ -793,11 +793,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
             <button
               type="button"
               onClick={async () => {
-                if (typeof window !== 'undefined' && (window as any).clearAppCache) {
-                  const confirm = window.confirm("Deseja limpar o cache e carregar a versão mais recente? Isso resolverá problemas de travamento ou tela em branco e garantirá o acesso imediato.");
-                  if (confirm) {
-                    await (window as any).clearAppCache(true);
+                const confirm = window.confirm("Deseja limpar todo o cache e carregar a versão mais recente? Isso atualizará o sistema para a versão mais nova e resolverá travamentos.");
+                if (!confirm) return;
+
+                // Se estiver dentro do aplicativo Desktop (.EXE)
+                if (typeof window !== 'undefined' && (window as any).electronAPI?.clearCacheAndReload) {
+                  try {
+                    await (window as any).electronAPI.clearCacheAndReload();
+                    return;
+                  } catch (e) {
+                    console.warn('[Electron] Falha ao invocar clearCacheAndReload:', e);
                   }
+                }
+
+                // Navegador web / PWA
+                if (typeof window !== 'undefined' && (window as any).clearAppCache) {
+                  await (window as any).clearAppCache(true);
                 } else {
                   localStorage.clear();
                   sessionStorage.clear();

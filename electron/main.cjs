@@ -1,7 +1,16 @@
-const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { autoUpdater } = require('electron-updater');
+
+// Carregamento seguro e tolerante a falhas do electron-updater (previne crash de startup se não estiver empacotado)
+let autoUpdater = null;
+try {
+  const updaterModule = require('electron-updater');
+  autoUpdater = updaterModule.autoUpdater;
+} catch (updaterErr) {
+  console.warn('[Electron] electron-updater não encontrado ou falhou ao inicializar:', updaterErr.message);
+}
+
 
 // Configuração do IPC para salvar PDF nativamente no Electron
 ipcMain.handle('print-to-pdf', async (event, options) => {
@@ -200,45 +209,111 @@ ipcMain.handle('pick-system-font-file', async () => {
   }
 });
 
-// Configuração do Auto-Updater para atualizações binárias (.exe)
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
-
-// Quando uma atualização estiver disponível para download
-autoUpdater.on('update-available', (info) => {
-  dialog.showMessageBox({
-    type: 'info',
-    title: 'Atualização do Sistema',
-    message: `Uma nova versão do Agenda Master (${info.version}) está disponível. O download iniciou automaticamente em segundo plano e será instalado quando você fechar o aplicativo.`,
-    buttons: ['Entendido']
-  });
-});
-
-// Quando o download da atualização terminar
-autoUpdater.on('update-downloaded', (info) => {
-  dialog.showMessageBox({
-    type: 'question',
-    buttons: ['Reiniciar Agora', 'Mais Tarde'],
-    defaultId: 0,
-    title: 'Atualização Pronta',
-    message: `A versão ${info.version} do Agenda Master foi baixada com sucesso! Deseja reiniciar o aplicativo agora para aplicar as novidades?`
-  }).then((result) => {
-    if (result.response === 0) {
-      autoUpdater.quitAndInstall();
+// IPC para limpar cache e recarregar a versão mais recente em tempo real
+ipcMain.handle('clear-cache-and-reload', async () => {
+  try {
+    const ses = session.defaultSession;
+    await ses.clearCache();
+    await ses.clearStorageData({
+      storages: ['appcache', 'cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+    });
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (win) {
+      await loadAppIntoWindow(win);
     }
-  });
+    return { success: true };
+  } catch (err) {
+    console.error('[Electron] Erro ao limpar cache nativo:', err);
+    return { success: false, error: err.message || String(err) };
+  }
 });
 
-autoUpdater.on('error', (err) => {
-  console.error('Erro no Auto-Updater:', err);
-  // Exibir o erro na tela para ajudar a identificar o que está bloqueando a atualização
-  dialog.showMessageBox({
-    type: 'error',
-    title: 'Erro na Atualização Automática',
-    message: `Ocorreu um erro ao tentar baixar/aplicar a atualização:\n\n${err && err.message ? err.message : String(err)}`,
-    buttons: ['OK']
-  });
+// IPC para forçar reload do aplicativo
+ipcMain.handle('reload-app', async () => {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (win) {
+    win.reload();
+  }
+  return { success: true };
 });
+
+// Configuração do Auto-Updater para atualizações binárias (.exe)
+if (autoUpdater) {
+  autoUpdater.autoDownload = false; // Não tentar baixar automaticamente arquivos que podem não existir ou dar 404
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  // Em caso de erro na verificação (ex: GitHub Releases com status 404 ou sem internet)
+  autoUpdater.on('error', (err) => {
+    // Registra no console de diagnóstico mas NÃO abre janela de erro para não interromper nem assustar o usuário
+    console.warn('[Auto-Updater] Verificação de atualização binária ignorada/indisponível:', err && err.message ? err.message : String(err));
+  });
+
+  // Quando uma atualização estiver disponível no repositório
+  autoUpdater.on('update-available', (info) => {
+    console.log('[Auto-Updater] Nova versão encontrada:', info.version);
+    dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Baixar Atualização', 'Mais Tarde'],
+      defaultId: 0,
+      title: 'Atualização do Agenda Master',
+      message: `Uma nova versão do instalador (${info.version}) está disponível. Deseja realizar o download em segundo plano?`
+    }).then((res) => {
+      if (res.response === 0) {
+        autoUpdater.downloadUpdate().catch((e) => {
+          console.warn('[Auto-Updater] Falha ao baixar pacote:', e.message);
+        });
+      }
+    });
+  });
+
+  // Quando o download da atualização terminar com sucesso
+  autoUpdater.on('update-downloaded', (info) => {
+    dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Reiniciar Agora', 'Mais Tarde'],
+      defaultId: 0,
+      title: 'Atualização Pronta',
+      message: `A versão ${info.version} do Agenda Master foi baixada com sucesso! Deseja reiniciar o aplicativo agora para aplicar as novidades?`
+    }).then((result) => {
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+}
+
+// URL de produção em nuvem para que os usuários SEMPRE acessem a versão mais nova do Agenda Master
+const PRODUCTION_APP_URL = process.env.AGENDA_MASTER_URL || 'https://ais-pre-pqdpg3bbajb7bnh4kht4ij-509420675568.us-east1.run.app';
+
+async function loadAppIntoWindow(win) {
+  if (process.env.ELECTRON_DEV_URL) {
+    console.log('[Electron] Modo desenvolvimento: carregando dev server local:', process.env.ELECTRON_DEV_URL);
+    await win.loadURL(process.env.ELECTRON_DEV_URL);
+    return;
+  }
+
+  const localIndexPath = path.join(__dirname, '../dist/index.html');
+
+  // Se o usuário optar explicitamente por forçar modo offline local
+  if (process.env.ELECTRON_FORCE_LOCAL === 'true' && fs.existsSync(localIndexPath)) {
+    console.log('[Electron] Modo local forçado: carregando arquivo estático.');
+    await win.loadFile(localIndexPath);
+    return;
+  }
+
+  // Arquitetura Online-First: Tenta carregar a nuvem mais recente em tempo real
+  try {
+    console.log('[Electron] Carregando versão mais recente da nuvem:', PRODUCTION_APP_URL);
+    await win.loadURL(PRODUCTION_APP_URL);
+  } catch (netErr) {
+    console.warn('[Electron] Falha ao carregar versão remota (sem conexão ou erro de rede). Usando cópia local embutida:', netErr.message);
+    if (fs.existsSync(localIndexPath)) {
+      await win.loadFile(localIndexPath);
+    } else {
+      console.error('[Electron] Nenhum arquivo local dist/index.html encontrado para fallback.');
+    }
+  }
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -246,7 +321,7 @@ function createWindow() {
     height: 800,
     title: "Agenda Master",
     icon: path.join(__dirname, '../public/icon.png'),
-    autoHideMenuBar: true, // Hides the top menu bar for a cleaner, modern app look
+    autoHideMenuBar: true, // Oculta barra de menus para interface mais limpa e moderna
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -254,15 +329,26 @@ function createWindow() {
     }
   });
 
+  // Atalhos de teclado para recarregar (F5, Ctrl+R, Ctrl+Shift+R)
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      if ((input.control && input.key.toLowerCase() === 'r') || input.key === 'F5') {
+        if (input.shift || (input.control && input.key === 'F5')) {
+          console.log('[Electron] Recarga forçada (ignorando cache)...');
+          win.webContents.reloadIgnoringCache();
+        } else {
+          console.log('[Electron] Recarregando página...');
+          win.webContents.reload();
+        }
+        event.preventDefault();
+      }
+    }
+  });
 
-  if (process.env.ELECTRON_DEV_URL) {
-    win.loadURL(process.env.ELECTRON_DEV_URL);
-  } else {
-    // Load the local production build for 100% reliability, offline support, and speed.
-    win.loadFile(path.join(__dirname, '../dist/index.html'));
-  }
+  // Carrega a aplicação (Online-first com fallback offline)
+  loadAppIntoWindow(win);
 
-  // Open external links (like whatsapp, help desks, or tutorials) in the default web browser
+  // Abrir links externos (como WhatsApp, suporte, links externos) no navegador padrão do sistema
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -272,11 +358,15 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
-  // Verifica atualizações do wrapper binário (.exe) ao iniciar
-  if (!process.env.ELECTRON_DEV_URL) {
-    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-      console.warn('Erro ao inicializar checagem de atualizações binárias:', err);
-    });
+  // Verifica atualizações do wrapper binário (.exe) silenciosamente ao iniciar
+  if (autoUpdater && !process.env.ELECTRON_DEV_URL) {
+    try {
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.warn('[Auto-Updater] Verificação de atualizações binárias:', err.message);
+      });
+    } catch (checkErr) {
+      console.warn('[Auto-Updater] Erro ao iniciar checagem:', checkErr);
+    }
   }
 
   app.on('activate', () => {

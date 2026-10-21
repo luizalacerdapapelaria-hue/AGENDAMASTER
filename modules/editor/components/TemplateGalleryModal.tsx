@@ -125,7 +125,15 @@ export const TemplateGalleryModal: React.FC<TemplateGalleryModalProps> = ({
       const newElements = opt.notebookElements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) as LayoutElement[];
       setConfig(prev => ({
         ...prev,
+        projectType: 'notebook',
+        layoutType: 'notebook',
         elements: newElements,
+        elementsWeeklyLeft: undefined,
+        elementsWeeklyRight: undefined,
+        elementsSaturday: undefined,
+        elementsSunday: undefined,
+        elementsTop: undefined,
+        elementsBottom: undefined,
         ...(mioloOnly ? {} : { introPages: [] })
       }));
       onClose();

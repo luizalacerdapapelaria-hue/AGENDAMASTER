@@ -361,11 +361,11 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 ? (rowHeightPx < rawFontSize * 1.25 ? 1.0 : Math.min(rawLineHeight, 1.1))
                                 : rawLineHeight;
                             const maxFittingFont = Math.max(4.5, Math.floor((rowHeightPx - 1) * 0.82 * 2) / 2);
-                            const effectiveFontSize = isCompactRow ? Math.min(rawFontSize, maxFittingFont) : rawFontSize;
+                            const effectiveFontSize = Math.min(rawFontSize, maxFittingFont);
 
                             const singleLineTextH = effectiveFontSize * effectiveLineHeight;
                             const availVertSpace = Math.max(0, rowHeightPx - singleLineTextH - 0.5);
-                            const padY = isCompactRow ? Math.max(0, Math.min(rawPadding, Math.floor(availVertSpace / 2))) : rawPadding;
+                            const padY = Math.max(0, Math.min(rawPadding, Math.floor(availVertSpace / 2)));
                             const padX = isCompactRow && rowHeightPx < 14 ? Math.min(rawPadding, 2) : rawPadding;
 
                             const effectiveVa = (isCompactRow && va === 'top') ? 'middle' : va;

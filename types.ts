@@ -598,7 +598,8 @@ export type PdfImportDestination =
   | 'divider_verso'      // Verso da Divisória Mensal
   | 'replace'            // Substituir Página Atual
   | 'append'             // Adicionar à Página Atual
-  | 'save_template';     // Salvar na Biblioteca de Modelos (Meus Modelos)
+  | 'save_template'      // Salvar na Biblioteca de Modelos (Meus Modelos)
+  | 'full_agenda';       // Atualizar Agenda Completa (Iniciais + Divisórias + Mensais + Miolo Frente/Verso)
 
 export interface PdfImportBatchItem {
   pageNumber: number;

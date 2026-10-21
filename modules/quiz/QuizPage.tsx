@@ -819,7 +819,6 @@ export const QuizPage: React.FC<QuizPageProps> = ({
               <ScratchCard 
                 onReveal={handleRevealCoupon} 
                 isRevealed={isScratched} 
-                onReset={handleResetScratch}
               />
 
               <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -833,17 +832,6 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Voltar ao Resultado do Diagnóstico</span>
                 </button>
-
-                {isScratched && (
-                  <button
-                    onClick={handleResetScratch}
-                    className="text-xs text-[#b84a56] hover:text-[#9f3d4a] transition-colors inline-flex items-center gap-1.5 underline underline-offset-4 cursor-pointer font-semibold"
-                    title="Recarregar a camada da raspadinha"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Raspar novamente</span>
-                  </button>
-                )}
               </div>
             </div>
 

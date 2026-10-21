@@ -1,5 +1,6 @@
 {
-  "version": "2.0.0",
-  "releaseDate": "2026-10-14",
-  "notes": "Versão 2.0.0 com nova interface responsiva, otimizações de performance e suporte aprimorado."
+  "version": "2.0.1",
+  "releaseDate": "2026-10-21",
+  "notes": "Versão 2.0.1 com melhorias de inicialização, estabilidade na atualização e otimizações gerais."
 }
+

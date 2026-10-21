@@ -394,7 +394,7 @@ export const LAYOUT_LIBRARY: LayoutLibraryItem[] = [
   }),
 
   createLibraryItem({
-    id: 'planner-estudante',
+    id: 'planner-estudos',
     name: 'Planner de Estudos, Provas & Leituras Pastel (1 DPP)',
     description: 'Desenvolvido para estudantes, universitários e concurseiros: Disciplinas & Tópicos do Dia, Cronograma de Sessões/Pomodoro, Revisões & Questões, Resumo/Flashcards e Hidratação.',
     projectGroup: 'planner',
@@ -446,7 +446,11 @@ export const resolveLayoutLibraryConfig = (
   itemId: string,
   year: number = new Date().getFullYear() + 1
 ): Partial<AgendaConfig> | undefined => {
-  const item = LAYOUT_LIBRARY.find(i => i.id === itemId);
+  const item = LAYOUT_LIBRARY.find(
+    i => i.id === itemId || 
+         (itemId === 'planner-estudos' && i.id === 'planner-estudante') || 
+         (itemId === 'planner-estudante' && i.id === 'planner-estudos')
+  );
   if (!item) return undefined;
   return buildPastelModelConfig(item.modelOptions, year);
 };

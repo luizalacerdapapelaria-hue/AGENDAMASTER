@@ -85,11 +85,11 @@ const App: React.FC = () => {
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
     const saved = localStorage.getItem('agenda_master_exe_url');
-    if (saved && (saved.includes('v1.') || saved.includes('1.0.0') || saved.includes('1.0.1') || saved.includes('1.0.2'))) {
+    if (saved && (saved.includes('v1.') || saved.includes('1.0.0') || saved.includes('1.0.1') || saved.includes('1.0.2') || saved.includes('2.0.0'))) {
       localStorage.removeItem('agenda_master_exe_url');
-      return 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.0/Agenda.Master.Setup.2.0.0.exe';
+      return 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.1/Agenda.Master.Setup.2.0.1.exe';
     }
-    return saved || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.0/Agenda.Master.Setup.2.0.0.exe';
+    return saved || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/v2.0.1/Agenda.Master.Setup.2.0.1.exe';
   });
 
   const verifiedEmailRef = React.useRef<string | null>(null);

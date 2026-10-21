@@ -1,9 +1,8 @@
-const CACHE_NAME = 'agendamaster-cache-v1';
+const CACHE_NAME = 'agendamaster-cache-v2.0.1';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/index.css',
-  '/index.tsx',
   '/manifest.json',
   '/icon.svg',
   '/favicon.svg'
@@ -13,7 +12,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(ASSETS_TO_CACHE).catch(err => {
-        console.warn("[PWA SW] Erro ao carregar cache inicial (esperado em desenvolvimento):", err);
+        console.warn("[PWA SW] Erro ao carregar cache inicial:", err);
       });
     })
   );
@@ -37,12 +36,10 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Ignora chamadas que não sâo de leitura simples (ex: POST, PUT, DELETE)
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
 
-  // Ignorar consultas da API do Supabase, requisições de hot-reload ou control plane interno do AI Studio
   if (
     url.pathname.startsWith('/api') || 
     url.pathname.includes('__aistudio') || 
@@ -52,19 +49,35 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Network-First para navegação de páginas (garante que sempre carregue a versão mais recente e atualizada)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          return caches.match(event.request).then((cached) => cached || caches.match('/'));
+        })
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate para outros arquivos estáticos
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Estratégia Stale-While-Revalidate: serve do cache rápido e atualiza por trás
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, networkResponse);
             });
           }
-        }).catch(() => {
-          // Erro de rede em segundo plano silencioso
-        });
+        }).catch(() => {});
         return cachedResponse;
       }
 
@@ -79,11 +92,6 @@ self.addEventListener('fetch', (event) => {
         });
 
         return networkResponse;
-      }).catch(() => {
-        // se falhar offline completo para navegação SPA, entrega a casca principal
-        if (event.request.mode === 'navigate') {
-          return caches.match('/');
-        }
       });
     })
   );

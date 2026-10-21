@@ -3,13 +3,17 @@ import {
   X, Upload, FileText, Sparkles, Check, 
   ChevronLeft, ChevronRight, Layers, Eye, RefreshCw, 
   Trash2, AlertCircle, CheckSquare, Square, ZoomIn, ZoomOut, Type, Minus,
-  Palette, Sliders, CheckCircle2, Layout, Maximize2, BookOpen, Calendar, ArrowRightLeft, BookmarkPlus
+  Palette, Sliders, CheckCircle2, Layout, Maximize2, BookOpen, Calendar, ArrowRightLeft, BookmarkPlus,
+  Star, Zap
 } from 'lucide-react';
 import { LayoutElement, ElementType, PdfImportDestination, PdfImportBatchItem } from '../../../types';
 export type { PdfImportDestination, PdfImportBatchItem };
 import {
   extractPdfObjects,
   getPdfPageCount,
+  analyzeAgendaPdfStructure,
+  AgendaPdfStructureSummary,
+  AgendaPageClassificationType,
   PdfPageExtractionResult,
   PdfExtractionOptions,
   convertElementBetweenStaticAndDynamic,
@@ -53,6 +57,10 @@ export interface PdfPageBatchConfig {
   customName: string;
   dividerRole: 'front' | 'verso';
   mioloRole: 'front' | 'verso';
+  detectedType?: AgendaPageClassificationType;
+  isMaster?: boolean;
+  badgeLabel?: string;
+  confidence?: number;
 }
 
 export interface PdfImportModalProps {
@@ -109,8 +117,15 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
 
   // Destino da importação
   const [destination, setDestination] = useState<PdfImportDestination>(initialDestination || 'miolo_default');
-  const [destinationCategory, setDestinationCategory] = useState<'miolo' | 'divider' | 'pages' | 'current' | 'library'>('miolo');
+  const [destinationCategory, setDestinationCategory] = useState<'full_agenda' | 'miolo' | 'divider' | 'pages' | 'current' | 'library'>(initialDestination === 'full_agenda' ? 'full_agenda' : 'miolo');
   const [customPageName, setCustomPageName] = useState<string>('Layout de Miolo Diário (PDF)');
+
+  // Análise Inteligente da Estrutura de Agenda PDF (Páginas Iniciais, Divisórias, Mensais, Miolo)
+  const [structureSummary, setStructureSummary] = useState<AgendaPdfStructureSummary | null>(null);
+  const [isAnalyzingStructure, setIsAnalyzingStructure] = useState<boolean>(false);
+  const [structureScanProgress, setStructureScanProgress] = useState<{ current: number; total: number } | null>(null);
+  const [filterCategory, setFilterCategory] = useState<'all' | 'master' | 'miolo' | 'divider' | 'monthly_intro' | 'intro'>('master');
+  const [pageRangeInput, setPageRangeInput] = useState<string>('');
 
   // Configurações de importação em lote de páginas do PDF
   const [pageConfigs, setPageConfigs] = useState<PdfPageBatchConfig[]>([]);
@@ -198,8 +213,12 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   // Atualiza destino e ajusta categoria e nome sugerido automaticamente
   const handleDestinationSelect = (newDest: PdfImportDestination) => {
     setDestination(newDest);
-    let cat: 'miolo' | 'divider' | 'pages' | 'current' | 'library' = 'current';
-    if (newDest.startsWith('miolo')) {
+    let cat: 'full_agenda' | 'miolo' | 'divider' | 'pages' | 'current' | 'library' = 'current';
+    if (newDest === 'full_agenda') {
+      cat = 'full_agenda';
+      setDestinationCategory('full_agenda');
+      setCustomPageName('Agenda Completa (Mapeamento Automático)');
+    } else if (newDest.startsWith('miolo')) {
       cat = 'miolo';
       setDestinationCategory('miolo');
       if (newDest === 'miolo_default') setCustomPageName('Miolo Diário Principal (PDF)');
@@ -234,7 +253,25 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
       let newDivRole = cfg.dividerRole;
       let newMioloRole = cfg.mioloRole;
 
-      if (cat === 'divider') {
+      if (cat === 'full_agenda') {
+        if (cfg.detectedType === 'intro') {
+          newName = cfg.customName || `Página Inicial ${pNum}`;
+        } else if (cfg.detectedType === 'monthly_intro') {
+          newName = cfg.customName || `Abertura Mensal ${pNum}`;
+        } else if (cfg.detectedType === 'divider') {
+          newName = 'Capa da Divisória (Frente)';
+          newDivRole = 'front';
+        } else if (cfg.detectedType === 'divider_verso') {
+          newName = 'Verso da Divisória';
+          newDivRole = 'verso';
+        } else if (cfg.detectedType === 'miolo_front') {
+          newName = 'Miolo Frente (Ímpares / Direita)';
+          newMioloRole = 'front';
+        } else if (cfg.detectedType === 'miolo_verso') {
+          newName = 'Miolo Verso (Pares / Esquerda)';
+          newMioloRole = 'verso';
+        }
+      } else if (cat === 'divider') {
         newDivRole = (pNum === 2 || (newDest === 'divider_verso' && pNum === 1)) ? 'verso' : 'front';
         newName = newDivRole === 'verso' ? 'Verso da Divisória' : 'Capa da Divisória (Frente)';
       } else if (cat === 'miolo') {
@@ -257,7 +294,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
     }));
   };
 
-  // Ao selecionar arquivo
+  // Ao selecionar arquivo PDF
   const handleFileSelect = async (selectedFile: File) => {
     if (!selectedFile || (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf'))) {
       setError('Por favor, selecione um arquivo em formato PDF válido.');
@@ -268,20 +305,50 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
     setFileName(selectedFile.name);
     setCustomPageName(selectedFile.name.replace(/\.[^/.]+$/, ''));
     setCurrentPage(1);
+    setStructureSummary(null);
 
     try {
       setLoading(true);
       const pages = await getPdfPageCount(selectedFile);
       setTotalPages(pages || 1);
 
-      // Inicializa configurações de lote para todas as páginas do PDF
+      // Executa Análise Inteligente de Estrutura do PDF (Páginas Iniciais, Divisórias, Mensais, Miolo)
+      let summary: AgendaPdfStructureSummary | null = null;
+      if (pages && pages > 1) {
+        setIsAnalyzingStructure(true);
+        try {
+          summary = await analyzeAgendaPdfStructure(selectedFile, (curr, tot) => {
+            setStructureScanProgress({ current: curr, total: tot });
+          });
+          setStructureSummary(summary);
+        } catch (scanErr) {
+          console.warn('[PdfImportModal] Falha na análise de estrutura:', scanErr);
+        } finally {
+          setIsAnalyzingStructure(false);
+          setStructureScanProgress(null);
+        }
+      }
+
+      // Configuração inicial das páginas:
+      // Se for um arquivo com muitas páginas (>= 4), NÃO seleciona todas as 400 páginas por padrão!
+      // Seleciona de forma inteligente apenas as Páginas Mestras (iniciais, divisória, miolo frente/verso, abertura mensal)
       const initialConfigs: PdfPageBatchConfig[] = Array.from({ length: pages || 1 }, (_, i) => {
         const pNum = i + 1;
         const isEven = pNum % 2 === 0;
-        const divRole: 'front' | 'verso' = (pNum === 2 || (destination === 'divider_verso' && pNum === 1)) ? 'verso' : 'front';
-        const mioloR: 'front' | 'verso' = isEven ? 'verso' : 'front';
+        const analysis = summary?.pageAnalysis?.[pNum];
+        const isMaster = summary?.masterPages?.includes(pNum) ?? (pNum <= 2);
+        const detectedType: AgendaPageClassificationType = analysis?.detectedType || (isEven ? 'miolo_verso' : 'miolo_front');
 
-        let name = `${selectedFile.name.replace(/\.[^/.]+$/, '')} - Pág ${pNum}`;
+        let divRole: 'front' | 'verso' = 'front';
+        if (detectedType === 'divider_verso' || pNum === 2 || (destination === 'divider_verso' && pNum === 1)) {
+          divRole = 'verso';
+        }
+
+        let mioloR: 'front' | 'verso' = isEven ? 'verso' : 'front';
+        if (detectedType === 'miolo_verso') mioloR = 'verso';
+        if (detectedType === 'miolo_front') mioloR = 'front';
+
+        let name = analysis?.suggestedName || `${selectedFile.name.replace(/\.[^/.]+$/, '')} - Pág ${pNum}`;
         if (destinationCategory === 'divider' || destination === 'divider' || destination === 'divider_verso') {
           name = divRole === 'verso' ? 'Verso da Divisória' : 'Capa da Divisória (Frente)';
         } else if (destinationCategory === 'miolo' || destination.startsWith('miolo')) {
@@ -292,15 +359,41 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
           name = `Abertura Mensal ${pNum}`;
         }
 
+        let badgeLabel = '📄 Página';
+        if (detectedType === 'intro') badgeLabel = '📝 Inicial';
+        else if (detectedType === 'divider') badgeLabel = '📑 Divisória (Frente)';
+        else if (detectedType === 'divider_verso') badgeLabel = '📄 Divisória (Verso)';
+        else if (detectedType === 'monthly_intro') badgeLabel = '📅 Abertura Mensal';
+        else if (detectedType === 'miolo_front') badgeLabel = '📖 Miolo (Frente)';
+        else if (detectedType === 'miolo_verso') badgeLabel = '📖 Miolo (Verso)';
+
+        // Se tiver mais de 4 páginas, seleciona APENAS as páginas mestras para não carregar 400 páginas desnecessariamente!
+        const shouldSelect = (pages || 1) <= 4 ? true : isMaster;
+
         return {
           pageNumber: pNum,
-          selected: true,
+          selected: shouldSelect,
           customName: name,
           dividerRole: divRole,
-          mioloRole: mioloR
+          mioloRole: mioloR,
+          detectedType,
+          isMaster,
+          badgeLabel,
+          confidence: analysis?.typeConfidence || 0
         };
       });
+
       setPageConfigs(initialConfigs);
+
+      // Se for uma agenda completa com miolo/divisórias detectadas e mais de 10 páginas,
+      // sugerimos automaticamente a categoria 'full_agenda' ou 'miolo' com as mestras selecionadas
+      if (summary && summary.totalPages >= 10 && (summary.dividerPages.length > 0 || summary.mioloPages.front)) {
+        if (initialDestination === 'full_agenda' || !initialDestination || initialDestination === 'miolo_default') {
+          setDestination('full_agenda');
+          setDestinationCategory('full_agenda');
+          setCustomPageName('Agenda Completa (Mapeamento Automático)');
+        }
+      }
 
       await runExtraction(selectedFile, 1, importMode);
     } catch (err: any) {
@@ -341,6 +434,94 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
 
   const selectOnlyCurrentPage = () => {
     setPageConfigs(prev => prev.map(p => ({ ...p, selected: p.pageNumber === currentPage })));
+  };
+
+  // Selecionar apenas as páginas mestras identificadas pela IA
+  const selectMasterPagesOnly = () => {
+    if (!structureSummary?.masterPages?.length) {
+      // Fallback: primeiras 4 páginas
+      setPageConfigs(prev => prev.map(p => ({ ...p, selected: p.pageNumber <= 4 })));
+      return;
+    }
+    const masterSet = new Set(structureSummary.masterPages);
+    setPageConfigs(prev => prev.map(p => ({ ...p, selected: masterSet.has(p.pageNumber) })));
+  };
+
+  // Selecionar apenas Miolo (Frente e Verso)
+  const selectOnlyMiolo = () => {
+    const mioloSet = new Set<number>();
+    if (structureSummary?.mioloPages.front) mioloSet.add(structureSummary.mioloPages.front);
+    if (structureSummary?.mioloPages.verso) mioloSet.add(structureSummary.mioloPages.verso);
+    if (mioloSet.size === 0) {
+      mioloSet.add(1);
+      if (totalPages >= 2) mioloSet.add(2);
+    }
+    setPageConfigs(prev => prev.map(p => ({ ...p, selected: mioloSet.has(p.pageNumber) })));
+  };
+
+  // Selecionar apenas Divisórias
+  const selectOnlyDividers = () => {
+    const divSet = new Set<number>();
+    if (structureSummary?.dividerPages?.length) {
+      structureSummary.dividerPages.forEach(d => {
+        divSet.add(d.front);
+        if (d.verso) divSet.add(d.verso);
+      });
+    }
+    if (divSet.size === 0) {
+      pageConfigs.forEach(p => {
+        if (p.detectedType === 'divider' || p.detectedType === 'divider_verso') divSet.add(p.pageNumber);
+      });
+    }
+    setPageConfigs(prev => prev.map(p => ({ ...p, selected: divSet.has(p.pageNumber) })));
+  };
+
+  // Selecionar apenas Páginas Iniciais
+  const selectOnlyIntros = () => {
+    const introSet = new Set<number>(structureSummary?.introPages || []);
+    if (introSet.size === 0) {
+      pageConfigs.forEach(p => {
+        if (p.detectedType === 'intro') introSet.add(p.pageNumber);
+      });
+    }
+    setPageConfigs(prev => prev.map(p => ({ ...p, selected: introSet.has(p.pageNumber) })));
+  };
+
+  // Selecionar apenas Aberturas Mensais
+  const selectOnlyMonthlyIntros = () => {
+    const monthSet = new Set<number>(structureSummary?.monthlyIntroPages || []);
+    if (monthSet.size === 0) {
+      pageConfigs.forEach(p => {
+        if (p.detectedType === 'monthly_intro') monthSet.add(p.pageNumber);
+      });
+    }
+    setPageConfigs(prev => prev.map(p => ({ ...p, selected: monthSet.has(p.pageNumber) })));
+  };
+
+  // Aplicar intervalo de páginas customizado digitado pelo usuário (ex: "1-6, 15, 20-22")
+  const applyPageRange = (rangeStr: string) => {
+    if (!rangeStr.trim()) return;
+    const selectedSet = new Set<number>();
+    const parts = rangeStr.split(/[,;\s]+/);
+    for (const part of parts) {
+      if (!part.trim()) continue;
+      if (part.includes('-')) {
+        const [startStr, endStr] = part.split('-');
+        const start = parseInt(startStr, 10);
+        const end = parseInt(endStr, 10);
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let p = Math.min(start, end); p <= Math.max(start, end); p++) {
+            if (p >= 1 && p <= totalPages) selectedSet.add(p);
+          }
+        }
+      } else {
+        const p = parseInt(part, 10);
+        if (!isNaN(p) && p >= 1 && p <= totalPages) selectedSet.add(p);
+      }
+    }
+    if (selectedSet.size > 0) {
+      setPageConfigs(prev => prev.map(p => ({ ...p, selected: selectedSet.has(p.pageNumber) })));
+    }
   };
 
   const setPageRole = (pageNumber: number, role: 'front' | 'verso') => {
@@ -467,11 +648,30 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
       const hasBg = (importMode === 'art_whiteout' || importMode === 'bg_only') && !!result.backgroundDataUrl;
 
       let finalDest = destination;
-      if (destinationCategory === 'divider') {
+      if (destinationCategory === 'full_agenda' || destination === 'full_agenda') {
+        finalDest = 'full_agenda';
+      } else if (destinationCategory === 'divider') {
         finalDest = targetPage.dividerRole === 'verso' ? 'divider_verso' : 'divider';
       } else if (destinationCategory === 'miolo' && destination !== 'miolo_default') {
         finalDest = targetPage.mioloRole === 'verso' ? 'miolo_left' : 'miolo_right';
       }
+
+      const singleBatchItem: PdfImportBatchItem = {
+        pageNumber: targetPage.pageNumber,
+        pageName: targetPage.customName || customPageName,
+        elements: finalElements,
+        backgroundImage: hasBg ? result.backgroundDataUrl : undefined,
+        destination: (destinationCategory === 'full_agenda' || destination === 'full_agenda')
+          ? (targetPage.detectedType === 'intro' ? 'new_intro'
+            : targetPage.detectedType === 'monthly_intro' ? 'new_monthly_intro'
+            : targetPage.detectedType === 'divider' ? 'divider'
+            : targetPage.detectedType === 'divider_verso' ? 'divider_verso'
+            : targetPage.detectedType === 'miolo_verso' ? 'miolo_left'
+            : targetPage.detectedType === 'miolo_front' ? 'miolo_right'
+            : (targetPage.pageNumber % 2 === 0 ? 'miolo_left' : 'miolo_right'))
+          : finalDest,
+        isDividerVerso: targetPage.dividerRole === 'verso'
+      };
 
       onImport(
         finalElements,
@@ -484,9 +684,10 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
           zeroMargins,
           // No modo pure_vector: Fundo limpo sem imagem (zero duplicação, 100% nativo)
           backgroundImage: hasBg ? result.backgroundDataUrl : undefined,
-          clearExistingElements: finalDest === 'replace' || finalDest === 'miolo_default' || finalDest === 'miolo_left' || finalDest === 'miolo_right' || finalDest === 'divider' || finalDest === 'divider_verso',
+          clearExistingElements: finalDest === 'replace' || finalDest === 'miolo_default' || finalDest === 'miolo_left' || finalDest === 'miolo_right' || finalDest === 'divider' || finalDest === 'divider_verso' || finalDest === 'full_agenda',
           clearBackground: importMode === 'pure_vector',
-          applyBackground: hasBg
+          applyBackground: hasBg,
+          batchPages: finalDest === 'full_agenda' ? [singleBatchItem] : undefined
         }
       );
       onClose();
@@ -537,7 +738,27 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
         const pageElements = isBgOnly ? [] : (res.pageNumber === currentPage ? elements.filter(el => selectedIds.has(el.id)) : res.elements);
 
         let itemDest = destination;
-        if (destinationCategory === 'divider') {
+        if (destinationCategory === 'full_agenda' || destination === 'full_agenda') {
+          if (pConfig.detectedType === 'intro') {
+            itemDest = 'new_intro';
+          } else if (pConfig.detectedType === 'monthly_intro') {
+            itemDest = 'new_monthly_intro';
+          } else if (pConfig.detectedType === 'divider') {
+            itemDest = 'divider';
+          } else if (pConfig.detectedType === 'divider_verso') {
+            itemDest = 'divider_verso';
+          } else if (pConfig.detectedType === 'miolo_front') {
+            itemDest = 'miolo_right';
+          } else if (pConfig.detectedType === 'miolo_verso') {
+            itemDest = 'miolo_left';
+          } else if (pConfig.dividerRole === 'verso') {
+            itemDest = 'divider_verso';
+          } else if (pConfig.mioloRole === 'verso') {
+            itemDest = 'miolo_left';
+          } else {
+            itemDest = 'miolo_right';
+          }
+        } else if (destinationCategory === 'divider') {
           itemDest = pConfig.dividerRole === 'verso' ? 'divider_verso' : 'divider';
         } else if (destinationCategory === 'miolo') {
           itemDest = pConfig.mioloRole === 'verso' ? 'miolo_left' : 'miolo_right';
@@ -549,7 +770,9 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
           elements: pageElements,
           backgroundImage: pageHasBg ? res.backgroundDataUrl : undefined,
           destination: itemDest,
-          isDividerVerso: destinationCategory === 'divider' ? (pConfig.dividerRole === 'verso') : (pConfig.mioloRole === 'verso')
+          isDividerVerso: (destinationCategory === 'full_agenda' || destination === 'full_agenda')
+            ? (pConfig.detectedType === 'divider_verso' || pConfig.dividerRole === 'verso' || pConfig.detectedType === 'miolo_verso' || pConfig.mioloRole === 'verso')
+            : destinationCategory === 'divider' ? (pConfig.dividerRole === 'verso') : (pConfig.mioloRole === 'verso')
         });
       }
 
@@ -560,9 +783,11 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
       });
       await new Promise(r => setTimeout(r, 40));
 
-      const primaryDest = destinationCategory === 'divider' 
-        ? (activePages[0].dividerRole === 'verso' ? 'divider_verso' : 'divider')
-        : destination;
+      const primaryDest = (destinationCategory === 'full_agenda' || destination === 'full_agenda')
+        ? 'full_agenda'
+        : destinationCategory === 'divider' 
+          ? (activePages[0].dividerRole === 'verso' ? 'divider_verso' : 'divider')
+          : destination;
 
       onImport(
         batchItems[0].elements,
@@ -788,136 +1013,382 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                 </div>
               </div>
 
-              {/* Barra de Seleção e Mapeamento de Páginas do PDF (Importação em Lote / Seleção Múltipla) */}
+              {/* Barra de Seleção e Mapeamento de Páginas do PDF (Importação em Lote Inteligente) */}
               {totalPages > 1 && (
-                <div className="bg-indigo-50/70 border-b border-indigo-100 px-4 py-2 shrink-0 flex flex-col gap-1.5 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-gray-800">
-                        <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Páginas para Importar ({pageConfigs.filter(p => p.selected).length} de {totalPages} selecionadas)</span>
-                      </div>
-                      <span className="text-[10px] text-gray-500 hidden sm:inline">
-                        • Marque as páginas que deseja importar de uma única vez
+                <div className="bg-slate-50 border-b border-gray-200 px-4 py-2.5 shrink-0 flex flex-col gap-2 shadow-2xs">
+                  
+                  {/* Status do Reconhecimento Inteligente da Estrutura */}
+                  {isAnalyzingStructure && (
+                    <div className="flex items-center gap-2 p-2 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-900 animate-pulse">
+                      <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0"></div>
+                      <span className="font-semibold">
+                        Identificando automaticamente Páginas Iniciais, Divisórias, Mensais e Miolo... {structureScanProgress ? `(${structureScanProgress.current} de ${structureScanProgress.total} págs)` : ''}
                       </span>
                     </div>
+                  )}
 
-                    <div className="flex items-center gap-1.5">
+                  {/* Banner de Reconhecimento Inteligente da Estrutura da Agenda */}
+                  {structureSummary && (
+                    <div className="p-3 bg-gradient-to-r from-emerald-50/90 via-indigo-50/70 to-blue-50/70 border border-emerald-200/90 rounded-xl shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-xs shrink-0 mt-0.5">
+                          <Sparkles className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-xs font-bold text-gray-900">
+                              Estrutura da Agenda Identificada ({totalPages} págs no PDF)
+                            </h4>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              ⚡ {structureSummary.masterPages.length} Páginas-Mestre Mapeadas
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-600 mt-0.5 leading-tight">
+                            Não é necessário carregar as {totalPages} páginas repetidas. O sistema identificou os layouts únicos:
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            {structureSummary.mioloPages.front && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-emerald-200 text-emerald-800 shadow-2xs">
+                                📖 Miolo Diário: Pág. {structureSummary.mioloPages.front} {structureSummary.mioloPages.verso ? `& ${structureSummary.mioloPages.verso}` : ''}
+                              </span>
+                            )}
+                            {structureSummary.dividerPages.length > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-800 shadow-2xs">
+                                📑 Divisórias: {structureSummary.dividerPages.length} {structureSummary.dividerPages.length === 1 ? 'mês' : 'meses'}
+                              </span>
+                            )}
+                            {structureSummary.monthlyIntroPages.length > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-purple-200 text-purple-800 shadow-2xs">
+                                📅 Aberturas Mensais: {structureSummary.monthlyIntroPages.length}
+                              </span>
+                            )}
+                            {structureSummary.introPages.length > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-blue-200 text-blue-800 shadow-2xs">
+                                📝 Páginas Iniciais: {structureSummary.introPages.length}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Botão de Ação Rápida: Atualizar Toda a Agenda com 1 Clique */}
+                      <div className="flex items-center gap-2 shrink-0 self-stretch md:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleDestinationSelect('full_agenda');
+                            selectMasterPagesOnly();
+                          }}
+                          className={`flex-1 md:flex-initial px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer ${
+                            destinationCategory === 'full_agenda'
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 ring-2 ring-emerald-500/30'
+                              : 'bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300'
+                          }`}
+                          title="Mapear Miolo (Frente e Verso), Páginas Iniciais, Divisórias e Aberturas Mensais de uma só vez"
+                        >
+                          <Zap className="w-3.5 h-3.5 fill-current" />
+                          <span>Atualizar Agenda Completa (1-Clique)</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Barra de Filtros Rápidos de Seleção & Intervalo de Páginas */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    
+                    {/* Filtros por Categoria de Layout */}
+                    <div className="flex items-center gap-1 overflow-x-auto text-[11px] font-medium custom-scrollbar pb-0.5">
+                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mr-1">Filtrar:</span>
+                      
+                      {structureSummary && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterCategory('master')}
+                          className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
+                            filterCategory === 'master'
+                              ? 'bg-amber-500 text-white font-bold border-amber-600 shadow-xs'
+                              : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                          }`}
+                        >
+                          <Star className={`w-3 h-3 ${filterCategory === 'master' ? 'fill-white' : 'text-amber-500 fill-amber-500'}`} />
+                          <span>Páginas-Mestre ({structureSummary.masterPages.length})</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory('miolo')}
+                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
+                          filterCategory === 'miolo'
+                            ? 'bg-emerald-600 text-white font-bold border-emerald-700 shadow-xs'
+                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                        }`}
+                      >
+                        <BookOpen className="w-3 h-3" />
+                        <span>Miolo Diário</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory('divider')}
+                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
+                          filterCategory === 'divider'
+                            ? 'bg-purple-600 text-white font-bold border-purple-700 shadow-xs'
+                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                        }`}
+                      >
+                        <Layers className="w-3 h-3" />
+                        <span>Divisórias</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory('intro')}
+                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
+                          filterCategory === 'intro'
+                            ? 'bg-blue-600 text-white font-bold border-blue-700 shadow-xs'
+                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                        }`}
+                      >
+                        <FileText className="w-3 h-3" />
+                        <span>Iniciais</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory('monthly_intro')}
+                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
+                          filterCategory === 'monthly_intro'
+                            ? 'bg-indigo-600 text-white font-bold border-indigo-700 shadow-xs'
+                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                        }`}
+                      >
+                        <Calendar className="w-3 h-3" />
+                        <span>Mensais</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory('all')}
+                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
+                          filterCategory === 'all'
+                            ? 'bg-gray-800 text-white font-bold border-gray-900 shadow-xs'
+                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                        }`}
+                      >
+                        <span>Todas ({totalPages})</span>
+                      </button>
+                    </div>
+
+                    {/* Ações de Seleção de Marcação Rápida */}
+                    <div className="flex items-center gap-1.5 text-xs">
+                      {structureSummary && (
+                        <button
+                          type="button"
+                          onClick={selectMasterPagesOnly}
+                          className="text-[10px] font-bold text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                          title="Marcar apenas os modelos mestres para poupar tempo de processamento"
+                        >
+                          <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                          <span>Marcar Apenas Mestras</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={selectOnlyMiolo}
+                        className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                        title="Marcar apenas as 2 páginas de miolo (Frente e Verso)"
+                      >
+                        Apenas Miolo
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => selectAllPages(true)}
-                        className="text-[10px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded transition-colors cursor-pointer shadow-2xs"
+                        className="text-[10px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
                         title="Marcar todas as páginas para importação"
                       >
-                        ✓ Selecionar Todas
+                        Marcar Todas ({totalPages})
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => selectOnlyCurrentPage()}
-                        className="text-[10px] font-bold text-gray-700 hover:text-gray-900 bg-white hover:bg-gray-50 border border-gray-200 px-2 py-0.5 rounded transition-colors cursor-pointer shadow-2xs"
-                        title="Marcar apenas a página visualizada atualmente"
-                      >
-                        Apenas Pág. {currentPage}
-                      </button>
+
                       <button
                         type="button"
                         onClick={() => selectAllPages(false)}
-                        className="text-[10px] font-medium text-gray-400 hover:text-red-600 bg-white hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded transition-colors cursor-pointer shadow-2xs"
+                        className="text-[10px] font-medium text-gray-400 hover:text-red-600 bg-white hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
                         title="Desmarcar todas"
                       >
                         Limpar
                       </button>
+
+                      {/* Entrada de Intervalo Numérico */}
+                      <div className="flex items-center gap-1 pl-1 border-l border-gray-300 ml-1">
+                        <input
+                          type="text"
+                          value={pageRangeInput}
+                          onChange={(e) => setPageRangeInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              applyPageRange(pageRangeInput);
+                            }
+                          }}
+                          placeholder="Págs: ex 1-6, 15"
+                          className="w-24 text-[10px] px-2 py-0.5 bg-white border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 outline-none"
+                          title="Digite os números ou intervalos de páginas separados por vírgula"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => applyPageRange(pageRangeInput)}
+                          className="text-[10px] font-bold text-gray-700 hover:text-indigo-600 bg-white hover:bg-indigo-50 border border-gray-200 px-1.5 py-0.5 rounded-md cursor-pointer"
+                        >
+                          OK
+                        </button>
+                      </div>
                     </div>
+                  </div>
+
+                  {/* Resumo de Seleção Atual */}
+                  <div className="flex items-center justify-between text-[11px] text-gray-500 pt-0.5 border-t border-gray-200/60">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-gray-800">
+                        {pageConfigs.filter(p => p.selected).length} de {totalPages} páginas selecionadas
+                      </span>
+                      {pageConfigs.filter(p => p.selected).length < totalPages && (
+                        <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-medium border border-emerald-100">
+                          ⚡ Economizando processamento de {totalPages - pageConfigs.filter(p => p.selected).length} páginas repetidas
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-gray-400">
+                      Mostrando {pageConfigs.filter((cfg) => {
+                        if (filterCategory === 'master') return cfg.isMaster;
+                        if (filterCategory === 'miolo') return cfg.detectedType === 'miolo_front' || cfg.detectedType === 'miolo_verso';
+                        if (filterCategory === 'divider') return cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso';
+                        if (filterCategory === 'monthly_intro') return cfg.detectedType === 'monthly_intro';
+                        if (filterCategory === 'intro') return cfg.detectedType === 'intro';
+                        return true;
+                      }).length} páginas no carrossel abaixo
+                    </span>
                   </div>
 
                   {/* Chips horizontais de páginas com checkboxes e seletores de papel */}
                   <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 custom-scrollbar">
-                    {pageConfigs.map((cfg) => {
-                      const isCurrent = cfg.pageNumber === currentPage;
-                      return (
-                        <div
-                          key={cfg.pageNumber}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs shrink-0 transition-all ${
-                            isCurrent
-                              ? 'bg-white border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
-                              : cfg.selected
-                                ? 'bg-white border-indigo-200/80 text-gray-800 shadow-2xs'
-                                : 'bg-gray-100/70 border-gray-200 text-gray-400 opacity-60 hover:opacity-100'
-                          }`}
-                        >
-                          {/* Checkbox de Inclusão no Lote */}
-                          <button
-                            type="button"
-                            onClick={() => togglePageSelection(cfg.pageNumber)}
-                            className="text-gray-400 hover:text-indigo-600 cursor-pointer"
-                            title={cfg.selected ? "Desmarcar esta página do lote de importação" : "Incluir esta página no lote de importação"}
-                          >
-                            {cfg.selected ? (
-                              <CheckSquare className="w-4 h-4 text-indigo-600" />
-                            ) : (
-                              <Square className="w-4 h-4 text-gray-300" />
-                            )}
-                          </button>
-
-                          {/* Botão de Ver no Canvas */}
-                          <button
-                            type="button"
-                            onClick={() => handlePageChange(cfg.pageNumber)}
-                            className={`font-bold text-[11px] cursor-pointer hover:text-indigo-600 flex items-center gap-1 ${
-                              isCurrent ? 'text-indigo-700 font-extrabold' : 'text-gray-700'
+                    {pageConfigs
+                      .filter((cfg) => {
+                        if (filterCategory === 'master') return cfg.isMaster;
+                        if (filterCategory === 'miolo') return cfg.detectedType === 'miolo_front' || cfg.detectedType === 'miolo_verso';
+                        if (filterCategory === 'divider') return cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso';
+                        if (filterCategory === 'monthly_intro') return cfg.detectedType === 'monthly_intro';
+                        if (filterCategory === 'intro') return cfg.detectedType === 'intro';
+                        return true;
+                      })
+                      .map((cfg) => {
+                        const isCurrent = cfg.pageNumber === currentPage;
+                        return (
+                          <div
+                            key={cfg.pageNumber}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs shrink-0 transition-all ${
+                              isCurrent
+                                ? 'bg-white border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
+                                : cfg.selected
+                                  ? 'bg-white border-indigo-200/80 text-gray-800 shadow-2xs'
+                                  : 'bg-gray-100/70 border-gray-200 text-gray-400 opacity-60 hover:opacity-100'
                             }`}
-                            title="Clique para visualizar esta página no canvas"
                           >
-                            <span>Pág. {cfg.pageNumber}</span>
-                            {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse"></span>}
-                          </button>
-
-                          {/* Seletor de Papel / Função para Divisórias */}
-                          {destinationCategory === 'divider' && cfg.selected && (
+                            {/* Checkbox de Inclusão no Lote */}
                             <button
                               type="button"
-                              onClick={() => setPageRole(cfg.pageNumber, cfg.dividerRole === 'front' ? 'verso' : 'front')}
-                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
-                                cfg.dividerRole === 'verso'
-                                  ? 'bg-purple-100 text-purple-800 border border-purple-300 hover:bg-purple-200'
-                                  : 'bg-indigo-100 text-indigo-800 border border-indigo-300 hover:bg-indigo-200'
-                              }`}
-                              title="Clique para alternar entre Capa (Frente) e Verso da Divisória"
+                              onClick={() => togglePageSelection(cfg.pageNumber)}
+                              className="text-gray-400 hover:text-indigo-600 cursor-pointer"
+                              title={cfg.selected ? "Desmarcar esta página do lote de importação" : "Incluir esta página no lote de importação"}
                             >
-                              {cfg.dividerRole === 'verso' ? '📄 Verso' : '📑 Frente'}
+                              {cfg.selected ? (
+                                <CheckSquare className="w-4 h-4 text-indigo-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-300" />
+                              )}
                             </button>
-                          )}
 
-                          {/* Seletor de Papel / Função para Miolo */}
-                          {destinationCategory === 'miolo' && cfg.selected && (
+                            {/* Botão de Ver no Canvas */}
                             <button
                               type="button"
-                              onClick={() => setPageRole(cfg.pageNumber, cfg.mioloRole === 'front' ? 'verso' : 'front')}
-                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
-                                cfg.mioloRole === 'verso'
-                                  ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
-                                  : 'bg-indigo-100 text-indigo-800 border border-indigo-300 hover:bg-indigo-200'
+                              onClick={() => handlePageChange(cfg.pageNumber)}
+                              className={`font-bold text-[11px] cursor-pointer hover:text-indigo-600 flex items-center gap-1 ${
+                                isCurrent ? 'text-indigo-700 font-extrabold' : 'text-gray-700'
                               }`}
-                              title="Clique para alternar entre Frente (Ímpar) e Verso (Par)"
+                              title="Clique para visualizar esta página no canvas"
                             >
-                              {cfg.mioloRole === 'verso' ? '📖 Verso (Par)' : '📖 Frente (Ímpar)'}
+                              <span>Pág. {cfg.pageNumber}</span>
+                              {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse"></span>}
                             </button>
-                          )}
 
-                          {/* Nome da Página para Páginas Iniciais / Mensais */}
-                          {destinationCategory === 'pages' && cfg.selected && (
-                            <input
-                              type="text"
-                              value={cfg.customName}
-                              onChange={(e) => setPageCustomName(cfg.pageNumber, e.target.value)}
-                              className="text-[10px] px-1.5 py-0.5 bg-gray-50 border border-gray-200 rounded max-w-[120px] focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none"
-                              placeholder="Nome da página..."
-                              title="Nome com que esta página será criada"
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
+                            {/* Badge do Tipo Identificado pela Análise da Agenda */}
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border flex items-center gap-1 ${
+                              cfg.detectedType === 'intro'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso'
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : cfg.detectedType === 'monthly_intro'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            }`}>
+                              {cfg.badgeLabel || '📄 Página'}
+                            </span>
+
+                            {/* Indicador de Página Mestra */}
+                            {cfg.isMaster && (
+                              <span className="text-[9px] font-extrabold text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-200 flex items-center gap-0.5" title="Página-mestre modelo recomendada para extração">
+                                <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                                <span>Mestra</span>
+                              </span>
+                            )}
+
+                            {/* Seletor de Papel / Função para Divisórias */}
+                            {(destinationCategory === 'divider' || cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso') && cfg.selected && (
+                              <button
+                                type="button"
+                                onClick={() => setPageRole(cfg.pageNumber, cfg.dividerRole === 'front' ? 'verso' : 'front')}
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
+                                  cfg.dividerRole === 'verso'
+                                    ? 'bg-purple-100 text-purple-800 border border-purple-300 hover:bg-purple-200'
+                                    : 'bg-indigo-100 text-indigo-800 border border-indigo-300 hover:bg-indigo-200'
+                                }`}
+                                title="Clique para alternar entre Capa (Frente) e Verso da Divisória"
+                              >
+                                {cfg.dividerRole === 'verso' ? '📄 Verso' : '📑 Frente'}
+                              </button>
+                            )}
+
+                            {/* Seletor de Papel / Função para Miolo */}
+                            {(destinationCategory === 'miolo' || cfg.detectedType === 'miolo_front' || cfg.detectedType === 'miolo_verso') && cfg.selected && (
+                              <button
+                                type="button"
+                                onClick={() => setPageRole(cfg.pageNumber, cfg.mioloRole === 'front' ? 'verso' : 'front')}
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
+                                  cfg.mioloRole === 'verso'
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
+                                    : 'bg-indigo-100 text-indigo-800 border border-indigo-300 hover:bg-indigo-200'
+                                }`}
+                                title="Clique para alternar entre Frente (Ímpar) e Verso (Par)"
+                              >
+                                {cfg.mioloRole === 'verso' ? '📖 Verso (Par)' : '📖 Frente (Ímpar)'}
+                              </button>
+                            )}
+
+                            {/* Nome da Página para Páginas Iniciais / Mensais */}
+                            {(destinationCategory === 'pages' || destinationCategory === 'full_agenda') && cfg.selected && (
+                              <input
+                                type="text"
+                                value={cfg.customName}
+                                onChange={(e) => setPageCustomName(cfg.pageNumber, e.target.value)}
+                                className="text-[10px] px-1.5 py-0.5 bg-gray-50 border border-gray-200 rounded max-w-[120px] focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                                placeholder="Nome da página..."
+                                title="Nome com que esta página será criada"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
               )}
@@ -1248,7 +1719,23 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                   </div>
 
                   {/* Abas de Categorias de Destino */}
-                  <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg text-[11px] font-medium">
+                  <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg text-[11px] font-medium flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDestinationCategory('full_agenda');
+                        handleDestinationSelect('full_agenda');
+                      }}
+                      className={`py-1.5 px-2 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        destinationCategory === 'full_agenda'
+                          ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                          : 'text-emerald-800 hover:text-emerald-950 bg-emerald-50/80 border border-emerald-200'
+                      }`}
+                      title="Mapeamento Inteligente da Agenda Completa"
+                    >
+                      <Zap className="w-3 h-3 fill-current" />
+                      <span>Completa</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -1325,6 +1812,46 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                       <span>Modelos</span>
                     </button>
                   </div>
+
+                  {/* Opções da Categoria Agenda Completa */}
+                  {destinationCategory === 'full_agenda' && (
+                    <div className="space-y-2 pt-1">
+                      <div className="p-3 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                        <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                          <Zap className="w-4 h-4 fill-emerald-600 text-emerald-600" />
+                          <span>Atualização de Agenda Completa</span>
+                        </div>
+                        <p className="text-[11px] text-gray-600 leading-relaxed">
+                          O AgendaMaster distribui cada página selecionada automaticamente para seu destino correspondente:
+                        </p>
+                        <div className="space-y-1.5 pt-1 text-[11px]">
+                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
+                            <span className="font-semibold text-gray-700">📖 Miolo Diário</span>
+                            <span className="text-emerald-800 font-bold text-[10px]">Frente & Verso</span>
+                          </div>
+                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
+                            <span className="font-semibold text-gray-700">📑 Divisórias Mensais</span>
+                            <span className="text-emerald-800 font-bold text-[10px]">Capa & Verso</span>
+                          </div>
+                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
+                            <span className="font-semibold text-gray-700">📝 Páginas Iniciais</span>
+                            <span className="text-emerald-800 font-bold text-[10px]">
+                              {structureSummary?.introPages.length ? `${structureSummary.introPages.length} detectadas` : 'Dados / Metas'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
+                            <span className="font-semibold text-gray-700">📅 Aberturas Mensais</span>
+                            <span className="text-emerald-800 font-bold text-[10px]">
+                              {structureSummary?.monthlyIntroPages.length ? `${structureSummary.monthlyIntroPages.length} detectadas` : 'Visão Mensal'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="pt-1 text-[10px] text-gray-500 italic">
+                          💡 Dica: Apenas as páginas marcadas no carrossel serão importadas. Nenhuma página desnecessária é processada!
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Opções da Categoria Miolo */}
                   {destinationCategory === 'miolo' && (
@@ -2205,11 +2732,17 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                   type="button"
                   onClick={handleFinalImport}
                   disabled={pageConfigs.filter(p => p.selected).length === 0}
-                  className="flex-1 px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`flex-1 px-4 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                    destinationCategory === 'full_agenda' || destination === 'full_agenda'
+                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
+                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                  }`}
                 >
-                  <Sparkles className="w-4 h-4" />
+                  {destinationCategory === 'full_agenda' || destination === 'full_agenda' ? <Zap className="w-4 h-4 fill-current" /> : <Sparkles className="w-4 h-4" />}
                   <span>
-                    {importMode === 'bg_only'
+                    {(destinationCategory === 'full_agenda' || destination === 'full_agenda')
+                      ? `Atualizar Agenda Completa (${pageConfigs.filter(p => p.selected).length} Páginas Mapeadas) ⚡`
+                      : importMode === 'bg_only'
                       ? `Aplicar como Fundo (${pageConfigs.filter(p => p.selected).length > 1 ? `${pageConfigs.filter(p => p.selected).length} Páginas em Lote` : (destination === 'miolo_default' ? 'Miolo Diário' : (destination === 'divider' ? 'Capa da Divisória' : (destination === 'divider_verso' ? 'Verso da Divisória' : 'Página')))})`
                       : pageConfigs.filter(p => p.selected).length > 1
                         ? `Importar ${pageConfigs.filter(p => p.selected).length} Páginas Selecionadas em Lote (${destinationCategory === 'divider' ? 'Divisória Frente + Verso' : (destinationCategory === 'miolo' ? 'Miolo Frente + Verso' : (destination === 'new_intro' ? 'Páginas Iniciais' : (destination === 'new_monthly_intro' ? 'Abertura Mensal' : 'Modelos')))}) 🚀`

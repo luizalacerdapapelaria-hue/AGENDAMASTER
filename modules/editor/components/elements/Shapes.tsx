@@ -78,13 +78,14 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             }
             lineCount = timesList.length;
             if (lineCount > 0 && heightPx > 0) {
-                finalLineSpacing = heightPx / lineCount;
+                finalLineSpacing = Math.max(16, heightPx / lineCount);
             }
         } else if (style.rowCount && style.rowCount > 0) {
             lineCount = style.rowCount;
-            finalLineSpacing = heightPx / lineCount;
+            finalLineSpacing = Math.max(16, heightPx / lineCount);
         } else {
-            // Use a small negative buffer to ensure we don't render a line that barely fits but might be cut by sub-pixel rendering
+            // Ensure lines have at least 16px spacing so written text and lines are clearly legible
+            finalLineSpacing = Math.max(16, finalLineSpacing);
             lineCount = Math.floor((heightPx - 1) / finalLineSpacing);
         }
 
@@ -92,7 +93,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         const verticalAlign = style.verticalAlign || 'middle';
         const timePosition = style.timePosition || 'left';
         const timeWidthPx = (style as any).timeColumnWidth || style.timeWidth || 30;
-        const timeFontSizeVal = (style as any).timeFontSize || style.fontSize || 7.5;
+        const rawTimeFontSize = (style as any).timeFontSize || style.fontSize || 7.5;
+        const timeFontSizeVal = Math.min(rawTimeFontSize, Math.max(5.5, finalLineSpacing * 0.58));
         const timeColorVal = (style as any).timeColor || style.color || '#6b7280';
         const timeFontWeightVal = (style as any).timeFontWeight || style.fontWeight || 'bold';
         const showCheckboxes = Boolean((style as any).showCheckboxes);

@@ -1,7 +1,7 @@
 {
   "name": "agendamaster-ai",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Gerenciador e Editor de Agendas Personalizadas",
   "author": "Luiza Lacerda",
   "type": "module",
@@ -24,12 +24,19 @@
         "repo": "AGENDAMASTER"
       }
     ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "asar": true,
     "directories": {
       "output": "dist-desktop"
     },
     "win": {
       "target": "nsis",
-      "icon": "public/icon.svg"
+      "icon": "public/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -43,6 +50,7 @@
     "@google/genai": "^1.34.0",
     "@supabase/supabase-js": "^2.106.1",
     "@use-gesture/react": "^10.3.1",
+    "electron-updater": "^6.8.9",
     "firebase": "^12.13.0",
     "framer-motion": "^12.38.0",
     "html2canvas": "^1.4.1",
@@ -60,10 +68,9 @@
     "@types/opentype.js": "^1.3.10",
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^5.0.0",
-    "concurrently": "^10.0.6",
-    "electron": "^43.8.0",
+    "concurrently": "^10.0.3",
+    "electron": "^43.0.0",
     "electron-builder": "^26.15.3",
-    "electron-updater": "^6.8.9",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

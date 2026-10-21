@@ -99,7 +99,7 @@ if (typeof window !== 'undefined') {
   };
 
   // Autocorreção e atualização automática de versão se houver nova implantação
-  const CURRENT_SYSTEM_VERSION = 'agendamaster-v1.1.2';
+  const CURRENT_SYSTEM_VERSION = 'agendamaster-v2.0.1';
   const lastSavedVersion = localStorage.getItem('agendamaster_system_version');
   
   if (!lastSavedVersion) {
@@ -107,11 +107,11 @@ if (typeof window !== 'undefined') {
       localStorage.setItem('agendamaster_system_version', CURRENT_SYSTEM_VERSION);
     } catch (_) {}
   } else if (lastSavedVersion !== CURRENT_SYSTEM_VERSION) {
-    console.warn('[Self-Heal] Nova atualização do sistema detectada. Limpando caches obsoletos para evitar travamentos...');
+    console.warn('[Self-Heal] Nova atualização do sistema detectada (v2.0.1). Limpando caches obsoletos e atualizando arquivos...');
     try {
       localStorage.setItem('agendamaster_system_version', CURRENT_SYSTEM_VERSION);
     } catch (_) {}
-    (window as any).clearAppCache(false).catch(() => {});
+    (window as any).clearAppCache(true).catch(() => {});
   }
 
   const clearStaleSession = () => {

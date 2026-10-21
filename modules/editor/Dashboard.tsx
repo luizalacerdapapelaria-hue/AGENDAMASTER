@@ -3753,6 +3753,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const resolved = resolveLayoutLibraryConfig(layoutId, config.year) || buildStandardAgendaConfig(config.year);
       const isBlank = layoutId === 'layout-em-branco' || layoutId === 'planner-em-branco';
 
+      const isTargetWeekly = (resolved.layoutType || config.layoutType)?.startsWith('weekly');
+
       if (mioloOnly) {
           setConfig(prev => ({
               ...prev,
@@ -3764,10 +3766,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               elementsSunday: isBlank ? [] : (resolved.elementsSunday !== undefined ? resolved.elementsSunday : prev.elementsSunday),
               elementsTop: isBlank ? [] : (resolved.elementsTop !== undefined ? resolved.elementsTop : prev.elementsTop),
               elementsBottom: isBlank ? [] : (resolved.elementsBottom !== undefined ? resolved.elementsBottom : prev.elementsBottom),
-              elementsWeeklyLeft: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (resolved.elementsWeeklyLeft !== undefined ? resolved.elementsWeeklyLeft : prev.elementsWeeklyLeft),
-              elementsWeeklyRight: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (resolved.elementsWeeklyRight !== undefined ? resolved.elementsWeeklyRight : prev.elementsWeeklyRight),
+              elementsWeeklyLeft: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (isTargetWeekly ? (resolved.elementsWeeklyLeft || []) : undefined),
+              elementsWeeklyRight: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (isTargetWeekly ? (resolved.elementsWeeklyRight || []) : undefined),
           }));
           setEditMode('daily');
+          setEditorViewMode('standard');
           setSelectedIds([]);
           setTemplateModal(false);
           setToastMessage(isBlank ? 'Miolo em Branco (100% limpo) aplicado com sucesso!' : `Miolo "${item.name}" aplicado mantendo suas Páginas Iniciais e Divisórias!`);
@@ -3793,6 +3796,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               year: prev.year,
           }));
           setEditMode('daily');
+          setEditorViewMode('standard');
           setSelectedIds([]);
           setTemplateModal(false);
           setToastMessage(`Projeto 100% em Branco (Folha Limpa) iniciado do zero!`);
@@ -3802,8 +3806,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setConfig(prev => ({
           ...prev,
           ...resolved,
+          elementsWeeklyLeft: resolved.layoutType?.startsWith('weekly') ? (resolved.elementsWeeklyLeft || []) : undefined,
+          elementsWeeklyRight: resolved.layoutType?.startsWith('weekly') ? (resolved.elementsWeeklyRight || []) : undefined,
           year: prev.year,
       }));
+      setEditMode('daily');
+      setEditorViewMode('standard');
       if (resolved.introPages && resolved.introPages.length > 0) {
           setCurrentIntroPageId(resolved.introPages[0].id);
       }
@@ -4696,6 +4704,158 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         setActiveTab('editor');
         setToastMessage(`${importedElements.length} elementos adicionados à página atual!${dimensionNote}`);
         break;
+      }
+
+      case 'full_agenda': {
+        if (metadata.batchPages && metadata.batchPages.length > 0) {
+          const newIntroPages: IntroPage[] = [];
+          const newMonthlyIntroPages: IntroPage[] = [];
+          let divFrontElements: LayoutElement[] | undefined = undefined;
+          let divFrontBg: BackgroundConfig | undefined = undefined;
+          let divVersoElements: LayoutElement[] | undefined = undefined;
+          let divVersoBg: BackgroundConfig | undefined = undefined;
+          let mioloFrontElements: LayoutElement[] | undefined = undefined;
+          let mioloFrontBg: BackgroundConfig | undefined = undefined;
+          let mioloVersoElements: LayoutElement[] | undefined = undefined;
+          let mioloVersoBg: BackgroundConfig | undefined = undefined;
+
+          for (let i = 0; i < metadata.batchPages.length; i++) {
+            const bp = metadata.batchPages[i];
+            let bpBgUrl = bp.backgroundImage;
+            if (bpBgUrl && bpBgUrl.startsWith('data:image/')) {
+              try {
+                bpBgUrl = await ImageManager.registerImage(bpBgUrl);
+              } catch (e) {}
+            }
+
+            let processedBpElements = bp.elements;
+            try {
+              processedBpElements = await ImageManager.migrateConfigImages(bp.elements);
+            } catch (e) {}
+
+            if (bp.destination === 'new_intro') {
+              const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+                id: `bg-intro-${Date.now()}-${i}`,
+                name: `Fundo ${bp.pageName}`,
+                type: 'image',
+                image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+                opacity: 1,
+                showOnIntroPages: true
+              } : undefined;
+              newIntroPages.push({
+                id: `pdf-intro-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`,
+                name: bp.pageName || `Página Inicial ${bp.pageNumber}`,
+                elements: processedBpElements,
+                background: bpBg
+              });
+            } else if (bp.destination === 'new_monthly_intro') {
+              const bpBg: BackgroundConfig | undefined = bpBgUrl ? {
+                id: `bg-monthly-${Date.now()}-${i}`,
+                name: `Fundo ${bp.pageName}`,
+                type: 'image',
+                image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+                opacity: 1,
+                showOnIntroPages: true
+              } : undefined;
+              newMonthlyIntroPages.push({
+                id: `pdf-monthly-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`,
+                name: bp.pageName || `Abertura Mensal ${bp.pageNumber}`,
+                elements: processedBpElements,
+                background: bpBg
+              });
+            } else if (bp.destination === 'divider' || (!bp.isDividerVerso && bp.destination.startsWith('divider'))) {
+              divFrontElements = processedBpElements;
+              if (bpBgUrl) {
+                divFrontBg = {
+                  id: `bg-div-front-${Date.now()}`,
+                  name: `Fundo Divisória Frente`,
+                  type: 'image',
+                  image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+                  opacity: 1
+                };
+              }
+            } else if (bp.destination === 'divider_verso' || bp.isDividerVerso) {
+              divVersoElements = processedBpElements;
+              if (bpBgUrl) {
+                divVersoBg = {
+                  id: `bg-div-verso-${Date.now()}`,
+                  name: `Fundo Divisória Verso`,
+                  type: 'image',
+                  image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+                  opacity: 1
+                };
+              }
+            } else if (bp.destination === 'miolo_left') {
+              mioloVersoElements = processedBpElements;
+              if (bpBgUrl) {
+                mioloVersoBg = {
+                  id: `bg-miolo-verso-${Date.now()}`,
+                  name: `Fundo Miolo Verso`,
+                  type: 'image',
+                  image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+                  opacity: 1,
+                  showOnDailyPages: true
+                };
+              }
+            } else if (bp.destination === 'miolo_right' || bp.destination === 'miolo_default') {
+              mioloFrontElements = processedBpElements;
+              if (bpBgUrl) {
+                mioloFrontBg = {
+                  id: `bg-miolo-front-${Date.now()}`,
+                  name: `Fundo Miolo Frente`,
+                  type: 'image',
+                  image: { url: bpBgUrl, opacity: 1, fit: 'fill' },
+                  opacity: 1,
+                  showOnDailyPages: true
+                };
+              }
+            }
+          }
+
+          setConfig(prev => {
+            const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
+            const miolo = currentRules.miolo ? { ...currentRules.miolo } : {};
+            if (mioloFrontBg) {
+              miolo.odd = mioloFrontBg;
+              miolo.default = mioloFrontBg;
+              currentRules.global = mioloFrontBg;
+            }
+            if (mioloVersoBg) {
+              miolo.even = mioloVersoBg;
+            }
+            currentRules.miolo = miolo;
+
+            const updatedMonthlyDivider = (divFrontElements || divVersoElements || divFrontBg || divVersoBg) ? {
+              ...(prev.monthlyDividerStyle || {}),
+              layout: 'custom' as const,
+              elements: divFrontElements || prev.monthlyDividerStyle?.elements,
+              background: divFrontBg || prev.monthlyDividerStyle?.background,
+              versoElements: divVersoElements || prev.monthlyDividerStyle?.versoElements,
+              versoBackground: divVersoBg || prev.monthlyDividerStyle?.versoBackground
+            } : prev.monthlyDividerStyle;
+
+            return {
+              ...prev,
+              ...dimensionUpdates,
+              introPages: newIntroPages.length > 0 ? newIntroPages : prev.introPages,
+              monthlyIntroPages: newMonthlyIntroPages.length > 0 ? newMonthlyIntroPages : prev.monthlyIntroPages,
+              includeMonthlyDividers: (divFrontElements || divVersoElements) ? true : prev.includeMonthlyDividers,
+              monthlyDividerStyle: updatedMonthlyDivider,
+              customVerso: mioloVersoElements !== undefined ? true : prev.customVerso,
+              elements: mioloFrontElements || prev.elements,
+              elementsWeeklyRight: mioloFrontElements || prev.elementsWeeklyRight,
+              elementsVerso: mioloVersoElements || prev.elementsVerso,
+              elementsWeeklyLeft: mioloVersoElements || prev.elementsWeeklyLeft,
+              backgroundRules: currentRules
+            };
+          });
+
+          setEditMode('daily');
+          setEditorViewMode('standard');
+          setActiveTab('editor');
+          setToastMessage(`🎉 Agenda Completa Atualizada a partir do PDF! Iniciais (${newIntroPages.length}), Divisórias e Miolo aplicados.${dimensionNote}`);
+          break;
+        }
       }
     }
   }, [pushHistory, updateActiveElements, editMode, currentIntroPageId, currentMonthlyIntroPageId, dividerViewMode, customTemplates, config.layoutType]);
@@ -11085,7 +11245,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       />
 
       <div className="flex-1 flex flex-col overflow-hidden no-print min-w-0">
-          <header className="bg-white border-b border-gray-200 min-h-[48px] sm:min-h-[52px] h-auto flex flex-wrap items-center justify-between px-2 sm:px-3 py-1 sm:py-1.5 z-20 shrink-0 relative gap-y-1.5 gap-x-2">
+          <header className="bg-white border-b border-gray-200 min-h-[48px] sm:min-h-[52px] h-auto flex flex-wrap items-center justify-between px-2 sm:px-3 py-1 sm:py-1.5 z-50 shrink-0 relative gap-y-1.5 gap-x-2">
             {/* Left Group: Sidebar Toggle, Logo & Project Name */}
             <div className="flex items-center space-x-1 sm:space-x-1.5 shrink-0 min-w-0">
               {!isMobile && activeTab === 'editor' && (
@@ -11294,7 +11454,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   </button>
 
                   {isMoreMenuOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-150 text-gray-800">
+                    <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-2xl border-2 border-[#eedad5] py-2 z-[70] animate-in fade-in zoom-in-95 duration-150 text-gray-800">
                       {/* UI Screen Density / Scale Control */}
                       <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/60">
                         <div className="flex items-center justify-between mb-1.5">
@@ -12502,7 +12662,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             <main 
                 ref={workspaceRef} 
-                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-[#f5ede8] p-2 sm:p-4 md:p-6'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'lg:pr-[290px] xl:pr-[300px]' : ''}`}
+                className={`flex-1 overflow-hidden h-full min-h-0 ${activeTab === 'opentype' || activeTab === 'mockup' ? 'bg-slate-950' : 'bg-[#f5ede8] p-2 sm:p-4 md:p-6'} relative flex flex-col items-center no-print transition-all duration-300 ${isMobile ? 'h-full overflow-hidden' : ''} ${!isMobile && showProperties && activeTab === 'editor' ? 'md:pr-[290px] lg:pr-[290px] xl:pr-[300px]' : ''}`}
                 onMouseDown={(e) => {
                   if (e.button !== 0) return;
                   const targetEl = e.target as HTMLElement;
@@ -13012,7 +13172,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     initial={isMobile ? { y: '100%' } : { opacity: 0, x: 20 }}
                                     animate={isMobile ? { y: 0 } : { opacity: 1, x: 0 }}
                                     exit={isMobile ? { y: '100%' } : { opacity: 0, x: 20 }}
-                                    className={isMobile ? "fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col no-print border-t border-[#eedad5]" : "absolute right-0 top-0 bottom-0 w-72 bg-white border-l border-[#eedad5] flex flex-col h-full z-40 no-print shadow-xs"}
+                                    className={isMobile ? "fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col no-print border-t border-[#eedad5]" : "absolute right-0 top-0 bottom-0 w-72 bg-white border-l border-[#eedad5] flex flex-col h-full z-30 no-print shadow-xs"}
                                 >
                                     <div className="flex items-center justify-between p-3 border-b border-[#eedad5] bg-[#faf6f4] shrink-0">
                                         <h3 className="text-xs font-black text-[#b84a56] uppercase tracking-widest flex items-center gap-2"><icons.Settings2 className="w-4 h-4 text-[#b84a56]" /> Ajustes</h3>

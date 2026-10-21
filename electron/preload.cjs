@@ -6,7 +6,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   savePDFBase64: (base64String, defaultName) => ipcRenderer.invoke('save-pdf-base64', { base64String, defaultName }),
   getSystemFonts: () => ipcRenderer.invoke('get-system-fonts'),
   readFontFile: (filePath) => ipcRenderer.invoke('read-font-file', filePath),
-  pickSystemFontFile: () => ipcRenderer.invoke('pick-system-font-file')
+  pickSystemFontFile: () => ipcRenderer.invoke('pick-system-font-file'),
+  clearCacheAndReload: () => ipcRenderer.invoke('clear-cache-and-reload'),
+  reloadApp: () => ipcRenderer.invoke('reload-app')
 });
 
 // Preload script for safe context bridge (if needed in the future)
