@@ -282,9 +282,6 @@ if (autoUpdater) {
   });
 }
 
-// URL de produção em nuvem para que os usuários SEMPRE acessem a versão mais nova do Agenda Master
-const PRODUCTION_APP_URL = process.env.AGENDA_MASTER_URL || 'https://ais-pre-pqdpg3bbajb7bnh4kht4ij-509420675568.us-east1.run.app';
-
 async function loadAppIntoWindow(win) {
   if (process.env.ELECTRON_DEV_URL) {
     console.log('[Electron] Modo desenvolvimento: carregando dev server local:', process.env.ELECTRON_DEV_URL);
@@ -292,26 +289,28 @@ async function loadAppIntoWindow(win) {
     return;
   }
 
-  const localIndexPath = path.join(__dirname, '../dist/index.html');
-
-  // Se o usuário optar explicitamente por forçar modo offline local
-  if (process.env.ELECTRON_FORCE_LOCAL === 'true' && fs.existsSync(localIndexPath)) {
-    console.log('[Electron] Modo local forçado: carregando arquivo estático.');
-    await win.loadFile(localIndexPath);
-    return;
+  // Se houver uma URL customizada em nuvem explicitamente definida (ex: domínio próprio)
+  const customRemoteUrl = process.env.AGENDA_MASTER_URL;
+  if (customRemoteUrl && !customRemoteUrl.includes('ais-dev') && !customRemoteUrl.includes('ais-pre')) {
+    try {
+      console.log('[Electron] Carregando URL remota customizada:', customRemoteUrl);
+      await win.loadURL(customRemoteUrl);
+      return;
+    } catch (e) {
+      console.warn('[Electron] Falha ao carregar URL remota customizada. Usando arquivo local:', e.message);
+    }
   }
 
-  // Arquitetura Online-First: Tenta carregar a nuvem mais recente em tempo real
-  try {
-    console.log('[Electron] Carregando versão mais recente da nuvem:', PRODUCTION_APP_URL);
-    await win.loadURL(PRODUCTION_APP_URL);
-  } catch (netErr) {
-    console.warn('[Electron] Falha ao carregar versão remota (sem conexão ou erro de rede). Usando cópia local embutida:', netErr.message);
-    if (fs.existsSync(localIndexPath)) {
-      await win.loadFile(localIndexPath);
-    } else {
-      console.error('[Electron] Nenhum arquivo local dist/index.html encontrado para fallback.');
-    }
+  // Carregamento principal e 100% confiável: arquivos locais embutidos no .exe
+  const localIndexPath = path.join(__dirname, '../dist/index.html');
+  if (fs.existsSync(localIndexPath)) {
+    console.log('[Electron] Carregando arquivos locais empacotados no aplicativo:', localIndexPath);
+    await win.loadFile(localIndexPath);
+  } else {
+    // Fallback de caminho caso a estrutura de pastas do ASAR seja diferente
+    const fallbackPath = path.resolve(__dirname, '..', 'dist', 'index.html');
+    console.log('[Electron] Tentando caminho de fallback:', fallbackPath);
+    await win.loadFile(fallbackPath);
   }
 }
 
@@ -319,6 +318,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    backgroundColor: '#faf6f4', // Cor de fundo suave da identidade visual do Agenda Master
     title: "Agenda Master",
     icon: path.join(__dirname, '../public/icon.png'),
     autoHideMenuBar: true, // Oculta barra de menus para interface mais limpa e moderna
@@ -329,7 +329,7 @@ function createWindow() {
     }
   });
 
-  // Atalhos de teclado para recarregar (F5, Ctrl+R, Ctrl+Shift+R)
+  // Atalhos de teclado para recarregar (F5, Ctrl+R, Ctrl+Shift+R) e Inspecionar (F12)
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown') {
       if ((input.control && input.key.toLowerCase() === 'r') || input.key === 'F5') {
@@ -341,11 +341,24 @@ function createWindow() {
           win.webContents.reload();
         }
         event.preventDefault();
+      } else if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        win.webContents.toggleDevTools();
+        event.preventDefault();
       }
     }
   });
 
-  // Carrega a aplicação (Online-first com fallback offline)
+  // Fallback de segurança em caso de falha de carregamento
+  win.webContents.on('did-fail-load', async (event, errorCode, errorDescription, validatedURL) => {
+    console.warn(`[Electron] Falha ao carregar (${errorCode}: ${errorDescription}) em: ${validatedURL}`);
+    const localIndexPath = path.join(__dirname, '../dist/index.html');
+    if (fs.existsSync(localIndexPath) && !validatedURL.includes('dist/index.html')) {
+      console.log('[Electron] Redirecionando para arquivo local empacotado dist/index.html...');
+      await win.loadFile(localIndexPath);
+    }
+  });
+
+  // Carrega a aplicação diretamente dos arquivos empacotados
   loadAppIntoWindow(win);
 
   // Abrir links externos (como WhatsApp, suporte, links externos) no navegador padrão do sistema
