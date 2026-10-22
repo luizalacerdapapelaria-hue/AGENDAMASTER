@@ -468,6 +468,8 @@ export function mapAllElementsInConfig(
     elementsBottom: mapList(config.elementsBottom),
     elementsWeeklyLeft: mapList(config.elementsWeeklyLeft),
     elementsWeeklyRight: mapList(config.elementsWeeklyRight),
+    elementsWeeklyVersoLeft: mapList(config.elementsWeeklyVersoLeft),
+    elementsWeeklyVersoRight: mapList(config.elementsWeeklyVersoRight),
     introPages: config.introPages.map(p => ({
       ...p,
       elements: p.elements.map(mapper),
@@ -513,6 +515,8 @@ export function getAllElementsFromConfig(config: AgendaConfig): LayoutElement[] 
   pushList(config.elementsBottom);
   pushList(config.elementsWeeklyLeft);
   pushList(config.elementsWeeklyRight);
+  pushList(config.elementsWeeklyVersoLeft);
+  pushList(config.elementsWeeklyVersoRight);
   config.introPages?.forEach(p => pushList(p.elements));
   config.monthlyIntroPages?.forEach(p => pushList(p.elements));
   pushList(config.monthlyDividerStyle?.elements);

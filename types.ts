@@ -48,6 +48,7 @@ export interface DayData {
   countdowns?: { item: SpecialDateItem; daysRemaining: number; text: string }[];
   specialEventText?: string;
   specialDatesList?: SpecialDateItem[];
+  isPaddingDay?: boolean;
 }
 
 // Tipos de elementos que podem ser arrastados para a página
@@ -498,6 +499,8 @@ export interface CustomTemplateItem extends IntroPage {
     elementsVerso?: LayoutElement[];
     elementsWeeklyLeft?: LayoutElement[];
     elementsWeeklyRight?: LayoutElement[];
+    elementsWeeklyVersoLeft?: LayoutElement[];
+    elementsWeeklyVersoRight?: LayoutElement[];
     projectType?: 'agenda' | 'planner' | 'notebook' | 'devotional';
     createdAt?: string;
 }
@@ -576,14 +579,18 @@ export interface AgendaConfig {
   elementsSunday?: LayoutElement[]; // Template específico para Domingo (opcional)
   elementsTop?: LayoutElement[]; // Template específico para a parte superior (2 dias por página)
   elementsBottom?: LayoutElement[]; // Template específico para a parte inferior (2 dias por página)
-  elementsWeeklyLeft?: LayoutElement[]; // Template para página esquerda do planner semanal
-  elementsWeeklyRight?: LayoutElement[]; // Template para página direita do planner semanal
+  elementsWeeklyLeft?: LayoutElement[]; // Template para página esquerda do planner semanal (frente)
+  elementsWeeklyRight?: LayoutElement[]; // Template para página direita do planner semanal (frente)
+  elementsWeeklyVersoLeft?: LayoutElement[]; // Template para página esquerda do verso no planner semanal em 2 páginas
+  elementsWeeklyVersoRight?: LayoutElement[]; // Template para página direita do verso no planner semanal em 2 páginas
   introPages: IntroPage[]; // Lista de páginas iniciais (DADOS, CALENDARIOS, ETC)
   monthlyIntroPages?: IntroPage[]; // Páginas introdutórias que começam toda mês (após o divisor de cada mês)
   styles?: ProjectStylesConfig; // Sistema de estilos vinculados (Cor, Caractere e Parágrafo)
   specialDates?: SpecialDateItem[]; // Datas Especiais, Férias da Cliente, Contagem Regressiva para Casamento
   showSpecialDateBadges?: boolean; // Exibir badges elegantes nas páginas dos dias com eventos especiais
   specialDateBadgePosition?: 'top' | 'bottom'; // Posição dos badges automáticos nas páginas
+  weeklyStartMode?: 'full_week' | 'strict_first_day'; // 'full_week' = alinha no início da semana com dias do mês anterior; 'strict_first_day' = começa estritamente no dia 1º
+  showPaddingDaysNumbers?: boolean; // Se true, exibe os números dos dias do mês anterior; se false, deixa as caixas em branco
   quoteCategory?: 'all' | 'feminine_strength' | 'faith' | 'motivational' | 'gratitude_mindfulness' | 'entrepreneurship_creativity' | 'self_care' | 'self_love' | 'success_habits' | string; // Categoria padrão de frases motivacionais
   quoteCustomList?: string[]; // Lista personalizada de frases motivacionais do projeto
 }

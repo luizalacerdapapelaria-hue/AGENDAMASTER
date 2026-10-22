@@ -297,73 +297,144 @@ export const generatePlannerDays = (
   includeHolidays: boolean,
   municipalHolidays: Holiday[] = [],
   startMonth: number = 0,
-  durationMonths: number = 12
+  durationMonths: number = 12,
+  weeklyStartMode: 'full_week' | 'strict_first_day' = 'full_week',
+  startOfWeekDay: number = 1,
+  showPaddingDaysNumbers: boolean = true
 ): DayData[] => {
-  const days = generateCalendarYear(year, includeHolidays, municipalHolidays, startMonth, durationMonths);
-  
-  // Pad beginning to start on Monday (1)
-  const firstDay = days[0];
-  const firstDayOfWeek = firstDay.dayOfWeek; // 0 is Sunday, 1 is Monday
-  
-  if (firstDayOfWeek !== 1) {
-    const diff = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
-    const padding = [];
-    for (let i = diff; i > 0; i--) {
-        const d = new Date(firstDay.date);
-        d.setDate(d.getDate() - i);
-        
-        // Moon Math for padding days
-        const current = d.getTime();
-        const diffDays = (current - knownNewMoon) / (1000 * 60 * 60 * 24);
-        const phasePos = ((diffDays % cycle) + cycle) % cycle / cycle;
-        let moonPhase = '';
-        if (phasePos < 0.06 || phasePos > 0.94) moonPhase = 'Nova';
-        else if (phasePos < 0.44) moonPhase = 'Crescente';
-        else if (phasePos < 0.56) moonPhase = 'Lua cheia';
-        else moonPhase = 'Minguante';
+  const isStrictFirstDay = weeklyStartMode === 'strict_first_day';
+  const targetEndDay = (startOfWeekDay + 6) % 7;
 
-        padding.push({
-            date: new Date(d),
-            dayOfWeek: d.getDay(),
-            dayOfMonth: 0, 
-            month: d.getMonth(),
-            year: d.getFullYear(),
-            holiday: undefined,
-            moonPhase: moonPhase
-        });
+  // Pre-calculate holidays for all target years
+  const startYear = year + Math.floor(startMonth / 12);
+  const endYear = year + Math.floor((startMonth + durationMonths) / 12);
+  const holidays: Holiday[] = [];
+  if (includeHolidays !== false) {
+    for (let y = startYear - 1; y <= endYear + 1; y++) {
+      holidays.push(...getFixedHolidays(y), ...getMobileHolidays(y));
     }
-    days.unshift(...padding);
   }
 
-  // Pad end to end on Sunday (0)
-  const lastDay = days[days.length - 1];
-  const lastDayOfWeek = lastDay.dayOfWeek;
-  if (lastDayOfWeek !== 0) {
-      const diff = 7 - lastDayOfWeek;
-      for (let i = 1; i <= diff; i++) {
-          const d = new Date(lastDay.date);
-          d.setDate(d.getDate() + i);
-          
-          // Moon Math for padding days
-          const current = d.getTime();
-          const diffDays = (current - knownNewMoon) / (1000 * 60 * 60 * 24);
-          const phasePos = ((diffDays % cycle) + cycle) % cycle / cycle;
-          let moonPhase = '';
-          if (phasePos < 0.06 || phasePos > 0.94) moonPhase = 'Nova';
-          else if (phasePos < 0.44) moonPhase = 'Crescente';
-          else if (phasePos < 0.56) moonPhase = 'Lua cheia';
-          else moonPhase = 'Minguante';
-
-          days.push({
-              date: new Date(d),
-              dayOfWeek: d.getDay(),
-              dayOfMonth: 0, 
-              month: d.getMonth(),
-              year: d.getFullYear(),
-              holiday: undefined,
-              moonPhase: moonPhase
-          });
+  if (municipalHolidays && municipalHolidays.length > 0) {
+    for (const mh of municipalHolidays) {
+      if (!mh.date || !mh.name) continue;
+      const parts = mh.date.trim().split('-');
+      if (parts.length === 3) {
+        const m = parts[1].padStart(2, '0');
+        const d = parts[2].padStart(2, '0');
+        for (let y = startYear - 1; y <= endYear + 1; y++) {
+          holidays.push({ ...mh, date: `${y}-${m}-${d}` });
+        }
+      } else {
+        holidays.push(mh);
       }
+    }
+  }
+
+  const holidayMap = new Map<string, string>();
+  holidays.forEach(h => {
+    if (h.date && h.name) {
+      const parts = h.date.trim().split('-');
+      if (parts.length === 3) {
+        const iso = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        holidayMap.set(iso, h.name);
+      } else {
+        holidayMap.set(h.date, h.name);
+      }
+    }
+  });
+
+  const getMoonPhaseForDate = (d: Date): string => {
+    const current = d.getTime();
+    const diffDays = (current - knownNewMoon) / (1000 * 60 * 60 * 24);
+    const phasePos = ((diffDays % cycle) + cycle) % cycle / cycle;
+    if (phasePos < 0.06 || phasePos > 0.94) return 'Nova';
+    if (phasePos < 0.44) return 'Crescente';
+    if (phasePos < 0.56) return 'Lua cheia';
+    return 'Minguante';
+  };
+
+  const days: DayData[] = [];
+
+  for (let m = startMonth; m < startMonth + durationMonths; m++) {
+    const currentYear = year + Math.floor(m / 12);
+    const monthIndex = ((m % 12) + 12) % 12;
+
+    const firstDate = new Date(currentYear, monthIndex, 1);
+    const lastDate = new Date(currentYear, monthIndex + 1, 0);
+    const daysInMonth = lastDate.getDate();
+
+    // 1. Padding at the beginning of the month's first week
+    const firstDayOfWeek = firstDate.getDay();
+    const startDiff = (firstDayOfWeek - startOfWeekDay + 7) % 7;
+
+    if (startDiff > 0) {
+      for (let i = startDiff; i > 0; i--) {
+        const padDate = new Date(firstDate);
+        padDate.setDate(padDate.getDate() - i);
+
+        // When strict_first_day: box is strictly empty with dayOfMonth = 0 (no prior month dates)
+        // When full_week: includes prior month dates if showPaddingDaysNumbers is true
+        const padDayNum = isStrictFirstDay ? 0 : (showPaddingDaysNumbers ? padDate.getDate() : 0);
+        const padHoliday = isStrictFirstDay ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
+        const padMoon = isStrictFirstDay ? undefined : getMoonPhaseForDate(padDate);
+
+        days.push({
+          date: new Date(padDate),
+          dayOfWeek: padDate.getDay(),
+          dayOfMonth: padDayNum,
+          month: monthIndex, // Keeps context bound to this month's first week
+          year: currentYear,
+          holiday: padHoliday,
+          moonPhase: padMoon,
+          isPaddingDay: true
+        });
+      }
+    }
+
+    // 2. Active days of this month
+    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+      const d = new Date(currentYear, monthIndex, dayNum);
+      const isoDate = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      const holidayName = checkIsHoliday(currentYear, monthIndex, dayNum, municipalHolidays) || holidayMap.get(isoDate);
+
+      days.push({
+        date: new Date(d),
+        dayOfWeek: d.getDay(),
+        dayOfMonth: dayNum,
+        month: monthIndex,
+        year: currentYear,
+        holiday: holidayName,
+        moonPhase: getMoonPhaseForDate(d),
+        isPaddingDay: false
+      });
+    }
+
+    // 3. Padding at the end of the month's final week
+    const lastDayOfWeek = lastDate.getDay();
+    const endDiff = (targetEndDay - lastDayOfWeek + 7) % 7;
+
+    if (endDiff > 0) {
+      for (let i = 1; i <= endDiff; i++) {
+        const padDate = new Date(lastDate);
+        padDate.setDate(padDate.getDate() + i);
+
+        const padDayNum = isStrictFirstDay ? 0 : (showPaddingDaysNumbers ? padDate.getDate() : 0);
+        const padHoliday = isStrictFirstDay ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
+        const padMoon = isStrictFirstDay ? undefined : getMoonPhaseForDate(padDate);
+
+        days.push({
+          date: new Date(padDate),
+          dayOfWeek: padDate.getDay(),
+          dayOfMonth: padDayNum,
+          month: monthIndex, // Keeps context bound to this month's final week
+          year: currentYear,
+          holiday: padHoliday,
+          moonPhase: padMoon,
+          isPaddingDay: true
+        });
+      }
+    }
   }
 
   return days;

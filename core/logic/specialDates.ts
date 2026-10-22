@@ -198,7 +198,7 @@ export const enrichDayDataWithSpecialDates = (
   dayData: DayData,
   specialDates: SpecialDateItem[] = []
 ): DayData => {
-  if (!dayData || !dayData.date || !specialDates || specialDates.length === 0) {
+  if (!dayData || !dayData.date || dayData.dayOfMonth === 0 || dayData.isPaddingDay || !specialDates || specialDates.length === 0) {
     return dayData;
   }
 

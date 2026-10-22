@@ -43,7 +43,7 @@ import {
   Square, Circle, Flower, ListTodo, Grid3X3,
   ScanLine, Layers, ChevronDown,
   CalendarDays, CalendarClock, TableProperties, X, Smile, Copy, ClipboardList, Shapes,
-  ChevronUp, Book, Plus, FileText, Grid, List, Undo,
+  ChevronUp, Book, Plus, FileText, Grid, List, Undo, Check,
   Type as TypeIcon, CaseUpper, CaseLower,
   PanelTop, PanelBottom, PanelLeft, PanelRight, Columns, Rows, Minus, Flag,
   Table as TableIcon,
@@ -1003,6 +1003,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     elementsBottom: initialConfig?.elementsBottom,
     elementsWeeklyLeft: initialConfig?.elementsWeeklyLeft,
     elementsWeeklyRight: initialConfig?.elementsWeeklyRight,
+    elementsWeeklyVersoLeft: initialConfig?.elementsWeeklyVersoLeft,
+    elementsWeeklyVersoRight: initialConfig?.elementsWeeklyVersoRight,
     introPages: initialConfig?.introPages || INTRO_TEMPLATES,
     monthlyIntroPages: initialConfig?.monthlyIntroPages || []
   });
@@ -1032,6 +1034,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           elements: nextElements,
           elementsWeeklyLeft: isWeekly ? initialConfig.elementsWeeklyLeft : undefined,
           elementsWeeklyRight: isWeekly ? initialConfig.elementsWeeklyRight : undefined,
+          elementsWeeklyVersoLeft: isWeekly ? initialConfig.elementsWeeklyVersoLeft : undefined,
+          elementsWeeklyVersoRight: isWeekly ? initialConfig.elementsWeeklyVersoRight : undefined,
           municipalHolidays: initialConfig.municipalHolidays || prev.municipalHolidays || [],
           specialDates: initialConfig.specialDates || prev.specialDates || [],
           showSpecialDateBadges: initialConfig.showSpecialDateBadges ?? prev.showSpecialDateBadges ?? true,
@@ -1175,6 +1179,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (checkElements(config.elementsSunday)) return true;
     if (checkElements(config.elementsWeeklyLeft)) return true;
     if (checkElements(config.elementsWeeklyRight)) return true;
+    if (checkElements(config.elementsWeeklyVersoLeft)) return true;
+    if (checkElements(config.elementsWeeklyVersoRight)) return true;
 
     if (config.introPages?.some(p => checkElements(p.elements))) return true;
     if (config.monthlyIntroPages?.some(p => checkElements(p.elements))) return true;
@@ -1195,6 +1201,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (checkElements(config.elementsSunday)) return true;
     if (checkElements(config.elementsWeeklyLeft)) return true;
     if (checkElements(config.elementsWeeklyRight)) return true;
+    if (checkElements(config.elementsWeeklyVersoLeft)) return true;
+    if (checkElements(config.elementsWeeklyVersoRight)) return true;
 
     if (config.introPages?.some(p => checkElements(p.elements))) return true;
     if (config.monthlyIntroPages?.some(p => checkElements(p.elements))) return true;
@@ -1224,7 +1232,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
   };
 
-  const [editorViewMode, setEditorViewMode] = useState<'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right'>(
+  const [editorViewMode, setEditorViewMode] = useState<'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right'>(
     initialConfig?.layoutType === 'weekly_vertical' || initialConfig?.layoutType === 'weekly_horizontal' 
     ? 'weekly_left' 
     : 'standard'
@@ -2235,6 +2243,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       hasSim(config.elementsVerso) ||
       hasSim(config.elementsWeeklyLeft) ||
       hasSim(config.elementsWeeklyRight) ||
+      hasSim(config.elementsWeeklyVersoLeft) ||
+      hasSim(config.elementsWeeklyVersoRight) ||
       hasSim(config.elementsSaturday) ||
       hasSim(config.elementsSunday) ||
       hasSim(config.elementsTop) ||
@@ -2250,6 +2260,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       elementsVerso: clearList(prev.elementsVerso),
       elementsWeeklyLeft: clearList(prev.elementsWeeklyLeft),
       elementsWeeklyRight: clearList(prev.elementsWeeklyRight),
+      elementsWeeklyVersoLeft: clearList(prev.elementsWeeklyVersoLeft),
+      elementsWeeklyVersoRight: clearList(prev.elementsWeeklyVersoRight),
       elementsSaturday: clearList(prev.elementsSaturday),
       elementsSunday: clearList(prev.elementsSunday),
       elementsTop: clearList(prev.elementsTop),
@@ -2724,7 +2736,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             config.includeHolidays,
             config.municipalHolidays,
             config.startMonth ?? 0,
-            config.durationMonths ?? 12
+            config.durationMonths ?? 12,
+            config.weeklyStartMode ?? 'full_week',
+            config.startOfWeekDay ?? 1,
+            config.showPaddingDaysNumbers !== false
         );
     } else {
         data = generateCalendarYear(
@@ -2741,7 +2756,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
     
     setGeneratedData(data);
-  }, [config.year, config.includeHolidays, config.municipalHolidays, config.specialDates, config.layoutType, config.projectType, config.pageCount, config.startMonth, config.durationMonths]);
+  }, [config.year, config.includeHolidays, config.municipalHolidays, config.specialDates, config.layoutType, config.projectType, config.pageCount, config.startMonth, config.durationMonths, config.weeklyStartMode, config.startOfWeekDay, config.showPaddingDaysNumbers]);
 
   useEffect(() => {
     if (config.includeQuotes && quotes.length === 0) {
@@ -2769,6 +2784,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const getActiveElements = (): LayoutElement[] => {
       if (editMode === 'daily') {
+          if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+              if (editorViewMode === 'weekly_verso_left' || (editorViewMode === 'verso' && config.customVerso)) {
+                  return config.elementsWeeklyVersoLeft ?? (config.elementsWeeklyLeft ?? config.elements);
+              }
+              if (editorViewMode === 'weekly_verso_right') {
+                  return config.elementsWeeklyVersoRight ?? (config.elementsWeeklyRight ?? config.elements);
+              }
+              if (editorViewMode === 'weekly_left') return config.elementsWeeklyLeft ?? config.elements;
+              if (editorViewMode === 'weekly_right') return config.elementsWeeklyRight ?? config.elements;
+              if (editorViewMode === 'standard') return config.elementsWeeklyLeft ?? config.elements;
+          }
           if (editorViewMode === 'verso') {
               return config.elementsVerso || config.elements;
           }
@@ -2779,11 +2805,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           if (config.layoutType === '2_per_page') {
               if (editorViewMode === 'top') return config.elementsTop || config.elements;
               if (editorViewMode === 'bottom') return config.elementsBottom || config.elements;
-          }
-          if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
-              if (editorViewMode === 'weekly_left') return config.elementsWeeklyLeft ?? config.elements;
-              if (editorViewMode === 'weekly_right') return config.elementsWeeklyRight ?? config.elements;
-              if (editorViewMode === 'standard') return config.elementsWeeklyLeft ?? config.elements;
           }
 
           const filtered = config.elements.filter(el => el.type !== 'planner_day_box');
@@ -2841,10 +2862,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       return [];
   };
 
-  const transferElementBetweenPages = (elementId: string, from: 'weekly_left' | 'weekly_right', to: 'weekly_left' | 'weekly_right', event: React.MouseEvent) => {
+  const transferElementBetweenPages = (
+    elementId: string, 
+    from: 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right', 
+    to: 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right', 
+    event: React.MouseEvent
+  ) => {
     setConfig(prev => {
-        const fromKey = from === 'weekly_left' ? 'elementsWeeklyLeft' : 'elementsWeeklyRight';
-        const toKey = to === 'weekly_left' ? 'elementsWeeklyLeft' : 'elementsWeeklyRight';
+        const getListKey = (mode: string): 'elementsWeeklyLeft' | 'elementsWeeklyRight' | 'elementsWeeklyVersoLeft' | 'elementsWeeklyVersoRight' => {
+            if (mode === 'weekly_right') return 'elementsWeeklyRight';
+            if (mode === 'weekly_verso_left') return 'elementsWeeklyVersoLeft';
+            if (mode === 'weekly_verso_right') return 'elementsWeeklyVersoRight';
+            return 'elementsWeeklyLeft';
+        };
+        const fromKey = getListKey(from);
+        const toKey = getListKey(to);
         
         const fromList = prev[fromKey] || prev.elements;
         const toList = prev[toKey] || prev.elements;
@@ -2856,9 +2888,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const newFromList = fromList.filter(e => e.id !== elementId);
         
         // Calculate the new X position
-        // If we are moving from left to right, we subtract ~100 to bring it to near 0 on the right page
-        // If from right to left, we add ~100
-        const newX = from === 'weekly_left' ? element.x - 100 : element.x + 100;
+        const isFromLeft = from === 'weekly_left' || from === 'weekly_verso_left';
+        const newX = isFromLeft ? element.x - 100 : element.x + 100;
         
         const newElement = { ...element, x: Math.max(0, Math.min(100 - element.w, newX)) };
         const newToList = [...toList, newElement];
@@ -2868,11 +2899,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         // We also need to update dragRef because the coordinate system changed
         if (dragRef.current) {
-            // Adjust start position relative to the new page
             const containerWidth = EDITOR_WIDTH_PX;
             const gapWidth = 32; // gap-8 = 2rem = 32px
             
-            if (from === 'weekly_left') {
+            if (isFromLeft) {
                 dragRef.current.startX += (containerWidth + gapWidth);
                 dragRef.current.initialX -= 100;
             } else {
@@ -2895,6 +2925,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           typeof elementsOrUpdater === 'function' ? elementsOrUpdater(prevList || []) : elementsOrUpdater;
 
       if (editMode === 'daily') {
+          if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+              if (editorViewMode === 'weekly_verso_left' || (editorViewMode === 'verso' && config.customVerso)) {
+                  setter(prev => ({ 
+                      ...prev, 
+                      elementsWeeklyVersoLeft: getNew(prev.elementsWeeklyVersoLeft ?? (prev.elementsWeeklyLeft ?? prev.elements)) 
+                  }));
+              } else if (editorViewMode === 'weekly_verso_right') {
+                  setter(prev => ({ 
+                      ...prev, 
+                      elementsWeeklyVersoRight: getNew(prev.elementsWeeklyVersoRight ?? (prev.elementsWeeklyRight ?? prev.elements)) 
+                  }));
+              } else if (editorViewMode === 'weekly_left' || editorViewMode === 'standard') {
+                  setter(prev => ({ ...prev, elementsWeeklyLeft: getNew(prev.elementsWeeklyLeft ?? prev.elements) }));
+              } else if (editorViewMode === 'weekly_right') {
+                  setter(prev => ({ ...prev, elementsWeeklyRight: getNew(prev.elementsWeeklyRight ?? prev.elements) }));
+              }
+              return;
+          }
           if (editorViewMode === 'verso') {
               setter(prev => ({ ...prev, elementsVerso: getNew(prev.elementsVerso || prev.elements) }));
               return;
@@ -2918,14 +2966,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   setter(prev => ({ ...prev, elementsBottom: getNew(prev.elementsBottom || prev.elements) }));
                   return;
               }
-          }
-          if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
-              if (editorViewMode === 'weekly_left' || editorViewMode === 'standard') {
-                  setter(prev => ({ ...prev, elementsWeeklyLeft: getNew(prev.elementsWeeklyLeft ?? prev.elements) }));
-              } else if (editorViewMode === 'weekly_right') {
-                  setter(prev => ({ ...prev, elementsWeeklyRight: getNew(prev.elementsWeeklyRight ?? prev.elements) }));
-              }
-              return;
           }
           setter(prev => ({ ...prev, elements: getNew(prev.elements) }));
       } else if (editMode === 'intro') {
@@ -3856,7 +3896,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           layoutType: type,
           elements: single.length > 0 ? single : prev.elements.filter(el => el.type !== 'planner_day_box'),
           elementsWeeklyLeft: left.length > 0 ? left : undefined,
-          elementsWeeklyRight: right.length > 0 ? right : undefined
+          elementsWeeklyRight: right.length > 0 ? right : undefined,
+          elementsWeeklyVersoLeft: (left.length > 0 && prev.customVerso) ? mapElements(left) : undefined,
+          elementsWeeklyVersoRight: (right.length > 0 && prev.customVerso) ? mapElements(right) : undefined
       }));
       if (type === 'weekly_one_page_vertical' || type === 'weekly_one_page_horizontal') {
           setEditorViewMode('standard');
@@ -3880,6 +3922,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               elementsVerso: template.elementsVerso ? template.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsVerso,
               elementsWeeklyLeft: template.elementsWeeklyLeft ? template.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyLeft,
               elementsWeeklyRight: template.elementsWeeklyRight ? template.elementsWeeklyRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyRight,
+              elementsWeeklyVersoLeft: template.elementsWeeklyVersoLeft ? template.elementsWeeklyVersoLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyVersoLeft,
+              elementsWeeklyVersoRight: template.elementsWeeklyVersoRight ? template.elementsWeeklyVersoRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyVersoRight,
           }));
           if (template.layoutType === 'weekly_one_page_vertical' || template.layoutType === 'weekly_one_page_horizontal') {
               setEditorViewMode('standard');
@@ -3960,6 +4004,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           elementsVerso: config.elementsVerso ? config.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
           elementsWeeklyLeft: config.elementsWeeklyLeft ? config.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
           elementsWeeklyRight: config.elementsWeeklyRight ? config.elementsWeeklyRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
+          elementsWeeklyVersoLeft: config.elementsWeeklyVersoLeft ? config.elementsWeeklyVersoLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
+          elementsWeeklyVersoRight: config.elementsWeeklyVersoRight ? config.elementsWeeklyVersoRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
           background: config.background,
           createdAt: new Date().toISOString()
       };
@@ -5351,6 +5397,119 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     if (type === 'text') { newElement.content = styleOverride.content || "Novo Texto"; }
 
+    const isDatePlaceholderNumber = type === 'date_placeholder' && (!styleOverride.variant || styleOverride.variant === 'day_number');
+    const isDatePlaceholderName = type === 'date_placeholder' && styleOverride.variant === 'day_name';
+    const isDayNumber = type === 'day_number' || isDatePlaceholderNumber;
+    const isDayName = type === 'day_name' || isDatePlaceholderName;
+    const isDayBox = type === 'planner_day_box';
+
+    if ((isDayNumber || isDayName || isDayBox) && styleOverride.dayIndex === undefined) {
+        if (config.layoutType.startsWith('weekly')) {
+            const isRight = editorViewMode === 'weekly_right';
+            const startDay = config.startOfWeekDay ?? 1;
+            let pageDays: number[];
+            if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+                if (startDay === 0) {
+                    pageDays = isRight ? [4, 5, 6] : [0, 1, 2, 3];
+                } else {
+                    pageDays = isRight ? [4, 5, 6, 0] : [1, 2, 3];
+                }
+            } else {
+                pageDays = startDay === 0 ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6, 0];
+            }
+
+            const existingNumberDays = new Set(
+                activeList
+                    .filter(el => el.type === 'day_number' || (el.type === 'date_placeholder' && (el.style.variant === 'day_number' || !el.style.variant)))
+                    .map(el => el.style.dayIndex)
+                    .filter((idx): idx is number => idx !== undefined)
+            );
+            const existingNameDays = new Set(
+                activeList
+                    .filter(el => el.type === 'day_name' || (el.type === 'date_placeholder' && el.style.variant === 'day_name'))
+                    .map(el => el.style.dayIndex)
+                    .filter((idx): idx is number => idx !== undefined)
+            );
+            const existingBoxDays = new Set(
+                activeList
+                    .filter(el => el.type === 'planner_day_box')
+                    .map(el => el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex)
+                    .filter((idx): idx is number => idx !== undefined)
+            );
+
+            let chosenDay: number;
+            if (isDayNumber) {
+                const unused = pageDays.find(d => !existingNumberDays.has(d));
+                chosenDay = unused !== undefined ? unused : pageDays[existingNumberDays.size % pageDays.length];
+                if (existingNumberDays.size > 0) {
+                    if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_one_page_vertical') {
+                        const step = Math.min(28, Math.floor(75 / pageDays.length));
+                        newElement.x = Math.min(80, 5 + (existingNumberDays.size * step));
+                    } else {
+                        const step = Math.min(22, Math.floor(70 / pageDays.length));
+                        newElement.y = Math.min(80, 10 + (existingNumberDays.size * step));
+                    }
+                }
+            } else if (isDayName) {
+                const candidate = pageDays.find(d => existingNumberDays.has(d) && !existingNameDays.has(d));
+                if (candidate !== undefined) {
+                    chosenDay = candidate;
+                } else {
+                    const unused = pageDays.find(d => !existingNameDays.has(d));
+                    chosenDay = unused !== undefined ? unused : pageDays[existingNameDays.size % pageDays.length];
+                }
+            } else {
+                const unused = pageDays.find(d => !existingBoxDays.has(d));
+                chosenDay = unused !== undefined ? unused : pageDays[existingBoxDays.size % pageDays.length];
+                if (existingBoxDays.size > 0) {
+                    if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_one_page_vertical') {
+                        const step = Math.min(32, Math.floor(95 / pageDays.length));
+                        newElement.x = Math.min(70, existingBoxDays.size * step);
+                    } else {
+                        const step = Math.min(24, Math.floor(85 / pageDays.length));
+                        newElement.y = Math.min(75, 10 + (existingBoxDays.size * step));
+                    }
+                }
+            }
+
+            newElement.style.dayIndex = chosenDay;
+            if (isDayBox) {
+                newElement.style.plannerDayBox = {
+                    contentStyle: 'lines',
+                    ...(newElement.style.plannerDayBox || {}),
+                    dayIndex: chosenDay
+                };
+            }
+        } else if (config.layoutType === '2_per_page') {
+            const existingNumberIndices = new Set(
+                activeList
+                    .filter(el => el.type === 'day_number' || (el.type === 'date_placeholder' && (el.style.variant === 'day_number' || !el.style.variant)))
+                    .map(el => el.style.dayIndex ?? 0)
+            );
+            if (isDayNumber) {
+                const nextIdx = existingNumberIndices.has(0) ? 1 : 0;
+                newElement.style.dayIndex = nextIdx;
+                if (nextIdx === 1) newElement.y = 55;
+            } else if (isDayName) {
+                const existingNameIndices = new Set(
+                    activeList
+                        .filter(el => el.type === 'day_name' || (el.type === 'date_placeholder' && el.style.variant === 'day_name'))
+                        .map(el => el.style.dayIndex ?? 0)
+                );
+                if (existingNumberIndices.has(0) && !existingNameIndices.has(0)) {
+                    newElement.style.dayIndex = 0;
+                } else if (existingNumberIndices.has(1) && !existingNameIndices.has(1)) {
+                    newElement.style.dayIndex = 1;
+                    newElement.y = 55;
+                } else {
+                    const nextIdx = existingNameIndices.has(0) ? 1 : 0;
+                    newElement.style.dayIndex = nextIdx;
+                    if (nextIdx === 1) newElement.y = 55;
+                }
+            }
+        }
+    }
+
     if (!sizeOverride.w) {
         if (type === 'lines') { newElement.w = 80; newElement.h = 40; newElement.x = 10; newElement.style.borderWidth = 0.5; }
         if (type === 'box') { newElement.w = 30; newElement.h = 15; newElement.style.backgroundColor = '#f3f4f6'; newElement.style.borderWidth = 0; }
@@ -5875,8 +6034,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newGroupId = groupMapping.get(element.groupId);
         }
 
+        const cloned: LayoutElement = JSON.parse(JSON.stringify(element));
+
+        // Se for elemento de data em layout semanal, avançar para o próximo dia na sequência
+        const isDateElem = ['day_number', 'day_name', 'planner_day_box'].includes(element.type) ||
+                           (element.type === 'date_placeholder' && ['day_number', 'day_name'].includes(element.style.variant || 'day_number'));
+        
+        if (isDateElem && config.layoutType.startsWith('weekly')) {
+            const isRight = editorViewMode === 'weekly_right';
+            const startDay = config.startOfWeekDay ?? 1;
+            let pageDays: number[];
+            if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+                pageDays = isRight ? (startDay === 0 ? [4, 5, 6] : [4, 5, 6, 0]) : (startDay === 0 ? [0, 1, 2, 3] : [1, 2, 3]);
+            } else {
+                pageDays = startDay === 0 ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6, 0];
+            }
+            const currentDay = element.type === 'planner_day_box' ? (element.style.plannerDayBox?.dayIndex ?? element.style.dayIndex ?? pageDays[0]) : (element.style.dayIndex ?? pageDays[0]);
+            const currIdx = pageDays.indexOf(currentDay);
+            const nextDay = currIdx !== -1 && currIdx + 1 < pageDays.length ? pageDays[currIdx + 1] : ((currentDay + 1) % 7);
+            
+            cloned.style.dayIndex = nextDay;
+            if (cloned.type === 'planner_day_box') {
+                cloned.style.plannerDayBox = {
+                    contentStyle: cloned.style.plannerDayBox?.contentStyle || 'lines',
+                    ...(cloned.style.plannerDayBox || {}),
+                    dayIndex: nextDay
+                };
+            }
+        }
+
         newElements.push({
-            ...JSON.parse(JSON.stringify(element)),
+            ...cloned,
             id: newId,
             groupId: newGroupId,
             name: `${element.name || element.type} (Cópia)`,
@@ -6247,6 +6435,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         elements: updateBoxList(prev.elements) || [],
         elementsWeeklyLeft: prev.elementsWeeklyLeft ? updateBoxList(prev.elementsWeeklyLeft) : undefined,
         elementsWeeklyRight: prev.elementsWeeklyRight ? updateBoxList(prev.elementsWeeklyRight) : undefined,
+        elementsWeeklyVersoLeft: prev.elementsWeeklyVersoLeft ? updateBoxList(prev.elementsWeeklyVersoLeft) : undefined,
+        elementsWeeklyVersoRight: prev.elementsWeeklyVersoRight ? updateBoxList(prev.elementsWeeklyVersoRight) : undefined,
     }));
   };
 
@@ -6816,6 +7006,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }));
     }
 
+    if (isWeekly && config.customVerso && (!config.elementsWeeklyVersoLeft || config.elementsWeeklyVersoLeft.length === 0 || !config.elementsWeeklyVersoRight || config.elementsWeeklyVersoRight.length === 0)) {
+        setConfig(prev => ({
+            ...prev,
+            elementsWeeklyVersoLeft: (prev.elementsWeeklyVersoLeft && prev.elementsWeeklyVersoLeft.length > 0)
+                ? prev.elementsWeeklyVersoLeft
+                : (prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })),
+            elementsWeeklyVersoRight: (prev.elementsWeeklyVersoRight && prev.elementsWeeklyVersoRight.length > 0)
+                ? prev.elementsWeeklyVersoRight
+                : (prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) }))
+        }));
+    }
+
     if (isTwoPerPage && (!config.elementsTop || config.elementsTop.length === 0 || !config.elementsBottom || config.elementsBottom.length === 0)) {
         setConfig(prev => ({
             ...prev,
@@ -6957,7 +7159,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     startMarqueeSelectionRef.current = startMarqueeSelection;
   }, [startMarqueeSelection]);
 
-  const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right', introPageId?: string) => {
+  const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right', introPageId?: string) => {
     window.focus();
     if (templateType === 'intro' && introPageId) {
         if (introPageId === 'divider' || introPageId === 'divider_verso') {
@@ -6989,6 +7191,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!element && templateType) {
         if (templateType === 'weekly_left') activeList = config.elementsWeeklyLeft || config.elements;
         else if (templateType === 'weekly_right') activeList = config.elementsWeeklyRight || config.elements;
+        else if (templateType === 'weekly_verso_left') activeList = config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements;
+        else if (templateType === 'weekly_verso_right') activeList = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
         else if (templateType === 'saturday') activeList = config.elementsSaturday || config.elements;
         else if (templateType === 'sunday') activeList = config.elementsSunday || config.elements;
         else if (templateType === 'top') activeList = config.elementsTop || config.elements;
@@ -7009,12 +7213,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const groupH = Math.max(0.1, maxY - minY);
 
             const domMap = new Map<string, HTMLElement>();
-            if (editorRef.current) {
-                selectedElements.forEach(el => {
-                    const domEl = editorRef.current?.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
-                    if (domEl) domMap.set(el.id, domEl);
-                });
-            }
+            selectedElements.forEach(el => {
+                const domEl = (editorRef.current?.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null) ||
+                              (typeof document !== 'undefined' ? document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null : null);
+                if (domEl) domMap.set(el.id, domEl);
+            });
 
             dragRef.current = {
                 ids: selectedIds,
@@ -7104,12 +7307,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const groupH = Math.max(0.1, maxY - minY);
 
     const domMap = new Map<string, HTMLElement>();
-    if (editorRef.current) {
-        selectedElements.forEach(el => {
-            const domEl = editorRef.current?.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
-            if (domEl) domMap.set(el.id, domEl);
-        });
-    }
+    selectedElements.forEach(el => {
+        const domEl = (editorRef.current?.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null) ||
+                      (typeof document !== 'undefined' ? document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null : null);
+        if (domEl) domMap.set(el.id, domEl);
+    });
 
     dragRef.current = { 
         ids: newSelectedIds,
@@ -7937,6 +8139,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         elementsVerso: prev.elementsVerso?.map(updateCalendarElement),
         elementsWeeklyLeft: prev.elementsWeeklyLeft?.map(updateCalendarElement),
         elementsWeeklyRight: prev.elementsWeeklyRight?.map(updateCalendarElement),
+        elementsWeeklyVersoLeft: prev.elementsWeeklyVersoLeft?.map(updateCalendarElement),
+        elementsWeeklyVersoRight: prev.elementsWeeklyVersoRight?.map(updateCalendarElement),
         elementsSaturday: prev.elementsSaturday?.map(updateCalendarElement),
         elementsSunday: prev.elementsSunday?.map(updateCalendarElement),
         elementsTop: prev.elementsTop?.map(updateCalendarElement),
@@ -8034,6 +8238,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         elementsVerso: prev.elementsVerso?.map(updateMiniElement),
         elementsWeeklyLeft: prev.elementsWeeklyLeft?.map(updateMiniElement),
         elementsWeeklyRight: prev.elementsWeeklyRight?.map(updateMiniElement),
+        elementsWeeklyVersoLeft: prev.elementsWeeklyVersoLeft?.map(updateMiniElement),
+        elementsWeeklyVersoRight: prev.elementsWeeklyVersoRight?.map(updateMiniElement),
         elementsSaturday: prev.elementsSaturday?.map(updateMiniElement),
         elementsSunday: prev.elementsSunday?.map(updateMiniElement),
         elementsTop: prev.elementsTop?.map(updateMiniElement),
@@ -8088,7 +8294,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     pageNumber?: number, 
     pageWidth: number = 800, 
     pageHeight: number = 600,
-    templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right',
+    templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right',
     introPageId?: string,
     weekDays?: DayData[]
   ) => {
@@ -8099,7 +8305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const globalStyle = getGlobalCalendarStyle();
     
     // Obter índices calculados (auto ou explícitos)
-    const effectiveIndices = getEffectiveDayIndices(elements);
+    const effectiveIndices = getEffectiveDayIndices(elements, templateType);
     const miniCalendarIndexMap = new Map<string, number>();
     let miniCalCounter = 0;
     elements.forEach(el => {
@@ -8109,9 +8315,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     });
 
     const elementsWithIndices = elements.map(el => {
+        const assignedDay = effectiveIndices[el.id] ?? el.style.dayIndex ?? 0;
         let finalStyle = {
             ...el.style,
-            dayIndex: effectiveIndices[el.id] ?? el.style.dayIndex ?? 0,
+            dayIndex: assignedDay,
+            ...(el.type === 'planner_day_box' ? {
+                plannerDayBox: {
+                    ...el.style.plannerDayBox,
+                    dayIndex: assignedDay
+                }
+            } : {}),
             ...(isEditor ? {} : { simulateMaxSpace: false })
         };
 
@@ -8539,7 +8752,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       });
   };
 
-  const getEffectiveDayIndices = useCallback((elements: LayoutElement[]) => {
+  const getEffectiveDayIndices = useCallback((elements: LayoutElement[], templateType?: string) => {
     // Encontrar elementos que mostram partes da data
     const dateElements = elements.filter(el => 
         ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'holiday', 'moon', 'permanent_day_header', 'planner_day_box'].includes(el.type)
@@ -8550,8 +8763,79 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     // Verificar se é layout semanal (que usa dayIndex como dia da semana 0-6)
     const isWeekly = config.layoutType.startsWith('weekly');
     if (isWeekly) {
+        // Obter os dias esperados para esta página
+        const isRight = templateType === 'weekly_right' || templateType === 'weekly_verso_right' || (!templateType && (editorViewMode === 'weekly_right' || editorViewMode === 'weekly_verso_right'));
+        const startDay = config.startOfWeekDay ?? 1;
+        let pageDaysSequence: number[];
+        
+        if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+            if (startDay === 0) {
+                pageDaysSequence = isRight ? [4, 5, 6] : [0, 1, 2, 3];
+            } else {
+                pageDaysSequence = isRight ? [4, 5, 6, 0] : [1, 2, 3];
+            }
+        } else {
+            pageDaysSequence = startDay === 0 ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6, 0];
+        }
+
+        // Verificar se todos os elementos com data têm índices definidos E distintos
+        const explicitIndices = dateElements.map(el => {
+            return el.type === 'planner_day_box' 
+                ? (el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex) 
+                : el.style.dayIndex;
+        });
+        const definedExplicit = explicitIndices.filter((idx): idx is number => idx !== undefined);
+        const hasDistinctIndices = new Set(definedExplicit).size > 1;
+        const allExplicit = dateElements.length > 0 && definedExplicit.length === dateElements.length;
+
+        // Se todos têm índices explícitos e variados (ou é apenas 1 elemento com índice explícito):
+        if (allExplicit && (hasDistinctIndices || dateElements.length === 1)) {
+            const mapping: Record<string, number> = {};
+            elements.forEach(el => {
+                const day = el.type === 'planner_day_box' 
+                    ? (el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex ?? 0) 
+                    : (el.style.dayIndex ?? 0);
+                mapping[el.id] = day;
+            });
+            return mapping;
+        }
+
+        // Caso contrário, auto-sequenciamento inteligente para Planner Semanal:
+        // Ordenar os elementos pela posição visual na página
+        const sorted = [...dateElements].sort((a, b) => {
+            if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_one_page_vertical') {
+                if (Math.abs(a.x - b.x) < 8) return a.y - b.y;
+                return a.x - b.x;
+            }
+            if (Math.abs(a.y - b.y) < 6) return a.x - b.x;
+            return a.y - b.y;
+        });
+
         const mapping: Record<string, number> = {};
-        elements.forEach(el => mapping[el.id] = el.style.dayIndex ?? 0);
+        let daySeqCursor = 0;
+        const seenTypesInDay = new Set<string>();
+
+        sorted.forEach(el => {
+            const explicit = el.type === 'planner_day_box' 
+                ? (el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex) 
+                : el.style.dayIndex;
+
+            if (explicit !== undefined && hasDistinctIndices) {
+                mapping[el.id] = explicit;
+                return;
+            }
+
+            const typeKey = el.type === 'date_placeholder' ? (el.style.variant || 'day_number') : el.type;
+            if (seenTypesInDay.has(typeKey)) {
+                daySeqCursor = (daySeqCursor + 1) % pageDaysSequence.length;
+                seenTypesInDay.clear();
+            }
+
+            const assignedDay = pageDaysSequence[daySeqCursor] ?? pageDaysSequence[0];
+            mapping[el.id] = assignedDay;
+            seenTypesInDay.add(typeKey);
+        });
+
         return mapping;
     }
 
@@ -8563,7 +8847,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return mapping;
     }
 
-    // Lógica de auto-sequenciamento:
+    // Lógica de auto-sequenciamento para layouts diários / 2 por página:
     // Ordenar pela posição visual: Topo para Baixo, depois Esquerda para Direita
     const sorted = [...dateElements].sort((a, b) => {
         if (Math.abs(a.y - b.y) < 2) return a.x - b.x;
@@ -8575,8 +8859,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const seenTypes = new Set<string>();
 
     sorted.forEach(el => {
-        // Se encontrarmos um tipo que já vimos para o "dia atual", 
-        // incrementamos o índice para o próximo "dia"
         const typeKey = el.type === 'date_placeholder' ? (el.style.variant || 'date_placeholder') : el.type;
         if (seenTypes.has(typeKey)) {
             currentIdx++;
@@ -8587,7 +8869,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     });
 
     return mapping;
-  }, [config.layoutType]);
+  }, [config.layoutType, config.startOfWeekDay, editorViewMode]);
 
   const getMaxDayIndex = (elements: LayoutElement[]) => {
       const indices = getEffectiveDayIndices(elements);
@@ -8850,6 +9132,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const startMonth = config.startMonth ?? 0;
         const firstProjectDate = new Date(startYear, startMonth, 1);
         const startOfWeek = config.startOfWeekDay ?? 1;
+        const isStrictFirstDay = config.weeklyStartMode === 'strict_first_day';
+        const showPaddingNumbers = config.showPaddingDaysNumbers !== false;
+
         const diff = (firstProjectDate.getDay() - startOfWeek + 7) % 7;
         const weekStartDate = new Date(firstProjectDate);
         weekStartDate.setDate(firstProjectDate.getDate() - diff);
@@ -8857,14 +9142,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
             const d = new Date(weekStartDate);
             d.setDate(weekStartDate.getDate() + i);
+            const isPrevOrNextMonth = d.getMonth() !== startMonth || d.getFullYear() !== startYear;
+            const shouldHideNumber = isStrictFirstDay ? isPrevOrNextMonth : (isPrevOrNextMonth && !showPaddingNumbers);
             return {
-                dayOfMonth: d.getDate(),
-                month: d.getMonth(),
-                year: d.getFullYear(),
+                dayOfMonth: shouldHideNumber ? 0 : d.getDate(),
+                month: startMonth,
+                year: startYear,
                 dayOfWeek: d.getDay(),
-                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
-                moonPhase: 'Lua nova',
-                date: d
+                holiday: shouldHideNumber ? undefined : checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
+                moonPhase: shouldHideNumber ? undefined : 'Lua nova',
+                date: d,
+                isPaddingDay: isPrevOrNextMonth
             };
         });
 
@@ -8883,26 +9171,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const startMonth = config.startMonth ?? 0;
         const firstProjectDate = new Date(startYear, startMonth, 1);
         const startOfWeek = config.startOfWeekDay ?? 1;
+        const isStrictFirstDay = config.weeklyStartMode === 'strict_first_day';
+        const showPaddingNumbers = config.showPaddingDaysNumbers !== false;
+
+        const isVersoSpread = config.customVerso && (
+            editorViewMode === 'weekly_verso_left' || 
+            editorViewMode === 'weekly_verso_right' || 
+            editorViewMode === 'verso'
+        );
+
         const diff = (firstProjectDate.getDay() - startOfWeek + 7) % 7;
-        const weekStartDate = new Date(firstProjectDate);
+        let weekStartDate = new Date(firstProjectDate);
         weekStartDate.setDate(firstProjectDate.getDate() - diff);
+
+        // Se estiver visualizando o Verso da semana e avança sequência:
+        if (isVersoSpread && config.versoAdvancesSequence !== false) {
+            weekStartDate = new Date(weekStartDate);
+            weekStartDate.setDate(weekStartDate.getDate() + 7);
+        }
 
         const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
             const d = new Date(weekStartDate);
             d.setDate(weekStartDate.getDate() + i);
+            const isPrevOrNextMonth = d.getMonth() !== startMonth || d.getFullYear() !== startYear;
+            const shouldHideNumber = isStrictFirstDay ? isPrevOrNextMonth : (isPrevOrNextMonth && !showPaddingNumbers);
             return {
-                dayOfMonth: d.getDate(),
-                month: d.getMonth(),
-                year: d.getFullYear(),
+                dayOfMonth: shouldHideNumber ? 0 : d.getDate(),
+                month: startMonth,
+                year: startYear,
                 dayOfWeek: d.getDay(),
-                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
-                moonPhase: 'Lua nova',
-                date: d
+                holiday: shouldHideNumber ? undefined : checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
+                moonPhase: shouldHideNumber ? undefined : 'Lua nova',
+                date: d,
+                isPaddingDay: isPrevOrNextMonth
             };
         });
 
-        const elementsLeft = config.elementsWeeklyLeft ?? config.elements;
-        const elementsRight = config.elementsWeeklyRight ?? config.elements;
+        const elementsLeft = isVersoSpread
+            ? (config.elementsWeeklyVersoLeft ?? (config.elementsWeeklyLeft ?? config.elements))
+            : (config.elementsWeeklyLeft ?? config.elements);
+
+        const elementsRight = isVersoSpread
+            ? (config.elementsWeeklyVersoRight ?? (config.elementsWeeklyRight ?? config.elements))
+            : (config.elementsWeeklyRight ?? config.elements);
 
         const leftPaddingStyle = {
             paddingTop: `${config.margins.top * EDITOR_SCALE}px`,
@@ -8918,41 +9229,174 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             paddingRight: `${config.margins.outside * EDITOR_SCALE}px`
         };
 
+        const isLeftActive = isVersoSpread
+            ? (editorViewMode === 'weekly_verso_left' || editorViewMode === 'verso')
+            : (editorViewMode === 'weekly_left' || editorViewMode === 'standard');
+
+        const isRightActive = isVersoSpread
+            ? (editorViewMode === 'weekly_verso_right')
+            : (editorViewMode === 'weekly_right');
+
+        const templateTypeLeft = isVersoSpread ? 'weekly_verso_left' : 'weekly_left';
+        const templateTypeRight = isVersoSpread ? 'weekly_verso_right' : 'weekly_right';
+
         return (
-            <div className="flex gap-8 justify-center items-start p-8 bg-gray-200 min-h-full overflow-visible">
-                <div className="flex flex-col items-center gap-2">
-                    <div className="flex flex-col items-center">
-                        <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest leading-tight">Página Esquerda</span>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">Par / Verso</span>
+            <div className="flex flex-col items-center p-8 bg-gray-200 min-h-full overflow-visible gap-6">
+                {config.customVerso && (
+                    <div className="flex items-center bg-white/95 backdrop-blur-xs p-1.5 rounded-2xl shadow-sm border border-indigo-200 gap-2 select-none">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setEditorViewMode('weekly_left');
+                                setSelectedIds([]);
+                            }}
+                            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 ${
+                                !isVersoSpread
+                                    ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-300'
+                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                            }`}
+                        >
+                            <span>☀️ Semana Frente (Págs. 2 e 3)</span>
+                            <span className="text-[10px] py-0.5 px-2 rounded-md bg-white/20 font-mono font-bold">Frente</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setEditorViewMode('weekly_verso_left');
+                                setSelectedIds([]);
+                            }}
+                            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 ${
+                                isVersoSpread
+                                    ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-300'
+                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                            }`}
+                        >
+                            <span>🔄 Semana Verso (Próximas Págs. 4 e 5)</span>
+                            <span className="text-[10px] py-0.5 px-2 rounded-md bg-white/20 font-mono font-bold">Verso</span>
+                        </button>
                     </div>
-                    {wrapWithRuler(
-                        <div className={`${containerClass} ${editorViewMode === 'weekly_right' ? 'ring-1 ring-gray-300 opacity-90' : 'ring-4 ring-indigo-500/30'}`} style={{ ...containerStyle, ...leftPaddingStyle }}>
-                            {renderBackgroundsForPage('daily', 2)}
-                            <div className={usefulAreaClass}>
-                                {renderTemplate(elementsLeft, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'weekly_left', undefined, mockWeek)}
-                                {editorViewMode === 'weekly_right' && (
-                                    <div className="absolute inset-0 bg-white/5 cursor-pointer z-[60]" onClick={() => setEditorViewMode('weekly_left')} />
-                                )}
+                )}
+
+                <div className="flex gap-8 justify-center items-start overflow-visible">
+                    {/* Página Esquerda (Par / Verso) */}
+                    <div className="flex flex-col items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setEditorViewMode(isVersoSpread ? 'weekly_verso_left' : 'weekly_left');
+                                setSelectedIds([]);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 border select-none ${
+                                isLeftActive
+                                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-md ring-2 ring-indigo-300 scale-102'
+                                    : 'bg-white text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-gray-200 shadow-2xs'
+                            }`}
+                            title={isVersoSpread ? "Página Esquerda do Verso (Par) - Clique para selecionar e editar" : "Página Esquerda da Frente (Par) - Clique para selecionar e editar"}
+                        >
+                            <span className={`w-2 h-2 rounded-full ${isLeftActive ? 'bg-emerald-300 animate-pulse' : 'bg-gray-300'}`} />
+                            <div className="flex flex-col items-start leading-tight">
+                                <span className="text-[11px] font-black uppercase tracking-wider">
+                                    {isVersoSpread ? 'Página Esquerda • Verso (Par 4)' : 'Página Esquerda • Frente (Par 2)'}
+                                </span>
+                                <span className="text-[9px] font-medium opacity-85">
+                                    {isLeftActive ? '● Ativa para Edição' : 'Clique para Ativar'}
+                                </span>
                             </div>
-                        </div>
-                    )}
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                    <div className="flex flex-col items-center">
-                        <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest leading-tight">Página Direita</span>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">Ímpar / Frente</span>
+                        </button>
+                        {wrapWithRuler(
+                            <div 
+                                className={`${containerClass} layout-page-container cursor-pointer transition-all ${
+                                    isLeftActive 
+                                        ? 'ring-4 ring-indigo-500/40 shadow-xl border-indigo-400' 
+                                        : 'ring-1 ring-gray-300 hover:ring-2 hover:ring-indigo-300 opacity-90 hover:opacity-100'
+                                }`} 
+                                style={{ ...containerStyle, ...leftPaddingStyle }}
+                                onClick={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    if (!isLeftActive && !target.closest('.layout-element-wrapper')) {
+                                        setEditorViewMode(isVersoSpread ? 'weekly_verso_left' : 'weekly_left');
+                                        setSelectedIds([]);
+                                    }
+                                }}
+                            >
+                                {renderBackgroundsForPage('daily', isVersoSpread ? 4 : 2)}
+                                <div className={usefulAreaClass}>
+                                    {renderTemplate(
+                                        elementsLeft, 
+                                        null, 
+                                        true, 
+                                        isLeftActive, 
+                                        undefined, 
+                                        EDITOR_WIDTH_PX, 
+                                        EDITOR_HEIGHT_PX, 
+                                        templateTypeLeft, 
+                                        undefined, 
+                                        mockWeek
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
-                    {wrapWithRuler(
-                        <div className={`${containerClass} ${editorViewMode === 'weekly_left' ? 'ring-1 ring-gray-300 opacity-90' : 'ring-4 ring-indigo-500/30'}`} style={{ ...containerStyle, ...rightPaddingStyle }}>
-                            {renderBackgroundsForPage('daily', 1)}
-                            <div className={usefulAreaClass}>
-                                {renderTemplate(elementsRight, null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'weekly_right', undefined, mockWeek)}
-                                {editorViewMode === 'weekly_left' && (
-                                    <div className="absolute inset-0 bg-white/5 cursor-pointer z-[60]" onClick={() => setEditorViewMode('weekly_left')} />
-                                )}
+
+                    {/* Página Direita (Ímpar / Frente) */}
+                    <div className="flex flex-col items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setEditorViewMode(isVersoSpread ? 'weekly_verso_right' : 'weekly_right');
+                                setSelectedIds([]);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 border select-none ${
+                                isRightActive
+                                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-md ring-2 ring-indigo-300 scale-102'
+                                    : 'bg-white text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-gray-200 shadow-2xs'
+                            }`}
+                            title={isVersoSpread ? "Página Direita do Verso (Ímpar) - Clique para selecionar e editar" : "Página Direita da Frente (Ímpar) - Clique para selecionar e editar"}
+                        >
+                            <span className={`w-2 h-2 rounded-full ${isRightActive ? 'bg-emerald-300 animate-pulse' : 'bg-gray-300'}`} />
+                            <div className="flex flex-col items-start leading-tight">
+                                <span className="text-[11px] font-black uppercase tracking-wider">
+                                    {isVersoSpread ? 'Página Direita • Verso (Ímpar 5)' : 'Página Direita • Frente (Ímpar 3)'}
+                                </span>
+                                <span className="text-[9px] font-medium opacity-85">
+                                    {isRightActive ? '● Ativa para Edição' : 'Clique para Ativar'}
+                                </span>
                             </div>
-                        </div>
-                    )}
+                        </button>
+                        {wrapWithRuler(
+                            <div 
+                                className={`${containerClass} layout-page-container cursor-pointer transition-all ${
+                                    isRightActive 
+                                        ? 'ring-4 ring-indigo-500/40 shadow-xl border-indigo-400' 
+                                        : 'ring-1 ring-gray-300 hover:ring-2 hover:ring-indigo-300 opacity-90 hover:opacity-100'
+                                }`} 
+                                style={{ ...containerStyle, ...rightPaddingStyle }}
+                                onClick={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    if (!isRightActive && !target.closest('.layout-element-wrapper')) {
+                                        setEditorViewMode(isVersoSpread ? 'weekly_verso_right' : 'weekly_right');
+                                        setSelectedIds([]);
+                                    }
+                                }}
+                            >
+                                {renderBackgroundsForPage('daily', isVersoSpread ? 5 : 3)}
+                                <div className={usefulAreaClass}>
+                                    {renderTemplate(
+                                        elementsRight, 
+                                        null, 
+                                        true, 
+                                        isRightActive, 
+                                        undefined, 
+                                        EDITOR_WIDTH_PX, 
+                                        EDITOR_HEIGHT_PX, 
+                                        templateTypeRight, 
+                                        undefined, 
+                                        mockWeek
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         );
@@ -9600,12 +10044,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
         }
     } else if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
+        const targetEndDay = ((config.startOfWeekDay ?? 1) + 6) % 7;
         const weeks: DayData[][] = [];
         let currentWeek: DayData[] = [];
         
         effectiveDays.forEach((day, index) => {
             currentWeek.push(day);
-            if (day.dayOfWeek === 0 || index === effectiveDays.length - 1) {
+            if (day.dayOfWeek === targetEndDay || index === effectiveDays.length - 1) {
+                while (currentWeek.length < 7) {
+                    const lastD = currentWeek[currentWeek.length - 1];
+                    const nextDate = new Date(lastD.date);
+                    nextDate.setDate(nextDate.getDate() + 1);
+                    currentWeek.push({
+                        date: nextDate,
+                        dayOfWeek: nextDate.getDay(),
+                        dayOfMonth: 0,
+                        month: lastD.month,
+                        year: lastD.year,
+                        isPaddingDay: true
+                    });
+                }
                 weeks.push(currentWeek);
                 currentWeek = [];
             }
@@ -9613,7 +10071,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         let lastMonth = -1;
         weeks.forEach((week, weekIndex) => {
-            const firstValidDay = week.find(d => d.dayOfMonth > 0);
+            const firstValidDay = week.find(d => !d.isPaddingDay && d.dayOfMonth > 0) || week.find(d => !d.isPaddingDay) || week.find(d => d.dayOfMonth > 0) || week[0];
             if (!firstValidDay) return;
 
             const currentMonth = firstValidDay.month;
@@ -9670,23 +10128,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
         });
     } else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
-        // Group effectiveDays into weeks (Mon-Sun)
+        // Group effectiveDays into weeks
+        const targetEndDay = ((config.startOfWeekDay ?? 1) + 6) % 7;
         const weeks: DayData[][] = [];
         let currentWeek: DayData[] = [];
         
         effectiveDays.forEach((day, index) => {
             currentWeek.push(day);
-            if (day.dayOfWeek === 0 || index === effectiveDays.length - 1) {
+            if (day.dayOfWeek === targetEndDay || index === effectiveDays.length - 1) {
+                while (currentWeek.length < 7) {
+                    const lastD = currentWeek[currentWeek.length - 1];
+                    const nextDate = new Date(lastD.date);
+                    nextDate.setDate(nextDate.getDate() + 1);
+                    currentWeek.push({
+                        date: nextDate,
+                        dayOfWeek: nextDate.getDay(),
+                        dayOfMonth: 0,
+                        month: lastD.month,
+                        year: lastD.year,
+                        isPaddingDay: true
+                    });
+                }
                 weeks.push(currentWeek);
                 currentWeek = [];
             }
         });
 
         let lastMonth = -1;
+        let spreadIndex = 0;
         weeks.forEach((week, weekIndex) => {
             // Determinar o mês de referência para esta semana
-            // Usamos o primeiro dia da semana que tem dayOfMonth > 0 (pertence ao ano do planner)
-            const firstValidDay = week.find(d => d.dayOfMonth > 0);
+            const firstValidDay = week.find(d => !d.isPaddingDay && d.dayOfMonth > 0) || week.find(d => !d.isPaddingDay) || week.find(d => d.dayOfMonth > 0) || week[0];
             if (!firstValidDay) return; // Week entirely out of bounds? Should not happen with generatePlannerDays logic
 
             const currentMonth = firstValidDay.month;
@@ -9696,44 +10168,113 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             if (currentMonth !== lastMonth) {
                 renderMonthPrelude(currentMonth, currentYear);
                 lastMonth = currentMonth;
+                spreadIndex = 0;
             }
 
-            // Ensure Week Left Page is on an EVEN page (Left)
-            // To make the next page EVEN, current pageCount must be ODD.
-            if (pageCount % 2 === 0 && !config.disableSequenceSkip) {
-                const filler = renderFillerPage(pageCount + 1, currentMonth);
-                if (filler) pages.push(filler);
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Spread Frente para esta semana
+                if (pageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    const filler = renderFillerPage(pageCount + 1, currentMonth);
+                    if (filler) pages.push(filler);
+                }
+
+                // Left Page (Frente)
+                const elementsL = config.elementsWeeklyLeft || config.elements;
+                const containerL = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsL, null, false, false, pageCount + 1, printW, printH, 'weekly_left', undefined, week)}
+                    </div>,
+                    `week-l-${weekIndex}-front`,
+                    false, undefined, undefined, 'daily', currentMonth
+                );
+                if (containerL) pages.push(containerL);
+
+                // Right Page (Frente)
+                const elementsR = config.elementsWeeklyRight || config.elements;
+                const containerR = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsR, null, false, false, pageCount + 1, printW, printH, 'weekly_right', undefined, week)}
+                    </div>,
+                    `week-r-${weekIndex}-front`,
+                    false, undefined, undefined, 'daily', currentMonth
+                );
+                if (containerR) pages.push(containerR);
+
+                // Spread Verso com mesma semana (as próximas páginas par e ímpar!)
+                if (pageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    const filler = renderFillerPage(pageCount + 1, currentMonth);
+                    if (filler) pages.push(filler);
+                }
+
+                const elementsVL = config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements;
+                const containerVL = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsVL, null, false, false, pageCount + 1, printW, printH, 'weekly_verso_left', undefined, week)}
+                    </div>,
+                    `week-l-${weekIndex}-verso`,
+                    false, undefined, undefined, 'daily', currentMonth
+                );
+                if (containerVL) pages.push(containerVL);
+
+                const elementsVR = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
+                const containerVR = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsVR, null, false, false, pageCount + 1, printW, printH, 'weekly_verso_right', undefined, week)}
+                    </div>,
+                    `week-r-${weekIndex}-verso`,
+                    false, undefined, undefined, 'daily', currentMonth
+                );
+                if (containerVR) pages.push(containerVR);
+
+            } else {
+                // Alterna entre layout Frente (spread 0, 2, 4...) e layout Verso (spread 1, 3, 5... as próximas páginas par e ímpar!)
+                const isVersoSpread = config.customVerso && (spreadIndex % 2 === 1);
+
+                // Ensure Week Left Page is on an EVEN page (Left)
+                // To make the next page EVEN, current pageCount must be ODD.
+                if (pageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    const filler = renderFillerPage(pageCount + 1, currentMonth);
+                    if (filler) pages.push(filler);
+                }
+
+                // Left Page
+                const elementsL = isVersoSpread
+                    ? (config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements)
+                    : (config.elementsWeeklyLeft || config.elements);
+                const templateTypeL = isVersoSpread ? 'weekly_verso_left' : 'weekly_left';
+                const containerL = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsL, null, false, false, pageCount + 1, printW, printH, templateTypeL, undefined, week)}
+                    </div>,
+                    `week-l-${weekIndex}`,
+                    false,
+                    undefined,
+                    undefined,
+                    'daily',
+                    currentMonth
+                );
+                if (containerL) pages.push(containerL);
+
+                // Right Page
+                const elementsR = isVersoSpread
+                    ? (config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements)
+                    : (config.elementsWeeklyRight || config.elements);
+                const templateTypeR = isVersoSpread ? 'weekly_verso_right' : 'weekly_right';
+                const containerR = renderPageContainer(
+                    <div className="w-full h-full relative overflow-visible">
+                        {renderTemplate(elementsR, null, false, false, pageCount + 1, printW, printH, templateTypeR, undefined, week)}
+                    </div>,
+                    `week-r-${weekIndex}`,
+                    false,
+                    undefined,
+                    undefined,
+                    'daily',
+                    currentMonth
+                );
+                if (containerR) pages.push(containerR);
+
+                spreadIndex++;
             }
-
-            // Left Page
-            const elementsL = config.elementsWeeklyLeft || config.elements;
-            const containerL = renderPageContainer(
-                <div className="w-full h-full relative overflow-visible">
-                    {renderTemplate(elementsL, null, false, false, pageCount + 1, printW, printH, 'weekly_left', undefined, week)}
-                </div>,
-                `week-l-${weekIndex}`,
-                false,
-                undefined,
-                undefined,
-                'daily',
-                currentMonth
-            );
-            if (containerL) pages.push(containerL);
-
-            // Right Page
-            const elementsR = config.elementsWeeklyRight || config.elements;
-            const containerR = renderPageContainer(
-                <div className="w-full h-full relative overflow-visible">
-                    {renderTemplate(elementsR, null, false, false, pageCount + 1, printW, printH, 'weekly_right', undefined, week)}
-                </div>,
-                `week-r-${weekIndex}`,
-                false,
-                undefined,
-                undefined,
-                'daily',
-                currentMonth
-            );
-            if (containerR) pages.push(containerR);
         });
     }
     return pages;
@@ -11811,7 +12352,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     layoutType: newType,
                                                     elements: cleanElements.length > 0 ? cleanElements : getDefaultElements(),
                                                     elementsWeeklyLeft: undefined,
-                                                    elementsWeeklyRight: undefined
+                                                    elementsWeeklyRight: undefined,
+                                                    elementsWeeklyVersoLeft: undefined,
+                                                    elementsWeeklyVersoRight: undefined
                                                 }));
                                                 setEditorViewMode('standard');
                                             }}
@@ -11836,6 +12379,76 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         </select>
                                         <p className="text-[10px] text-gray-800 mt-1.5 font-bold">Mudar o layout no menu acima preserva seus elementos personalizados.</p>
                                     </div>
+
+                                    {(config.layoutType.startsWith('weekly') || config.projectType === 'planner') && (
+                                        <div className="pt-2.5 border-t-2 border-indigo-100 mt-2.5 space-y-2 bg-indigo-50/50 p-2.5 rounded-xl border">
+                                            <div className="flex items-center gap-1.5">
+                                                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                                <label className="text-[11px] font-black text-gray-900 uppercase">Início da 1ª Semana</label>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-1 gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfig(prev => ({ ...prev, weeklyStartMode: 'full_week' }))}
+                                                    className={`py-1.5 px-2.5 text-left rounded-lg text-xs font-bold transition-all border flex items-center justify-between cursor-pointer ${
+                                                        config.weeklyStartMode !== 'strict_first_day'
+                                                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                                    }`}
+                                                    title="Garante que a semana tenha os 7 dias completos, iniciando no início da semana para bater certinho o layout em 2 páginas"
+                                                >
+                                                    <div className="flex flex-col">
+                                                        <span className="font-black">Semana Completa (Recomendado)</span>
+                                                        <span className={`text-[9px] ${config.weeklyStartMode !== 'strict_first_day' ? 'text-indigo-100' : 'text-gray-500'}`}>
+                                                            Inclui dias do mês anterior para completar os 7 dias
+                                                        </span>
+                                                    </div>
+                                                    {config.weeklyStartMode !== 'strict_first_day' && <Check className="w-4 h-4 shrink-0 text-white" />}
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfig(prev => ({ ...prev, weeklyStartMode: 'strict_first_day' }))}
+                                                    className={`py-1.5 px-2.5 text-left rounded-lg text-xs font-bold transition-all border flex items-center justify-between cursor-pointer ${
+                                                        config.weeklyStartMode === 'strict_first_day'
+                                                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                                    }`}
+                                                    title="Inicia estritamente no dia 1º do mês, sem dias do mês anterior"
+                                                >
+                                                    <div className="flex flex-col">
+                                                        <span className="font-black">Iniciar no Dia 1º do Mês</span>
+                                                        <span className={`text-[9px] ${config.weeklyStartMode === 'strict_first_day' ? 'text-indigo-100' : 'text-gray-500'}`}>
+                                                            Começa estritamente no 1º dia do mês
+                                                        </span>
+                                                    </div>
+                                                    {config.weeklyStartMode === 'strict_first_day' && <Check className="w-4 h-4 shrink-0 text-white" />}
+                                                </button>
+                                            </div>
+
+                                            {config.weeklyStartMode !== 'strict_first_day' && (
+                                                <div className="pt-1 border-t border-indigo-100">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={config.showPaddingDaysNumbers !== false}
+                                                            onChange={(e) => setConfig(prev => ({ ...prev, showPaddingDaysNumbers: e.target.checked }))}
+                                                            className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 border-gray-300"
+                                                        />
+                                                        <span className="text-[11px] font-bold text-gray-800">
+                                                            Exibir números nos dias do mês anterior
+                                                        </span>
+                                                    </label>
+                                                    <p className="text-[9px] text-gray-500 ml-5.5">
+                                                        {config.showPaddingDaysNumbers !== false 
+                                                            ? '✓ Exibe as datas numéricas nas caixas do mês anterior.' 
+                                                            : '✓ Caixas do mês anterior ficam em branco/vazias sem números.'}
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </>
                             )}
 
@@ -11897,24 +12510,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             checked={!!config.customVerso} 
                                             onChange={(e) => {
                                                 const checked = e.target.checked;
+                                                const isWeeklyTwoPage = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
                                                 setConfig(prev => ({
                                                     ...prev,
                                                     customVerso: checked,
                                                     elementsVerso: (checked && (!prev.elementsVerso || prev.elementsVerso.length === 0))
                                                         ? prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
-                                                        : prev.elementsVerso
+                                                        : prev.elementsVerso,
+                                                    elementsWeeklyVersoLeft: (checked && (!prev.elementsWeeklyVersoLeft || prev.elementsWeeklyVersoLeft.length === 0))
+                                                        ? (prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) }))
+                                                        : prev.elementsWeeklyVersoLeft,
+                                                    elementsWeeklyVersoRight: (checked && (!prev.elementsWeeklyVersoRight || prev.elementsWeeklyVersoRight.length === 0))
+                                                        ? (prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) }))
+                                                        : prev.elementsWeeklyVersoRight
                                                 }));
                                                 if (checked) {
-                                                    setEditorViewMode('verso');
+                                                    setEditorViewMode(isWeeklyTwoPage ? 'weekly_verso_left' : 'verso');
                                                 } else {
-                                                    setEditorViewMode('standard');
+                                                    setEditorViewMode(isWeeklyTwoPage ? 'weekly_left' : 'standard');
                                                 }
                                             }} 
                                             className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-2 border-gray-400" 
                                         />
                                         <span className="text-xs font-black text-gray-950">Diferenciar Frente e Verso (Costas)</span>
                                     </label>
-                                    <p className="text-[10px] text-gray-800 mt-0.5 font-semibold">Permite criar um layout exclusivo para o verso (páginas pares) do miolo.</p>
+                                    <p className="text-[10px] text-gray-800 mt-0.5 font-semibold">
+                                        {config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal'
+                                            ? 'Permite criar um layout exclusivo para o verso do planner (as próximas páginas par e ímpar da folha).'
+                                            : 'Permite criar um layout exclusivo para o verso (páginas pares) do miolo.'}
+                                    </p>
                                 </div>
 
                                 {config.customVerso && (
@@ -12875,6 +13499,190 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
+                        {(config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') && editMode === 'daily' && (
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100 flex-wrap gap-y-1.5">
+                                {!config.customVerso ? (
+                                    <>
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Editando Planner Semanal:</span>
+                                        <button 
+                                            type="button"
+                                            onClick={() => { setEditorViewMode('weekly_left'); setSelectedIds([]); }} 
+                                            className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                editorViewMode === 'weekly_left' || editorViewMode === 'standard' 
+                                                    ? 'bg-indigo-600 text-white shadow-sm' 
+                                                    : 'text-gray-600 hover:bg-gray-100'
+                                            }`}
+                                        >
+                                            <span>📖 Página Esquerda (Par)</span>
+                                        </button>
+                                        <button 
+                                            type="button"
+                                            onClick={() => { setEditorViewMode('weekly_right'); setSelectedIds([]); }} 
+                                            className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                editorViewMode === 'weekly_right' 
+                                                    ? 'bg-indigo-600 text-white shadow-sm' 
+                                                    : 'text-gray-600 hover:bg-gray-100'
+                                            }`}
+                                        >
+                                            <span>📖 Página Direita (Ímpar)</span>
+                                        </button>
+                                        
+                                        <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+                                        
+                                        <button
+                                            type="button"
+                                            title={editorViewMode === 'weekly_right' ? "Copiar todos os elementos da Página Direita para a Página Esquerda" : "Copiar todos os elementos da Página Esquerda para a Página Direita"}
+                                            onClick={() => {
+                                                if (editorViewMode === 'weekly_right') {
+                                                    setConfig(prev => ({
+                                                        ...prev,
+                                                        elementsWeeklyLeft: (prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'left_' + Math.random().toString(36).substring(2, 9) }))
+                                                    }));
+                                                    setToastMessage("Elementos da Página Direita copiados para a Página Esquerda com sucesso!");
+                                                } else {
+                                                    setConfig(prev => ({
+                                                        ...prev,
+                                                        elementsWeeklyRight: (prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'right_' + Math.random().toString(36).substring(2, 9) }))
+                                                    }));
+                                                    setToastMessage("Elementos da Página Esquerda copiados para a Página Direita com sucesso!");
+                                                }
+                                            }}
+                                            className="px-2.5 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <Copy className="w-3 h-3" />
+                                            <span>{editorViewMode === 'weekly_right' ? 'Copiar para Esquerda' : 'Copiar para Direita'}</span>
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        {/* Alternador de Folha / Spread: Frente vs Verso */}
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Folha do Planner:</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEditorViewMode('weekly_left');
+                                                setSelectedIds([]);
+                                            }}
+                                            className={`px-3 py-1 text-xs font-black rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                editorViewMode === 'weekly_left' || editorViewMode === 'weekly_right' || editorViewMode === 'standard'
+                                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                                    : 'text-gray-700 hover:bg-gray-100'
+                                            }`}
+                                        >
+                                            <span>☀️ Frente (Págs 2 e 3)</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEditorViewMode('weekly_verso_left');
+                                                setSelectedIds([]);
+                                            }}
+                                            className={`px-3 py-1 text-xs font-black rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                editorViewMode === 'weekly_verso_left' || editorViewMode === 'weekly_verso_right' || editorViewMode === 'verso'
+                                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                                    : 'text-gray-700 hover:bg-gray-100'
+                                            }`}
+                                        >
+                                            <span>🔄 Verso (Próximas Págs 4 e 5)</span>
+                                        </button>
+
+                                        <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+
+                                        {/* Página ativa selecionada */}
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-1">Página Ativa:</span>
+                                        {(editorViewMode === 'weekly_verso_left' || editorViewMode === 'weekly_verso_right' || editorViewMode === 'verso') ? (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setEditorViewMode('weekly_verso_left'); setSelectedIds([]); }}
+                                                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                                                        editorViewMode === 'weekly_verso_left' || editorViewMode === 'verso'
+                                                            ? 'bg-indigo-100 text-indigo-800 font-bold border border-indigo-300'
+                                                            : 'text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    📖 Esquerda (Par 4)
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setEditorViewMode('weekly_verso_right'); setSelectedIds([]); }}
+                                                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                                                        editorViewMode === 'weekly_verso_right'
+                                                            ? 'bg-indigo-100 text-indigo-800 font-bold border border-indigo-300'
+                                                            : 'text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    📖 Direita (Ímpar 5)
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setEditorViewMode('weekly_left'); setSelectedIds([]); }}
+                                                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                                                        editorViewMode === 'weekly_left' || editorViewMode === 'standard'
+                                                            ? 'bg-indigo-100 text-indigo-800 font-bold border border-indigo-300'
+                                                            : 'text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    📖 Esquerda (Par 2)
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setEditorViewMode('weekly_right'); setSelectedIds([]); }}
+                                                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                                                        editorViewMode === 'weekly_right'
+                                                            ? 'bg-indigo-100 text-indigo-800 font-bold border border-indigo-300'
+                                                            : 'text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    📖 Direita (Ímpar 3)
+                                                </button>
+                                            </>
+                                        )}
+
+                                        <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+
+                                        {/* Ações de cópia para customVerso */}
+                                        <button
+                                            type="button"
+                                            title="Copiar elementos da Semana Frente (Págs 2 e 3) para a Semana Verso (Págs 4 e 5)"
+                                            onClick={() => {
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    elementsWeeklyVersoLeft: (prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })),
+                                                    elementsWeeklyVersoRight: (prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) }))
+                                                }));
+                                                setToastMessage("Elementos da Frente (Págs 2 e 3) copiados para o Verso (Págs 4 e 5)!");
+                                            }}
+                                            className="px-2.5 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <Copy className="w-3 h-3" />
+                                            <span>Copiar Frente ➔ Verso</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            title="Copiar elementos da Semana Verso (Págs 4 e 5) para a Semana Frente (Págs 2 e 3)"
+                                            onClick={() => {
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    elementsWeeklyLeft: (prev.elementsWeeklyVersoLeft ?? prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'wl_' + Math.random().toString(36).substring(2, 9) })),
+                                                    elementsWeeklyRight: (prev.elementsWeeklyVersoRight ?? prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'wr_' + Math.random().toString(36).substring(2, 9) }))
+                                                }));
+                                                setToastMessage("Elementos do Verso (Págs 4 e 5) copiados para a Frente (Págs 2 e 3)!");
+                                            }}
+                                            className="px-2.5 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <Copy className="w-3 h-3" />
+                                            <span>Copiar Verso ➔ Frente</span>
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
                         {editMode === 'divider' && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Divisória Mensal:</span>
@@ -12916,7 +13724,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
-                        {editMode === 'daily' && config.customVerso && (
+                        {editMode === 'daily' && config.customVerso && !config.layoutType.startsWith('weekly') && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Editando Página do Miolo:</span>
                                 <button 
@@ -12957,7 +13765,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
-                        {editMode === 'daily' && config.mirrorEvenPages && !config.customVerso && (
+                        {editMode === 'daily' && config.mirrorEvenPages && !config.customVerso && !config.layoutType.startsWith('weekly') && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Visualização do Miolo:</span>
                                 <button 
@@ -14458,14 +15266,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                          {['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year'].includes(selectedElement.type) && (
                                                             <div className="pt-3 border-t border-gray-100">
                                                                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-                                                                    {(config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') ? 'Vínculo com o Dia' : 'Sequência do Dia'}
+                                                                    {config.layoutType.startsWith('weekly') ? 'Vínculo com o Dia' : 'Sequência do Dia'}
                                                                 </h4>
                                                                 <div className="space-y-2">
                                                                     <label className="block text-[10px] font-bold text-gray-500 uppercase">
-                                                                        {(config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') ? 'Dia da Semana' : 'Ordem na Página (Offset)'}
+                                                                        {config.layoutType.startsWith('weekly') ? 'Dia da Semana' : 'Ordem na Página (Offset)'}
                                                                     </label>
                                                                     
-                                                                    {(config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') ? (
+                                                                    {config.layoutType.startsWith('weekly') ? (
                                                                         <select 
                                                                             value={selectedElement.style.dayIndex ?? 1} 
                                                                             onChange={(e) => updateElementStyle(selectedElement.id, { dayIndex: parseInt(e.target.value) })} 
@@ -14506,8 +15314,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         <div className="space-y-2">
                                                             <label className="block text-[10px] font-bold text-gray-500 uppercase">Dia da Semana</label>
                                                             <select 
-                                                                value={selectedElement.style.plannerDayBox?.dayIndex ?? 1} 
-                                                                onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, dayIndex: parseInt(e.target.value) } })} 
+                                                                value={selectedElement.style.plannerDayBox?.dayIndex ?? selectedElement.style.dayIndex ?? 1} 
+                                                                onChange={(e) => {
+                                                                    const val = parseInt(e.target.value);
+                                                                    updateElementStyle(selectedElement.id, { 
+                                                                        dayIndex: val,
+                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, dayIndex: val } 
+                                                                    });
+                                                                }} 
                                                                 className="w-full text-xs p-1.5 border border-gray-200 rounded"
                                                             >
                                                                 <option value={1}>Segunda-feira</option>

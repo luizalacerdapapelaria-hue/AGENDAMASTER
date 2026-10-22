@@ -499,7 +499,10 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
 
     let globalPageCount = 0;
     const isSinglePageType = config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.projectType === 'notebook' || config.projectType === 'devotional';
-    const totalPages = config.introPages.length + (isSinglePageType ? generatedDays.length : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
+    const isWeeklyTwoPage = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
+    const weeklyWeeksCount = Math.ceil(generatedDays.length / 7);
+    const weeklyPagesCount = (isWeeklyTwoPage && config.customVerso && config.versoAdvancesSequence === false) ? weeklyWeeksCount * 4 : weeklyWeeksCount * 2;
+    const totalPages = config.introPages.length + (isSinglePageType ? generatedDays.length : isWeeklyTwoPage ? weeklyPagesCount : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
 
     for (const page of config.introPages) {
         if (globalPageCount > 0) doc.addPage(format, orientation);
@@ -637,36 +640,99 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
         }
     }
     else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+        const targetEndDay = ((config.startOfWeekDay ?? 1) + 6) % 7;
         const weeks: DayData[][] = [];
         let currentWeek: DayData[] = [];
         generatedDays.forEach((day, index) => {
             currentWeek.push(day);
-            if (day.dayOfWeek === 0 || index === generatedDays.length - 1) {
+            if (day.dayOfWeek === targetEndDay || index === generatedDays.length - 1) {
                 weeks.push(currentWeek);
                 currentWeek = [];
             }
         });
 
+        let spreadIndex = 0;
+        let lastMonth = -1;
+
         for (const week of weeks) {
-            if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
-                // Ensure Left page is on EVEN page
-                doc.addPage(format, orientation);
-                globalPageCount++;
+            const firstValidDay = week.find(d => !d.isPaddingDay && d.dayOfMonth > 0) || week.find(d => !d.isPaddingDay) || week.find(d => d.dayOfMonth > 0) || week[0];
+            const currentMonth = firstValidDay ? firstValidDay.month : 0;
+            if (currentMonth !== lastMonth) {
+                lastMonth = currentMonth;
+                spreadIndex = 0;
             }
 
-            // Left Page (Even / Verso)
-            doc.addPage(format, orientation);
-            globalPageCount++;
-            let geo = getSafeGeometry(globalPageCount);
-            let elementsL = config.elementsWeeklyLeft || config.elements;
-            elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Spread Frente para esta semana
+                if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    doc.addPage(format, orientation);
+                    globalPageCount++;
+                }
 
-            // Right Page (Odd / Frente)
-            doc.addPage(format, orientation);
-            globalPageCount++;
-            geo = getSafeGeometry(globalPageCount);
-            let elementsR = config.elementsWeeklyRight || config.elements;
-            elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                // Left Page (Even / Par) - Frente
+                doc.addPage(format, orientation);
+                globalPageCount++;
+                let geo = getSafeGeometry(globalPageCount);
+                let elementsL = config.elementsWeeklyLeft || config.elements;
+                elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Right Page (Odd / Ímpar) - Frente
+                doc.addPage(format, orientation);
+                globalPageCount++;
+                geo = getSafeGeometry(globalPageCount);
+                let elementsR = config.elementsWeeklyRight || config.elements;
+                elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Spread Verso com mesma semana (as próximas páginas par e ímpar!)
+                if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    doc.addPage(format, orientation);
+                    globalPageCount++;
+                }
+
+                // Left Page (Even / Par) - Verso
+                doc.addPage(format, orientation);
+                globalPageCount++;
+                geo = getSafeGeometry(globalPageCount);
+                let elementsVL = config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements;
+                elementsVL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Right Page (Odd / Ímpar) - Verso
+                doc.addPage(format, orientation);
+                globalPageCount++;
+                geo = getSafeGeometry(globalPageCount);
+                let elementsVR = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
+                elementsVR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+            } else {
+                // Alterna entre layout Frente (spread par) e layout Verso (spread ímpar - as próximas páginas par e ímpar!)
+                const isVersoSpread = config.customVerso && (spreadIndex % 2 === 1);
+
+                if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    // Ensure Left page is on EVEN page
+                    doc.addPage(format, orientation);
+                    globalPageCount++;
+                }
+
+                // Left Page (Even / Par)
+                doc.addPage(format, orientation);
+                globalPageCount++;
+                let geo = getSafeGeometry(globalPageCount);
+                let elementsL = isVersoSpread
+                    ? (config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements)
+                    : (config.elementsWeeklyLeft || config.elements);
+                elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Right Page (Odd / Ímpar)
+                doc.addPage(format, orientation);
+                globalPageCount++;
+                geo = getSafeGeometry(globalPageCount);
+                let elementsR = isVersoSpread
+                    ? (config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements)
+                    : (config.elementsWeeklyRight || config.elements);
+                elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                spreadIndex++;
+            }
 
             if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
         }

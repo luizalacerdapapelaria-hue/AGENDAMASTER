@@ -49,7 +49,18 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
         d.month = 10; // Novembro (November)
     }
     
-    if (d.dayOfMonth === 0) return null;
+    const effectiveType = (element.type === 'date_placeholder' || ['day_number', 'day_name', 'month_name', 'month_number', 'year'].includes(element.type))
+        ? (style?.variant || element.type === 'date_placeholder' ? (style?.variant || 'day_number') : element.type)
+        : element.type;
+
+    if (d.dayOfMonth === 0) {
+        if (effectiveType === 'day_number' || (effectiveType === 'date_placeholder' && (!style?.variant || style?.variant === 'day_number'))) {
+            return null;
+        }
+        if (d.month === -1 && d.year === 0 && d.dayOfWeek === undefined) {
+            return null;
+        }
+    }
 
     const alignmentStyles = getAlignmentStyles(style);
     const textTransform = style.textTransform;
@@ -76,10 +87,6 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
             </div>
         );
     };
-
-    const effectiveType = (element.type === 'date_placeholder' || ['day_number', 'day_name', 'month_name', 'month_number', 'year'].includes(element.type))
-        ? (style?.variant || element.type === 'date_placeholder' ? (style?.variant || 'day_number') : element.type)
-        : element.type;
 
     switch (effectiveType) {
         case 'day_number': return renderContent(String(d.dayOfMonth).padStart(2, '0'));

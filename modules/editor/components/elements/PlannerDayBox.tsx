@@ -235,7 +235,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             {String(d.dayOfMonth).padStart(2, '0')}
                         </span>
                     )}
-                    {showDayName && d.dayOfMonth > 0 && (
+                    {showDayName && (d.dayOfWeek !== undefined) && (
                         <span className="font-medium opacity-70" style={{ color: headerTextColor, fontSize: `${Math.max(5, 10 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
                             {dayName}
                         </span>
@@ -245,7 +245,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             {d.holiday}
                         </div>
                     )}
-                    {plannerDayBox.showMoonPhase && d.moonPhase && (
+                    {plannerDayBox.showMoonPhase && d.moonPhase && d.dayOfMonth > 0 && (
                         <div className={`flex items-center gap-1 ${d.holiday ? 'ml-2' : 'ml-auto'}`}>
                             <div className="w-3.5 h-3.5 shrink-0 flex items-center justify-center">
                                 {renderMoonIcon(d.moonPhase, headerTextColor)}

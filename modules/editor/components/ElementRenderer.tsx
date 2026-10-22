@@ -318,20 +318,21 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
       let targetDay: DayData | undefined;
       
       if (dayIndex !== undefined && props.weekDays && props.weekDays.length > 0) {
-          // Se for layout semanal (7 dias), buscar pelo dia da semana (0-6)
-          // Se for outros layouts, usar como índice direto no array de dias da página
-          const isWeekly = props.weekDays.length === 7 && props.weekDays.some(d => d.dayOfWeek !== 0); 
-          
-          if (isWeekly && dayIndex >= 0 && dayIndex <= 6) {
-              targetDay = props.weekDays.find(d => d.dayOfWeek === dayIndex);
-          } else {
-              targetDay = props.weekDays[dayIndex];
-          }
+          // Se for layout semanal (dia da semana 0-6), buscar prioritariamente pelo dayOfWeek
+          const foundByDayOfWeek = (dayIndex >= 0 && dayIndex <= 6)
+              ? props.weekDays.find(d => d.dayOfWeek === dayIndex)
+              : undefined;
 
-          if (!targetDay && props.dayData && dayIndex > 0) {
+          if (foundByDayOfWeek) {
+              targetDay = foundByDayOfWeek;
+          } else if (props.weekDays[dayIndex]) {
+              targetDay = props.weekDays[dayIndex];
+          } else if (dayIndex >= 0 && dayIndex <= 6) {
+              targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
+          } else if (props.dayData && dayIndex > 0) {
               targetDay = getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays);
-          } else if (!targetDay) {
-              targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0) };
+          } else {
+              targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
           }
       } else if (dayIndex !== undefined && dayIndex > 0 && props.dayData) {
           targetDay = getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays);
