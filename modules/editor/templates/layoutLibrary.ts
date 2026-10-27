@@ -18,7 +18,10 @@ import {
   DAILY_STUDY,
   DAILY_HEALTH,
   APPOINTMENT_2DPP_TOP,
-  APPOINTMENT_2DPP_BOTTOM
+  APPOINTMENT_2DPP_BOTTOM,
+  DAILY_PERMANENT,
+  PERMANENT_2DPP_TOP,
+  PERMANENT_2DPP_BOTTOM
 } from './dailyTemplates';
 import {
   buildPastelModelConfig,
@@ -97,6 +100,32 @@ export const LAYOUT_LIBRARY: LayoutLibraryItem[] = [
       layoutType: '1_per_page',
       pageSize: 'A5',
       dailyElements: DAILY_CLASSIC
+    }
+  }),
+
+  createLibraryItem({
+    id: 'agenda-permanente',
+    name: 'Agenda Permanente • Não Datada (1 DPP)',
+    description: 'Sem datas pré-fixadas no miolo: cabeçalho livre para preencher dia/mês/ano (___/___/_____) e marcar o dia da semana (S T Q Q S S D). Ideal para começar em qualquer época do ano sem desperdiçar folhas.',
+    projectGroup: 'agenda',
+    category: 'agenda',
+    subCategory: 'classica',
+    badge: 'NÃO DATADA • PERMANENTE',
+    accentColor: 'rose',
+    highlights: [
+      'Cabeçalho livre ___/___/_____ + Dia da Semana (S a D)',
+      'Sem datas pré-fixadas nem feriados automáticos',
+      'Prioridades, Horários (07h–20h), Lembretes & Autocuidado',
+      'Páginas Iniciais Atemporais (sem calendário preso a ano)'
+    ],
+    modelOptions: {
+      isPermanent: true,
+      projectType: 'agenda',
+      layoutType: '1_per_page',
+      pageSize: 'A5',
+      dailyElements: DAILY_PERMANENT,
+      topElements: PERMANENT_2DPP_TOP,
+      bottomElements: PERMANENT_2DPP_BOTTOM
     }
   }),
 

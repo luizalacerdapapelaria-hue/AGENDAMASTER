@@ -1,7 +1,7 @@
 
 import { jsPDF } from "jspdf";
-import { AgendaConfig, DayData, LayoutElement } from "../types";
-import { getMonthName, getDayName } from "../core/backend/calendar";
+import { AgendaConfig, DayData, LayoutElement, Holiday } from "../types";
+import { getMonthName, getDayName, checkIsHoliday } from "../core/backend/calendar";
 import { getVerseForDay } from "../core/constants/verses";
 import { ImageManager } from "../modules/editor/utils/imageManager";
 
@@ -19,7 +19,70 @@ const getFont = (fontName: string | undefined, weight: string | number | undefin
     return { font: 'helvetica', style };
 };
 
-const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, quote: string | undefined, verse: string | undefined, safeAreaW: number, safeAreaH: number, offsetX: number, offsetY: number, week?: DayData[]) => {
+const drawPdfTextWithOptionalStroke = (
+    doc: jsPDF,
+    textOrLines: string | string[],
+    x: number,
+    y: number,
+    options: Record<string, any>,
+    strokeStyle?: { textStrokeWidth?: number; textStrokeColor?: string; textFillTransparent?: boolean; textStrokeJoin?: 'miter' | 'round' }
+) => {
+    const strokeW = Number(strokeStyle?.textStrokeWidth || 0);
+    if (Number.isFinite(strokeW) && strokeW > 0) {
+        const sRgb = hexToRgb(strokeStyle?.textStrokeColor || '#000000') || { r: 0, g: 0, b: 0 };
+        const isRound = strokeStyle?.textStrokeJoin === 'round';
+        doc.setDrawColor(sRgb.r, sRgb.g, sRgb.b);
+        doc.setLineWidth(Math.max(0.05, strokeW * 0.264583));
+        doc.setLineJoin(isRound ? 'round' : 'miter');
+        doc.setLineCap(isRound ? 'round' : 'butt');
+        const renderingMode = strokeStyle?.textFillTransparent ? 'stroke' : 'fillThenStroke';
+        doc.text(textOrLines as any, x, y, { ...options, renderingMode });
+        doc.setLineJoin('miter');
+        doc.setLineCap('butt');
+    } else {
+        doc.text(textOrLines as any, x, y, { ...options, renderingMode: 'fill' });
+    }
+};
+
+const getShiftedDayData = (baseDay: DayData, offset: number, municipalHolidays: Holiday[] = []): DayData => {
+    if (!offset || offset === 0 || !baseDay) return baseDay;
+    if (!baseDay.date) {
+        return {
+            ...baseDay,
+            dayOfMonth: baseDay.dayOfMonth ? baseDay.dayOfMonth + offset : offset
+        };
+    }
+    const targetDate = new Date(baseDay.date);
+    targetDate.setDate(targetDate.getDate() + offset);
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth();
+    const day = targetDate.getDate();
+    const holidayName = checkIsHoliday(year, month, day, municipalHolidays);
+
+    return {
+        ...baseDay,
+        dayOfMonth: day,
+        month: month,
+        year: year,
+        dayOfWeek: targetDate.getDay(),
+        date: targetDate,
+        holiday: holidayName
+    };
+};
+
+const renderElementToPDF = (
+    doc: jsPDF, 
+    el: LayoutElement, 
+    day: DayData | null, 
+    quote: string | undefined, 
+    verse: string | undefined, 
+    safeAreaW: number, 
+    safeAreaH: number, 
+    offsetX: number, 
+    offsetY: number, 
+    week?: DayData[],
+    municipalHolidays?: Holiday[]
+) => {
     const { x, y, w, h, style } = el;
     const absX = (x / 100) * safeAreaW + offsetX;
     const absY = (y / 100) * safeAreaH + offsetY;
@@ -39,15 +102,26 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
     doc.setFont(fontConfig.font, fontConfig.style);
     doc.setFontSize(style.fontSize || 12); 
 
+    const rawDayIdx = el.style?.dayIndex ?? (el.type === 'planner_day_box' ? el.style?.plannerDayBox?.dayIndex : 0);
+    const dayIdx = typeof rawDayIdx === 'number' ? rawDayIdx : 0;
+    const targetDay = (week && week[dayIdx])
+        ? week[dayIdx]
+        : ((day && dayIdx > 0) ? getShiftedDayData(day, dayIdx, municipalHolidays || []) : day);
+
     let text = '';
+    const variant = style.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
+
     if (el.type === 'text') text = el.content || 'Texto';
-    if (el.type === 'day_number' && day) text = day.dayOfMonth.toString();
-    if (el.type === 'day_name' && day) text = getDayName(day.dayOfWeek);
-    if (el.type === 'month_name' && day) text = getMonthName(day.month);
-    if (el.type === 'year' && day) text = (day.year + (style.yearOffset || 0)).toString();
+    if ((el.type === 'day_number' || variant === 'day_number') && targetDay) {
+        text = style.showLeadingZero ? targetDay.dayOfMonth.toString().padStart(2, '0') : targetDay.dayOfMonth.toString();
+    }
+    if ((el.type === 'day_name' || variant === 'day_name') && targetDay) text = getDayName(targetDay.dayOfWeek, style.nameFormat);
+    if ((el.type === 'month_name' || variant === 'month_name') && targetDay) text = getMonthName(targetDay.month, style.nameFormat);
+    if ((el.type === 'month_number' || variant === 'month_number') && targetDay) text = (targetDay.month + 1).toString().padStart(2, '0');
+    if ((el.type === 'year' || variant === 'year') && targetDay) text = (targetDay.year + (style.yearOffset || 0)).toString();
     if (el.type === 'quote') text = quote || '';
     if (el.type === 'verse') text = verse || '';
-    if (el.type === 'holiday' && day) text = day.holiday || '';
+    if (el.type === 'holiday' && targetDay) text = targetDay.holiday || '';
     if (el.type === 'holiday_list') text = el.content || '';
 
     // --- RENDER LOGIC ---
@@ -112,6 +186,75 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
         }
     }
 
+    // Permanent Day Header (S T Q Q S S D)
+    else if (el.type === 'permanent_day_header') {
+        const pVariant = style.variant || 'circles_outline';
+        const isFilled = pVariant.includes('filled');
+        const isSquare = pVariant.includes('square');
+        const isMinimal = pVariant.includes('minimal');
+        const isTextBelow = pVariant.includes('text_below');
+        const shapeScale = style.shapeScale || 1;
+        const pColorHex = style.color || '#f472b6';
+        const pRgb = hexToRgb(pColorHex) || { r: 244, g: 114, b: 182 };
+        const pBorderRgb = hexToRgb(style.borderColor || pColorHex) || pRgb;
+        const pFontSize = style.fontSize || 9;
+        const pFont = getFont(style.fontFamily, 'bold');
+
+        const dayIndices = [1, 2, 3, 4, 5, 6, 0];
+        const nameFormat = style.nameFormat || 'initial';
+        const dayLabels = dayIndices.map(dIdx => getDayName(dIdx, nameFormat));
+        const slotW = absW / 7;
+
+        dayLabels.forEach((lbl, idx) => {
+            const centerX = absX + slotW * idx + slotW / 2;
+            const maxDiam = Math.min(slotW * 0.78, isTextBelow ? absH * 0.65 : absH * 0.85) * shapeScale;
+            const radius = Math.max(1.2, maxDiam / 2);
+            const shapeCenterY = isTextBelow ? absY + radius + 0.5 : absY + absH / 2;
+
+            if (!isMinimal) {
+                doc.setDrawColor(pBorderRgb.r, pBorderRgb.g, pBorderRgb.b);
+                doc.setLineWidth(Math.max(0.1, (style.borderWidth ?? 1) * 0.2));
+                if (isFilled) {
+                    doc.setFillColor(pRgb.r, pRgb.g, pRgb.b);
+                }
+                const paintMode = isFilled ? 'FD' : 'S';
+                if (isSquare) {
+                    doc.roundedRect(centerX - radius, shapeCenterY - radius, radius * 2, radius * 2, 0.8, 0.8, paintMode);
+                } else {
+                    doc.circle(centerX, shapeCenterY, radius, paintMode);
+                }
+            }
+
+            doc.setFont(pFont.font, pFont.style);
+            doc.setFontSize(pFontSize);
+            if (!isTextBelow) {
+                if (isFilled && !isMinimal) {
+                    doc.setTextColor(255, 255, 255);
+                } else {
+                    doc.setTextColor(pRgb.r, pRgb.g, pRgb.b);
+                }
+                drawPdfTextWithOptionalStroke(
+                    doc,
+                    lbl,
+                    centerX,
+                    shapeCenterY + (pFontSize * 0.352 * 0.34),
+                    { align: 'center' },
+                    style
+                );
+            } else {
+                doc.setTextColor(pRgb.r, pRgb.g, pRgb.b);
+                drawPdfTextWithOptionalStroke(
+                    doc,
+                    lbl,
+                    centerX,
+                    shapeCenterY + radius + (pFontSize * 0.352 * 0.85),
+                    { align: 'center' },
+                    style
+                );
+            }
+        });
+    }
+
     // Other element line drawing (lines, etc)
     else if ((style.borderWidth && style.borderWidth > 0) || el.type === 'lines') {
         const borderColor = (style.borderColor ? hexToRgb(style.borderColor) : null) || rgb;
@@ -166,7 +309,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
                     else if (style.textAlign === 'right') { tx = colX + colWidth; align = 'right'; }
 
                     const splitText = doc.splitTextToSize(colText, colWidth);
-                    doc.text(splitText, tx, ty, { align, baseline: 'top' });
+                    drawPdfTextWithOptionalStroke(doc, splitText, tx, ty, { align, baseline: 'top' }, style);
                 }
             }
         } 
@@ -178,7 +321,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             else if (style.textAlign === 'right') { tx = absX + absW; align = 'right'; }
 
             const splitText = doc.splitTextToSize(text, absW);
-            doc.text(splitText, tx, ty, { align, baseline: 'top' });
+            drawPdfTextWithOptionalStroke(doc, splitText, tx, ty, { align, baseline: 'top' }, style);
         } else {
             // Short labels (day numbers, etc)
             let tx = absX;
@@ -186,7 +329,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             if (style.textAlign === 'center') { tx = absX + (absW / 2); align = 'center'; } 
             else if (style.textAlign === 'right') { tx = absX + absW; align = 'right'; }
             
-            doc.text(text, tx, ty + (fontSize * 0.352), { align });
+            drawPdfTextWithOptionalStroke(doc, text, tx, ty + (fontSize * 0.352), { align }, style);
         }
     }
 
@@ -268,7 +411,11 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
             textTransform: style.table?.textStyle?.textTransform || style.textTransform || 'none',
             backgroundColor: style.table?.textStyle?.backgroundColor || style.backgroundColor || 'transparent',
             textWrap: style.table?.textStyle?.textWrap || 'wrap',
-            cellPadding: style.table?.textStyle?.cellPadding !== undefined ? style.table?.textStyle?.cellPadding : 4
+            cellPadding: style.table?.textStyle?.cellPadding !== undefined ? style.table?.textStyle?.cellPadding : 4,
+            textStrokeWidth: style.table?.textStyle?.textStrokeWidth !== undefined ? style.table.textStyle.textStrokeWidth : (style.textStrokeWidth || 0),
+            textStrokeColor: style.table?.textStyle?.textStrokeColor || style.textStrokeColor || '#000000',
+            textFillTransparent: style.table?.textStyle?.textFillTransparent !== undefined ? style.table.textStyle.textFillTransparent : Boolean(style.textFillTransparent),
+            textStrokeJoin: style.table?.textStyle?.textStrokeJoin || style.textStrokeJoin || 'miter',
         };
 
         const rowStyles = style.table?.rowStyles || {};
@@ -393,7 +540,7 @@ const renderElementToPDF = (doc: jsPDF, el: LayoutElement, day: DayData | null, 
                     lines.forEach((line: string, lIdx: number) => {
                         const lineY = textY + (lIdx * lineHeightMm);
                         if (lineY <= curY + rowH + 1) {
-                            doc.text(line, textX, lineY, { align: textAlign });
+                            drawPdfTextWithOptionalStroke(doc, line, textX, lineY, { align: textAlign }, tStyle);
                         }
                     });
                 }
@@ -499,10 +646,18 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
 
     let globalPageCount = 0;
     const isSinglePageType = config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.projectType === 'notebook' || config.projectType === 'devotional';
+    const allConfigElements = [...config.elements, ...(config.elementsVerso || [])];
+    const maxDayIdx = Math.max(0, ...allConfigElements.map(el => {
+        const raw = el.style?.dayIndex ?? (el.type === 'planner_day_box' ? el.style?.plannerDayBox?.dayIndex : 0);
+        return typeof raw === 'number' ? raw : 0;
+    }));
+    const daysPerPage = (isSinglePageType && maxDayIdx > 0) ? maxDayIdx + 1 : 1;
+    const singlePagesCount = Math.ceil(generatedDays.length / daysPerPage);
+
     const isWeeklyTwoPage = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
     const weeklyWeeksCount = Math.ceil(generatedDays.length / 7);
     const weeklyPagesCount = (isWeeklyTwoPage && config.customVerso && config.versoAdvancesSequence === false) ? weeklyWeeksCount * 4 : weeklyWeeksCount * 2;
-    const totalPages = config.introPages.length + (isSinglePageType ? generatedDays.length : isWeeklyTwoPage ? weeklyPagesCount : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
+    const totalPages = config.introPages.length + (isSinglePageType ? (config.customVerso && config.versoAdvancesSequence === false ? singlePagesCount * 2 : singlePagesCount) : isWeeklyTwoPage ? weeklyPagesCount : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
 
     for (const page of config.introPages) {
         if (globalPageCount > 0) doc.addPage(format, orientation);
@@ -516,7 +671,11 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
 
     if (isSinglePageType) {
         if (config.customVerso && config.versoAdvancesSequence === false) {
-            for (const day of generatedDays) {
+            for (let i = 0; i < generatedDays.length; i += daysPerPage) {
+                const batch = generatedDays.slice(i, i + daysPerPage);
+                const day = batch[0];
+                if (!day) break;
+
                 // Frente Page (Odd)
                 doc.addPage(format, orientation);
                 globalPageCount++;
@@ -524,26 +683,30 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 let elements = getElementsForPage(config.elements, globalPageCount, true);
                 let verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
                 let quote = day.month !== undefined && quotes ? quotes[day.month] : undefined;
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
 
                 // Verso Page (Even) with same date
                 doc.addPage(format, orientation);
                 globalPageCount++;
                 geo = getSafeGeometry(globalPageCount);
                 elements = getElementsForPage(config.elements, globalPageCount, true);
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
 
                 if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
             }
         } else {
-            for (const day of generatedDays) {
+            for (let i = 0; i < generatedDays.length; i += daysPerPage) {
+                const batch = generatedDays.slice(i, i + daysPerPage);
+                const day = batch[0];
+                if (!day) break;
+
                 doc.addPage(format, orientation);
                 globalPageCount++;
                 const geo = getSafeGeometry(globalPageCount);
                 const elements = getElementsForPage(config.elements, globalPageCount, true);
                 const verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
                 const quote = day.month !== undefined && quotes ? quotes[day.month] : undefined;
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
                 if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
             }
         }
@@ -555,14 +718,21 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
             const geo = getSafeGeometry(globalPageCount);
             const day1 = generatedDays[i];
             const day2 = generatedDays[i+1];
-            const elements = getElementsForPage(config.elements, globalPageCount);
+            const topSource = (config.elementsTop && config.elementsTop.length > 0) ? config.elementsTop : config.elements;
+            const bottomSource = (config.elementsBottom && config.elementsBottom.length > 0) ? config.elementsBottom : config.elements;
+            const elementsTop = getElementsForPage(topSource, globalPageCount);
+            const elementsBottom = getElementsForPage(bottomSource, globalPageCount);
             
             const verse1 = getVerseForDay(getDayOfYear(new Date(day1.date)));
-            elements.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day1, quotes[day1.month], verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+            elementsTop.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day1, quotes[day1.month], verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
             
             if (day2) { 
                 const verse2 = getVerseForDay(getDayOfYear(new Date(day2.date)));
-                elements.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day2, quotes[day2.month], verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                const bottomAlreadyOffset = elementsBottom.every(e => e.y >= 48);
+                elementsBottom.forEach(el => {
+                    const halfH_El = bottomAlreadyOffset ? el : { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
+                    renderElementToPDF(doc, halfH_El, day2, quotes[day2.month], verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                }); 
                 const midY = geo.marginTop + (geo.safeH / 2); 
                 doc.setDrawColor(200, 200, 200); 
                 (doc as any).setLineDash([2, 2], 0); 
@@ -739,5 +909,5 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
     }
 
     onProgress(100);
-    doc.save(`Agenda_${config.year}.pdf`);
+    doc.save(config.isPermanent ? 'Agenda_Permanente.pdf' : `Agenda_${config.year}.pdf`);
 };

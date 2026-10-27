@@ -2,6 +2,7 @@
 import React from 'react';
 import { BaseElementProps } from './types';
 import { getMonthName, getDayName } from '../../../../core/backend/calendar';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 const applyTextTransform = (text: string | number, transform?: string) => {
     const str = String(text);
@@ -49,11 +50,25 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
         d.month = 10; // Novembro (November)
     }
     
-    const effectiveType = (element.type === 'date_placeholder' || ['day_number', 'day_name', 'month_name', 'month_number', 'year'].includes(element.type))
-        ? (style?.variant || element.type === 'date_placeholder' ? (style?.variant || 'day_number') : element.type)
-        : element.type;
+    const validVariants = ['day_number', 'day_name', 'month_name', 'month_number', 'year'];
+    let effectiveType: string = element.type;
+    if (element.type === 'date_placeholder') {
+        effectiveType = (style?.variant && validVariants.includes(style.variant)) ? style.variant : 'day_number';
+    } else if (!validVariants.includes(effectiveType)) {
+        effectiveType = 'day_number';
+    }
 
-    if (d.dayOfMonth === 0) {
+    // No editor, nunca deixe elementos em branco para permitir ao usuário posicionar, arrastar e estilizar
+    if (isEditor && (!d.dayOfMonth || d.dayOfMonth === 0)) {
+        const fallbackDay = (element.style?.dayIndex !== undefined && element.style.dayIndex >= 0 && element.style.dayIndex <= 6)
+            ? (element.style.dayIndex === 0 ? 7 : element.style.dayIndex)
+            : ((d.dayOfWeek !== undefined && d.dayOfWeek >= 0 && d.dayOfWeek <= 6)
+                ? (d.dayOfWeek === 0 ? 7 : d.dayOfWeek)
+                : ((d as any).date ? (d as any).date.getDate() : 1));
+        d.dayOfMonth = fallbackDay;
+    }
+
+    if (!isEditor && d.dayOfMonth === 0) {
         if (effectiveType === 'day_number' || (effectiveType === 'date_placeholder' && (!style?.variant || style?.variant === 'day_number'))) {
             return null;
         }
@@ -69,18 +84,22 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
 
     const renderContent = (content: string | number) => {
         const transformedContent = isSentenceOrCapitalize ? applyTextTransform(content, textTransform) : content;
+        const strokeCss = getTextStrokeCss(style, style?.color || '#111827');
+        const hasStroke = Boolean(style?.textStrokeWidth && style.textStrokeWidth > 0);
         return (
             <div 
                 style={{
+                    color: '#111827',
                     ...style, 
                     ...alignmentStyles, 
                     display: 'flex', 
                     width: '100%', 
                     height: '100%', 
                     whiteSpace: 'nowrap',
-                    overflow: 'hidden',
+                    overflow: hasStroke ? 'visible' : 'hidden',
                     textOverflow: 'ellipsis',
-                    textTransform: cssTransform as any
+                    textTransform: cssTransform as any,
+                    ...strokeCss
                 }}
             >
                 {transformedContent}

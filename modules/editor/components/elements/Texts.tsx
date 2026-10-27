@@ -1,6 +1,7 @@
-
 import React from 'react';
 import { TextElementProps } from './types';
+import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 const applyTextTransform = (text: string, transform?: string) => {
     if (!text) return text;
@@ -43,6 +44,13 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
             setIsEditing(false);
         }
     }, [isSelected]);
+
+    // Garante que a fonte do elemento esteja carregada via FontFace no document.fonts
+    React.useEffect(() => {
+        if (style?.fontFamily) {
+            ensureFontLoaded(style.fontFamily);
+        }
+    }, [style?.fontFamily]);
     
     const alignmentStyles = getAlignmentStyles(style);
     const textTransform = style.textTransform;
@@ -50,13 +58,17 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     
     // For sentence and capitalize, we apply it via JS. For others, CSS is fine.
     const cssTransform = isSentenceOrCapitalize ? 'none' : textTransform;
+    const safeFontFamily = getSafeFontFamily(style.fontFamily);
+    const strokeCss = getTextStrokeCss(style, style.color || '#111827');
+    const hasStroke = Boolean(style?.textStrokeWidth && style.textStrokeWidth > 0);
 
     if (element.type === 'holiday_list') {
         const rawContent = element.content || "Feriados Nacionais (Editável)";
         const content = isSentenceOrCapitalize ? applyTextTransform(rawContent, textTransform) : rawContent;
-        if (isEditor && isSelected && isEditing) { 
+
+        if (isEditor && isSelected && isEditing) {
             return (
-                <div style={{ width: '100%', height: '100%' }}>
+                <div style={{...alignmentStyles, width: '100%', height: '100%'}}>
                     <textarea 
                         value={element.content || "Feriados Nacionais (Editável)"} 
                         onChange={(e) => onContentChange && onContentChange(element.id, e.target.value)} 
@@ -68,7 +80,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         }}
                         style={{ 
                             fontSize: style.fontSize, 
-                            fontFamily: style.fontFamily, 
+                            fontFamily: safeFontFamily, 
                             fontWeight: style.fontWeight || 'normal',
                             fontStyle: style.fontStyle,
                             color: style.color, 
@@ -85,7 +97,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                             textTransform: cssTransform as any,
                             overflow: 'auto',
                             padding: '4px',
-                            boxSizing: 'border-box'
+                            boxSizing: 'border-box',
+                            ...strokeCss
                         }} 
                         autoFocus 
                         onMouseDown={(e) => e.stopPropagation()} 
@@ -121,7 +134,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         columnGap: `${colGap}px`,
                         rowGap: '2px',
                         fontSize: cssFontSize, 
-                        fontFamily: style.fontFamily, 
+                        fontFamily: safeFontFamily, 
                         fontWeight: style.fontWeight || 'normal',
                         fontStyle: style.fontStyle,
                         letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
@@ -131,7 +144,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         width: '100%',
                         height: '100%',
                         overflow: 'visible',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        ...strokeCss
                     }}
                 >
                     {columnsData.map((colLines, colIdx) => (
@@ -143,9 +157,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                                 justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
                                 textAlign: style.textAlign || 'left',
                                 minWidth: 0,
-                                width: '100%',
-                                fontSize: cssFontSize,
-                                boxSizing: 'border-box'
+                                width: '100%'
                             }}
                         >
                             {colLines.map((line, lineIdx) => (
@@ -181,7 +193,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                     justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
                     textAlign: style.textAlign || 'left',
                     fontSize: cssFontSize, 
-                    fontFamily: style.fontFamily, 
+                    fontFamily: safeFontFamily, 
                     fontWeight: style.fontWeight || 'normal',
                     fontStyle: style.fontStyle,
                     letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
@@ -191,7 +203,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                     width: '100%',
                     height: '100%',
                     overflow: 'visible',
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    ...strokeCss
                 }}
             >
                 {lines.map((line, idx) => (
@@ -229,6 +242,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         }}
                         style={{
                             ...style, 
+                            fontFamily: safeFontFamily,
                             lineHeight: style.lineHeight || 1.5,
                             width: '100%', 
                             height: 'auto', 
@@ -239,7 +253,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                             outline: 'none', 
                             display: 'block', 
                             whiteSpace: 'pre-wrap', 
-                            overflow: 'hidden'
+                            overflow: 'hidden',
+                            ...strokeCss
                         }} 
                         autoFocus 
                         onMouseDown={(e) => e.stopPropagation()} 
@@ -263,6 +278,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                     onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}
                     style={{
                         ...style, 
+                        fontFamily: safeFontFamily,
                         display: 'grid',
                         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
                         columnGap: `${colGap}px`,
@@ -271,7 +287,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         width: '100%', 
                         height: '100%', 
                         textTransform: cssTransform as any,
-                        overflow: 'hidden'
+                        overflow: hasStroke ? 'visible' : 'hidden',
+                        ...strokeCss
                     }}
                 >
                     {columnsData.map((colLines, colIdx) => (
@@ -309,13 +326,16 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                 onDoubleClick={() => isEditor && isSelected && setIsEditing(true)}
                 style={{
                     ...style, 
+                    fontFamily: safeFontFamily,
                     ...alignmentStyles, 
                     lineHeight: style.lineHeight || 1.5,
                     display: 'flex', 
                     width: '100%', 
                     height: '100%', 
                     whiteSpace: 'pre-wrap', 
-                    textTransform: cssTransform as any
+                    textTransform: cssTransform as any,
+                    overflow: hasStroke ? 'visible' : undefined,
+                    ...strokeCss
                 }}
             >
                 {content}
@@ -343,7 +363,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                         }}
                         style={{ 
                             fontSize: style.fontSize, 
-                            fontFamily: style.fontFamily, 
+                            fontFamily: safeFontFamily, 
                             fontWeight: style.fontWeight || 'normal',
                             fontStyle: style.fontStyle || 'italic',
                             color: style.color, 
@@ -356,7 +376,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                             border: '1.5px dashed #b84a56', 
                             outline: 'none', 
                             padding: '4px',
-                            boxSizing: 'border-box'
+                            boxSizing: 'border-box',
+                            ...strokeCss
                         }} 
                         autoFocus 
                         onMouseDown={(e) => e.stopPropagation()} 
@@ -365,14 +386,8 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
             );
         }
 
-        const formattedText = isSentenceOrCapitalize ? applyTextTransform(rawQuote, textTransform) : rawQuote;
-        const preset = element.style?.quoteStylePreset || 'minimal';
-        const showMarks = element.style?.showQuoteMarks ?? (preset === 'quotation_marks');
-
-        let displayContent = formattedText;
-        if (showMarks && displayContent && !displayContent.startsWith('“') && !displayContent.startsWith('"')) {
-            displayContent = `“${displayContent}”`;
-        }
+        const preset = (style as any).preset || 'default';
+        const displayContent = isSentenceOrCapitalize ? applyTextTransform(rawQuote, textTransform) : rawQuote;
 
         return (
             <div 
@@ -380,6 +395,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                 title={isEditor ? "Clique duplo para editar a frase diretamente" : undefined}
                 style={{
                     ...style, 
+                    fontFamily: safeFontFamily,
                     ...alignmentStyles, 
                     lineHeight: style.lineHeight || 1.35, 
                     display: 'flex', 
@@ -389,16 +405,17 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                     wordBreak: 'break-word',
                     overflowWrap: 'break-word',
                     textTransform: cssTransform as any,
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    overflow: hasStroke ? 'visible' : undefined
                 }}
             >
                 {preset === 'divider_card' ? (
                     <div className="w-full h-full p-2 rounded-xl border border-[#eedad5] bg-[#fffbf9] flex flex-col justify-center items-center text-center shadow-2xs">
                         <span className="text-[9px] text-[#b84a56] font-bold uppercase tracking-wider mb-0.5">✦ Inspiração ✦</span>
-                        <div className="italic">{displayContent}</div>
+                        <div className="italic" style={strokeCss}>{displayContent}</div>
                     </div>
                 ) : (
-                    <span>{displayContent}</span>
+                    <span style={strokeCss}>{displayContent}</span>
                 )}
             </div>
         );
@@ -411,15 +428,17 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
             <div 
                 style={{
                     ...style, 
+                    fontFamily: safeFontFamily,
                     ...alignmentStyles, 
                     lineHeight: style.lineHeight || 1.3, 
                     display: 'flex', 
                     width: '100%', 
                     height: '100%', 
                     whiteSpace: 'nowrap',
-                    overflow: 'hidden',
+                    overflow: hasStroke ? 'visible' : 'hidden',
                     textOverflow: 'ellipsis',
-                    textTransform: cssTransform as any
+                    textTransform: cssTransform as any,
+                    ...strokeCss
                 }}
             >
                 {content}
@@ -442,15 +461,17 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
             <div 
                 style={{
                     ...style, 
+                    fontFamily: safeFontFamily,
                     ...alignmentStyles, 
                     lineHeight: style.lineHeight || 1.3, 
                     display: 'flex', 
                     width: '100%', 
                     height: '100%', 
                     whiteSpace: 'nowrap',
-                    overflow: 'hidden',
+                    overflow: hasStroke ? 'visible' : 'hidden',
                     textOverflow: 'ellipsis',
-                    textTransform: cssTransform as any
+                    textTransform: cssTransform as any,
+                    ...strokeCss
                 }}
             >
                 {content}

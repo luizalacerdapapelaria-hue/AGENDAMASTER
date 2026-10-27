@@ -20,6 +20,13 @@ export interface MockupVideoRenderOptions {
   width: number;
   height: number;
   pageAspect: number; // PAGE_HEIGHT_MM / PAGE_WIDTH_MM
+  pageWidthMm?: number;
+  pageHeightMm?: number;
+  cardboardWidthMm?: number;
+  cardboardHeightMm?: number;
+  showHardcoverBacking?: boolean;
+  coverBoardColor?: string;
+  backCoverBoardColor?: string;
   mockupMode: MockupMode;
   perspective: MockupPerspective;
   customAngleX: number;
@@ -205,23 +212,38 @@ export function renderMockupVideoFrame(
   // 1. Draw Background
   drawStudioBackground(ctx, width, height, backgroundType);
 
-  // 2. Compute optimal book dimensions inside video canvas
+  // 2. Compute optimal book dimensions inside video canvas (respecting custom cardboard overhang)
+  const pWMm = Math.max(20, options.pageWidthMm || 148);
+  const pHMm = Math.max(20, options.pageHeightMm || pWMm * pageAspect);
+  const cbWMm = Math.max(20, options.cardboardWidthMm || pWMm);
+  const cbHMm = Math.max(20, options.cardboardHeightMm || pHMm);
+  const hasBoardBacking = Boolean(
+    options.showHardcoverBacking && (cbWMm > pWMm + 0.2 || cbHMm > pHMm + 0.2)
+  );
+  const boardWRatio = hasBoardBacking ? Math.max(1, cbWMm / pWMm) : 1;
+  const boardHRatio = hasBoardBacking ? Math.max(1, cbHMm / pHMm) : 1;
+
   const marginFactor = showPen ? 0.76 : 0.82;
   let pageW: number;
   let pageH: number;
 
   if (mockupMode === 'spread') {
-    // Spread total width = 2 * pageW, height = pageH
+    // Spread total width = 2 * pageW * boardWRatio, height = pageH * boardHRatio
     const maxSpreadW = width * marginFactor;
     const maxSpreadH = height * (showPageBadge ? 0.78 : 0.84);
-    pageW = Math.min(maxSpreadW / 2, maxSpreadH / pageAspect);
+    pageW = Math.min((maxSpreadW / 2) / boardWRatio, (maxSpreadH / pageAspect) / boardHRatio);
     pageH = pageW * pageAspect;
   } else {
     const maxSingleW = width * marginFactor;
     const maxSingleH = height * (showPageBadge ? 0.78 : 0.84);
-    pageW = Math.min(maxSingleW, maxSingleH / pageAspect);
+    pageW = Math.min(maxSingleW / boardWRatio, (maxSingleH / pageAspect) / boardHRatio);
     pageH = pageW * pageAspect;
   }
+
+  const overhangOuterPx = hasBoardBacking ? Math.max(0, ((cbWMm - pWMm) / pWMm) * pageW) : 0;
+  const overhangVertPx = hasBoardBacking ? Math.max(0, (((cbHMm - pHMm) / 2) / pHMm) * pageH) : 0;
+  const leftBoardColor = options.coverBoardColor || '#e2e8f0';
+  const rightBoardColor = options.backCoverBoardColor || options.coverBoardColor || '#cbd5e1';
 
   // 3. Apply 3D Camera Perspective & Gentle Floating Motion
   ctx.save();
@@ -243,21 +265,64 @@ export function renderMockupVideoFrame(
   ctx.transform(1, 0, skewX, scaleY, 0, 0);
 
   const cornerR = Math.max(6, pageW * 0.032);
+  const boardCornerR = Math.max(4, cornerR * 0.75);
   const stackCount = coverThickness === 'thick' ? 6 : coverThickness === 'medium' ? 4 : 2;
   const shadowAlpha = shadowIntensity === 'hard' ? 0.46 : shadowIntensity === 'soft' ? 0.20 : 0.32;
 
   if (mockupMode === 'spread') {
     // --- A. SPREAD MODE (OPEN AGENDA) ---
-    // Ambient Drop Shadow under spread
+    // Ambient Drop Shadow under spread (or hardcover boards)
     ctx.save();
     ctx.shadowColor = `rgba(0, 0, 0, ${shadowAlpha})`;
     ctx.shadowBlur = Math.max(24, pageW * 0.14);
     ctx.shadowOffsetX = -customAngleY * 0.6;
     ctx.shadowOffsetY = Math.max(12, pageH * 0.045);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.08)';
-    drawRoundedRectPath(ctx, -pageW, -pageH / 2, pageW * 2, pageH, [cornerR, cornerR, cornerR, cornerR]);
+    drawRoundedRectPath(
+      ctx,
+      -pageW - overhangOuterPx,
+      -pageH / 2 - overhangVertPx,
+      (pageW + overhangOuterPx) * 2,
+      pageH + overhangVertPx * 2,
+      [boardCornerR, boardCornerR, boardCornerR, boardCornerR]
+    );
     ctx.fill();
     ctx.restore();
+
+    // Proportional Hardcover Cardboard Backing ("Beiral") behind Left & Right Pages
+    if (hasBoardBacking) {
+      ctx.save();
+      // Left Hardcover Board
+      drawRoundedRectPath(
+        ctx,
+        -pageW - overhangOuterPx,
+        -pageH / 2 - overhangVertPx,
+        pageW + overhangOuterPx,
+        pageH + overhangVertPx * 2,
+        [boardCornerR, 2, 2, boardCornerR]
+      );
+      ctx.fillStyle = leftBoardColor;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      // Right Hardcover Board
+      drawRoundedRectPath(
+        ctx,
+        0,
+        -pageH / 2 - overhangVertPx,
+        pageW + overhangOuterPx,
+        pageH + overhangVertPx * 2,
+        [2, boardCornerR, boardCornerR, 2]
+      );
+      ctx.fillStyle = rightBoardColor;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Stacked Pages Thickness (Left & Right)
     for (let i = stackCount; i >= 1; i--) {
@@ -569,9 +634,34 @@ export function renderMockupVideoFrame(
     ctx.shadowOffsetX = 4;
     ctx.shadowOffsetY = Math.max(12, pageH * 0.045);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.08)';
-    drawRoundedRectPath(ctx, -pageW / 2, -pageH / 2, pageW, pageH, [cornerR, cornerR, cornerR, cornerR]);
+    drawRoundedRectPath(
+      ctx,
+      -pageW / 2,
+      -pageH / 2 - overhangVertPx,
+      pageW + overhangOuterPx,
+      pageH + overhangVertPx * 2,
+      [boardCornerR, boardCornerR, boardCornerR, boardCornerR]
+    );
     ctx.fill();
     ctx.restore();
+
+    if (hasBoardBacking) {
+      ctx.save();
+      drawRoundedRectPath(
+        ctx,
+        -pageW / 2,
+        -pageH / 2 - overhangVertPx,
+        pageW + overhangOuterPx,
+        pageH + overhangVertPx * 2,
+        [boardCornerR, boardCornerR, boardCornerR, boardCornerR]
+      );
+      ctx.fillStyle = rightBoardColor;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
 
     for (let i = stackCount; i >= 1; i--) {
       const offset = i * (pageW * 0.006);
@@ -627,7 +717,7 @@ export function renderMockupVideoFrame(
   // --- LUXURY PEN BESIDE BOOK ---
   if (showPen) {
     ctx.save();
-    const bookRightEdge = mockupMode === 'spread' ? pageW : pageW / 2;
+    const bookRightEdge = (mockupMode === 'spread' ? pageW : pageW / 2) + overhangOuterPx;
     const penX = bookRightEdge + pageW * 0.16;
     const penY = -pageH * 0.04;
     const penW = Math.max(8, pageW * 0.032);

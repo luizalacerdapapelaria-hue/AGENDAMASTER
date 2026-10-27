@@ -32,6 +32,7 @@ interface ElementRendererProps {
   globalCalendarStyle?: LayoutElement['style']['fullCalendar'];
   municipalHolidays?: Holiday[];
   calendarIndex?: number;
+  isWeekly?: boolean;
 }
 
 const getShiftedDayData = (baseDay: DayData, offset: number, municipalHolidays: Holiday[] = []): DayData => {
@@ -70,6 +71,9 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     if (typeof style.letterSpacing === 'number') {
         scaled.letterSpacing = style.letterSpacing * scaleFactor;
     }
+    if (typeof style.textStrokeWidth === 'number') {
+        scaled.textStrokeWidth = style.textStrokeWidth * scaleFactor;
+    }
     if (typeof style.borderWidth === 'number') {
         scaled.borderWidth = style.borderWidth * scaleFactor;
     }
@@ -98,6 +102,8 @@ const scaleStyle = (style: any, scaleFactor: number) => {
             ...style.plannerDayBox,
             headerBorderWidth: typeof style.plannerDayBox.headerBorderWidth === 'number' ? style.plannerDayBox.headerBorderWidth * scaleFactor : style.plannerDayBox.headerBorderWidth,
             strokeWidth: typeof style.plannerDayBox.strokeWidth === 'number' ? style.plannerDayBox.strokeWidth * scaleFactor : style.plannerDayBox.strokeWidth,
+            textStrokeWidth: typeof style.plannerDayBox.textStrokeWidth === 'number' ? style.plannerDayBox.textStrokeWidth * scaleFactor : style.plannerDayBox.textStrokeWidth,
+            headerTextStrokeWidth: typeof style.plannerDayBox.headerTextStrokeWidth === 'number' ? style.plannerDayBox.headerTextStrokeWidth * scaleFactor : style.plannerDayBox.headerTextStrokeWidth,
         };
     }
 
@@ -108,7 +114,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
             itemSize: typeof style.footerTracker.itemSize === 'number' ? style.footerTracker.itemSize * scaleFactor : style.footerTracker.itemSize,
             spacing: typeof style.footerTracker.spacing === 'number' ? style.footerTracker.spacing * scaleFactor : style.footerTracker.spacing,
             strokeWidth: typeof style.footerTracker.strokeWidth === 'number' ? style.footerTracker.strokeWidth * scaleFactor : style.footerTracker.strokeWidth,
-            boxPadding: typeof style.footerTracker.boxPadding === 'number' ? style.footerTracker.boxPadding * scaleFactor : style.footerTracker.boxPadding,
+            boxPadding: typeof style.footerTracker.boxPadding === style.footerTracker.boxPadding && typeof style.footerTracker.boxPadding === 'number' ? style.footerTracker.boxPadding * scaleFactor : style.footerTracker.boxPadding,
             boxBorderWidth: typeof style.footerTracker.boxBorderWidth === 'number' ? style.footerTracker.boxBorderWidth * scaleFactor : style.footerTracker.boxBorderWidth,
             boxBorderRadius: typeof style.footerTracker.boxBorderRadius === 'number' ? style.footerTracker.boxBorderRadius * scaleFactor : style.footerTracker.boxBorderRadius,
         };
@@ -129,6 +135,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                 ...style.table.textStyle,
                 fontSize: typeof style.table.textStyle.fontSize === 'number' ? Math.max(1, style.table.textStyle.fontSize * scaleFactor) : style.table.textStyle.fontSize,
                 letterSpacing: typeof style.table.textStyle.letterSpacing === 'number' ? style.table.textStyle.letterSpacing * scaleFactor : style.table.textStyle.letterSpacing,
+                textStrokeWidth: typeof style.table.textStyle.textStrokeWidth === 'number' ? style.table.textStyle.textStrokeWidth * scaleFactor : style.table.textStyle.textStrokeWidth,
                 cellPadding: typeof style.table.textStyle.cellPadding === 'number' ? style.table.textStyle.cellPadding * scaleFactor : style.table.textStyle.cellPadding,
             };
         }
@@ -140,6 +147,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                         ...val,
                         fontSize: typeof val.fontSize === 'number' ? Math.max(1, val.fontSize * scaleFactor) : val.fontSize,
                         letterSpacing: typeof val.letterSpacing === 'number' ? val.letterSpacing * scaleFactor : val.letterSpacing,
+                        textStrokeWidth: typeof val.textStrokeWidth === 'number' ? val.textStrokeWidth * scaleFactor : val.textStrokeWidth,
                         cellPadding: typeof val.cellPadding === 'number' ? val.cellPadding * scaleFactor : val.cellPadding,
                     };
                 } else {
@@ -156,6 +164,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                         ...val,
                         fontSize: typeof val.fontSize === 'number' ? Math.max(1, val.fontSize * scaleFactor) : val.fontSize,
                         letterSpacing: typeof val.letterSpacing === 'number' ? val.letterSpacing * scaleFactor : val.letterSpacing,
+                        textStrokeWidth: typeof val.textStrokeWidth === 'number' ? val.textStrokeWidth * scaleFactor : val.textStrokeWidth,
                         cellPadding: typeof val.cellPadding === 'number' ? val.cellPadding * scaleFactor : val.cellPadding,
                     };
                 } else {
@@ -172,6 +181,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                         ...val,
                         fontSize: typeof val.fontSize === 'number' ? Math.max(1, val.fontSize * scaleFactor) : val.fontSize,
                         letterSpacing: typeof val.letterSpacing === 'number' ? val.letterSpacing * scaleFactor : val.letterSpacing,
+                        textStrokeWidth: typeof val.textStrokeWidth === 'number' ? val.textStrokeWidth * scaleFactor : val.textStrokeWidth,
                         cellPadding: typeof val.cellPadding === 'number' ? val.cellPadding * scaleFactor : val.cellPadding,
                     };
                 } else {
@@ -196,6 +206,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                 ...style.fullCalendar.title,
                 fontSize: typeof style.fullCalendar.title.fontSize === 'number' ? Math.max(1, style.fullCalendar.title.fontSize * scaleFactor) : style.fullCalendar.title.fontSize,
                 letterSpacing: typeof style.fullCalendar.title.letterSpacing === 'number' ? style.fullCalendar.title.letterSpacing * scaleFactor : style.fullCalendar.title.letterSpacing,
+                textStrokeWidth: typeof style.fullCalendar.title.textStrokeWidth === 'number' ? style.fullCalendar.title.textStrokeWidth * scaleFactor : style.fullCalendar.title.textStrokeWidth,
             };
         }
         if (style.fullCalendar.weekDays) {
@@ -203,6 +214,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                 ...style.fullCalendar.weekDays,
                 fontSize: typeof style.fullCalendar.weekDays.fontSize === 'number' ? Math.max(1, style.fullCalendar.weekDays.fontSize * scaleFactor) : style.fullCalendar.weekDays.fontSize,
                 letterSpacing: typeof style.fullCalendar.weekDays.letterSpacing === 'number' ? style.fullCalendar.weekDays.letterSpacing * scaleFactor : style.fullCalendar.weekDays.letterSpacing,
+                textStrokeWidth: typeof style.fullCalendar.weekDays.textStrokeWidth === 'number' ? style.fullCalendar.weekDays.textStrokeWidth * scaleFactor : style.fullCalendar.weekDays.textStrokeWidth,
                 cellPadding: typeof style.fullCalendar.weekDays.cellPadding === 'number' ? style.fullCalendar.weekDays.cellPadding * scaleFactor : style.fullCalendar.weekDays.cellPadding,
             };
         }
@@ -211,6 +223,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                 ...style.fullCalendar.days,
                 fontSize: typeof style.fullCalendar.days.fontSize === 'number' ? Math.max(1, style.fullCalendar.days.fontSize * scaleFactor) : style.fullCalendar.days.fontSize,
                 letterSpacing: typeof style.fullCalendar.days.letterSpacing === 'number' ? style.fullCalendar.days.letterSpacing * scaleFactor : style.fullCalendar.days.letterSpacing,
+                textStrokeWidth: typeof style.fullCalendar.days.textStrokeWidth === 'number' ? style.fullCalendar.days.textStrokeWidth * scaleFactor : style.fullCalendar.days.textStrokeWidth,
             };
         }
         if (style.fullCalendar.specialDays?.style) {
@@ -220,6 +233,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                     ...style.fullCalendar.specialDays.style,
                     fontSize: typeof style.fullCalendar.specialDays.style.fontSize === 'number' ? Math.max(1, style.fullCalendar.specialDays.style.fontSize * scaleFactor) : style.fullCalendar.specialDays.style.fontSize,
                     letterSpacing: typeof style.fullCalendar.specialDays.style.letterSpacing === 'number' ? style.fullCalendar.specialDays.style.letterSpacing * scaleFactor : style.fullCalendar.specialDays.style.letterSpacing,
+                    textStrokeWidth: typeof style.fullCalendar.specialDays.style.textStrokeWidth === 'number' ? style.fullCalendar.specialDays.style.textStrokeWidth * scaleFactor : style.fullCalendar.specialDays.style.textStrokeWidth,
                 }
             };
         }
@@ -316,26 +330,29 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
   if (['day_number', 'month_name', 'month_number', 'day_name', 'year', 'date_placeholder', 'holiday', 'moon'].includes(element.type)) {
       const dayIndex = scaledElement.style.dayIndex;
       let targetDay: DayData | undefined;
+      const isWeekly = props.isWeekly ?? (props.weekDays && props.weekDays.length === 7);
       
-      if (dayIndex !== undefined && props.weekDays && props.weekDays.length > 0) {
-          // Se for layout semanal (dia da semana 0-6), buscar prioritariamente pelo dayOfWeek
-          const foundByDayOfWeek = (dayIndex >= 0 && dayIndex <= 6)
-              ? props.weekDays.find(d => d.dayOfWeek === dayIndex)
-              : undefined;
+      if (dayIndex !== undefined) {
+          if (isWeekly && props.weekDays && props.weekDays.length > 0) {
+              // Layout semanal onde dayIndex representa o dia da semana (0 = Dom, 1 = Seg, ..., 6 = Sáb)
+              const foundByDayOfWeek = (dayIndex >= 0 && dayIndex <= 6)
+                  ? props.weekDays.find(d => d.dayOfWeek === dayIndex)
+                  : undefined;
 
-          if (foundByDayOfWeek) {
-              targetDay = foundByDayOfWeek;
-          } else if (props.weekDays[dayIndex]) {
+              if (foundByDayOfWeek) {
+                  targetDay = foundByDayOfWeek;
+              } else if (props.weekDays[dayIndex]) {
+                  targetDay = props.weekDays[dayIndex];
+              } else {
+                  targetDay = { dayOfMonth: props.isEditor ? (dayIndex === 0 ? 7 : dayIndex) : 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
+              }
+          } else if (props.weekDays && props.weekDays[dayIndex]) {
+              // Layout multi-dia (ex: 2 ou 3 dias na mesma página): pega diretamente pelo índice da sequência!
               targetDay = props.weekDays[dayIndex];
-          } else if (dayIndex >= 0 && dayIndex <= 6) {
-              targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
-          } else if (props.dayData && dayIndex > 0) {
-              targetDay = getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays);
-          } else {
-              targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
+          } else if (props.dayData) {
+              // Deslocamento sequencial a partir do dia base
+              targetDay = dayIndex > 0 ? getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays) : props.dayData;
           }
-      } else if (dayIndex !== undefined && dayIndex > 0 && props.dayData) {
-          targetDay = getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays);
       } else {
           targetDay = props.dayData;
       }
@@ -368,15 +385,19 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
   }
 
   if (element.type === 'planner_day_box') {
-      const dayIndex = scaledElement.style.plannerDayBox?.dayIndex ?? 0;
+      const dayIndex = scaledElement.style.plannerDayBox?.dayIndex ?? scaledElement.style.dayIndex ?? 0;
       let targetDay: DayData | undefined;
+      const isWeekly = props.isWeekly ?? (props.weekDays && props.weekDays.length === 7);
 
-      if (props.weekDays) {
+      if (isWeekly && props.weekDays && props.weekDays.length > 0) {
           targetDay = props.weekDays.find(d => d.dayOfWeek === dayIndex);
           if (!targetDay) {
-              // Day not in this week
               targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0) };
           }
+      } else if (props.weekDays && props.weekDays[dayIndex]) {
+          targetDay = props.weekDays[dayIndex];
+      } else if (props.dayData) {
+          targetDay = dayIndex > 0 ? getShiftedDayData(props.dayData, dayIndex, props.municipalHolidays) : props.dayData;
       } else {
           targetDay = props.dayData;
       }

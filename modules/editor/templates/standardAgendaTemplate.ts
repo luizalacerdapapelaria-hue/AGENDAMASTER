@@ -1,5 +1,6 @@
 import { AgendaConfig, IntroPage, LayoutElement, MonthlyDividerStyle } from '../../../types';
 import { INTRO_TEMPLATES } from './introTemplates';
+import { DAILY_PERMANENT, PERMANENT_2DPP_TOP, PERMANENT_2DPP_BOTTOM } from './dailyTemplates';
 import { generateHolidayListFullText } from '../../../core/backend/calendar';
 
 export const STANDARD_DAILY_MIOLO_ELEMENTS: LayoutElement[] = [
@@ -955,6 +956,155 @@ const STANDARD_INTRO_TEMPLATE_IDS = [
     'tpl-anotacoes-gerais'
 ];
 
+const PERMANENT_INTRO_TEMPLATE_IDS = [
+    'tpl-dados-pessoais',
+    'tpl-datas-importantes',
+    'tpl-planejamento-anual',
+    'tpl-metas',
+    'tpl-roda-vida',
+    'tpl-contatos',
+    'tpl-senhas',
+    'tpl-financeiro-anual',
+    'tpl-anotacoes-gerais'
+];
+
+export const PERMANENT_DIVIDER_FRONT_ELEMENTS: LayoutElement[] = [
+    {
+        id: 'pdiv-f-bg',
+        name: 'Fundo Pastel da Divisória Permanente',
+        type: 'box',
+        x: 5, y: 4, w: 90, h: 92,
+        zIndex: 0,
+        style: {
+            backgroundType: 'gradient',
+            gradientType: 'linear',
+            gradientDirection: 135,
+            gradientColors: ['#fff1f2', '#fdfbf7'],
+            borderColor: '#fbcfe8',
+            borderWidth: 1.5,
+            borderRadius: 16
+        }
+    },
+    {
+        id: 'pdiv-f-wc-top',
+        name: 'Mancha Aquarela Rosé',
+        type: 'circle',
+        x: 14, y: 10, w: 50, h: 30,
+        zIndex: 0,
+        style: { backgroundColor: '#fce7f3', borderWidth: 0, opacity: 0.5 }
+    },
+    {
+        id: 'pdiv-f-inner-frame',
+        name: 'Moldura Interna Dourado Rosé',
+        type: 'box',
+        x: 8, y: 6.5, w: 84, h: 87,
+        zIndex: 1,
+        style: { backgroundColor: 'transparent', borderColor: '#f43f5e', borderWidth: 0.6, borderRadius: 12, opacity: 0.35 }
+    },
+    {
+        id: 'pdiv-f-welcome',
+        name: 'Saudação Caligráfica',
+        type: 'text',
+        content: 'novo ciclo, novas conquistas',
+        x: 15, y: 24, w: 70, h: 5.5,
+        zIndex: 2,
+        style: { fontSize: 18, fontFamily: 'Dancing Script', color: '#be185d', textAlign: 'center' }
+    },
+    {
+        id: 'pdiv-f-title',
+        name: 'Título Ciclo / Mês',
+        type: 'text',
+        content: 'MÊS / PERÍODO',
+        x: 12, y: 31, w: 76, h: 8,
+        zIndex: 2,
+        style: { fontSize: 22, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#4c0519', textAlign: 'center', letterSpacing: 3 }
+    },
+    {
+        id: 'pdiv-f-fill-box',
+        name: 'Campo Mês Livre',
+        type: 'box',
+        x: 20, y: 42, w: 60, h: 12,
+        zIndex: 1,
+        style: { backgroundColor: '#ffffff', borderColor: '#fbcfe8', borderWidth: 1, borderRadius: 12 }
+    },
+    {
+        id: 'pdiv-f-fill-line',
+        name: 'Linha Mês Livre',
+        type: 'text',
+        content: '_________________________',
+        x: 22, y: 45.5, w: 56, h: 6,
+        zIndex: 2,
+        style: { fontSize: 12, fontFamily: 'Playfair Display', color: '#9d174d', textAlign: 'center' }
+    },
+    {
+        id: 'pdiv-f-quote',
+        name: 'Citação Inspiradora',
+        type: 'quote',
+        x: 15, y: 68, w: 70, h: 10,
+        zIndex: 2,
+        style: { fontSize: 13, fontFamily: 'Dancing Script', color: '#881337', textAlign: 'center' }
+    }
+];
+
+export const PERMANENT_DIVIDER_VERSO_ELEMENTS: LayoutElement[] = STANDARD_DIVIDER_VERSO_ELEMENTS
+    .filter(el => el.type !== 'month_name')
+    .map(el => el.id === 'div-v-sub-script'
+        ? { ...el, content: 'intenções, metas & rituais deste ciclo' }
+        : el
+    );
+
+export const PERMANENT_MONTHLY_PLANNER_PAGE: IntroPage = {
+    id: 'monthly-tpl-permanente',
+    name: 'Visão Mensal Permanente (Não Datada)',
+    elements: [
+        { id: 'pmp-sub', type: 'text', name: 'Subtítulo Caligráfico', content: 'Visão geral & compromissos', x: 15, y: 2.5, w: 70, h: 3.5, zIndex: 2, style: { fontSize: 13, fontFamily: 'Dancing Script', color: '#b56576', textAlign: 'center' } },
+        { id: 'pmp-title', type: 'text', name: 'Título Planejamento Mensal', content: 'PLANEJAMENTO MENSAL', x: 8, y: 5.8, w: 84, h: 4.5, zIndex: 2, style: { fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#6d4352', textAlign: 'center', letterSpacing: 2 } },
+        { id: 'pmp-fill', type: 'text', name: 'Campo Mês e Ano Livre', content: 'MÊS: ___________________________     ANO: ___________', x: 8, y: 11.2, w: 84, h: 3.5, zIndex: 2, style: { fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#8c4f60', textAlign: 'center', letterSpacing: 0.6 } },
+        {
+            id: 'pmp-grid',
+            type: 'table',
+            name: 'Grade Mensal Livre (7 Colunas)',
+            x: 6, y: 16, w: 88, h: 61,
+            zIndex: 1,
+            style: {
+                table: {
+                    rows: 6,
+                    cols: 7,
+                    headerRow: true,
+                    headerBackgroundColor: '#fdf2f4',
+                    headerTextColor: '#9d4e64',
+                    borderColor: '#f3c6d1',
+                    borderWidth: 0.7,
+                    columnWidths: [14.28, 14.28, 14.28, 14.28, 14.28, 14.28, 14.32],
+                    rowHeights: [8, 18.4, 18.4, 18.4, 18.4, 18.4],
+                    textStyle: { fontSize: 7, fontFamily: 'Montserrat', color: '#6d4352', textAlign: 'center', verticalAlign: 'middle' },
+                    cellContent: {
+                        '0-0': 'SEG',
+                        '0-1': 'TER',
+                        '0-2': 'QUA',
+                        '0-3': 'QUI',
+                        '0-4': 'SEX',
+                        '0-5': 'SÁB',
+                        '0-6': 'DOM'
+                    }
+                }
+            }
+        },
+        { id: 'pmp-nbx', type: 'box', name: 'Card Notas do Mês', x: 6, y: 79.5, w: 88, h: 15, zIndex: 0, style: { borderWidth: 1, borderColor: '#c3d9cc', borderRadius: 10, backgroundColor: '#f2f7f4' } },
+        { id: 'pmp-ntt', type: 'text', name: 'Título Notas do Mês', content: 'PRIORIDADES & NOTAS DO MÊS', x: 9, y: 81, w: 60, h: 3, zIndex: 1, style: { fontSize: 8, fontWeight: 'bold', color: '#4a705a', fontFamily: 'Playfair Display', letterSpacing: 1 } },
+        { id: 'pmp-nls', type: 'lines', name: 'Linhas Notas do Mês', x: 9, y: 85, w: 82, h: 8, zIndex: 1, style: { color: '#b7d1c2', lineSpacing: 20, borderWidth: 0.5 } }
+    ]
+};
+
+export const PERMANENT_MONTHLY_INTRO_PAGES: IntroPage[] = [
+    PERMANENT_MONTHLY_PLANNER_PAGE,
+    {
+        id: 'monthly-tpl-financeiro-perm',
+        name: 'Financeiro do Mês (Pastel)',
+        elements: INTRO_TEMPLATES.find(t => t.id === 'tpl-financeiro')!.elements
+    }
+];
+
 const cloneElementWithNewId = (el: LayoutElement, baseYear: number): LayoutElement => {
     const cloned: LayoutElement = JSON.parse(JSON.stringify(el));
     cloned.id = Math.random().toString(36).substring(2, 11);
@@ -974,13 +1124,11 @@ const cloneElementWithNewId = (el: LayoutElement, baseYear: number): LayoutEleme
 };
 
 /**
- * Constrói a configuração completa da Agenda Padrão (Edição Pastel Artística) com todas as seções preenchidas:
- * - Páginas Iniciais (Dados Pessoais, Calendário Anual, Calendário do Próximo Ano, Datas Importantes, Planejamento Anual, Metas, Contatos, Senhas, Financeiro Anual, Anotações)
- * - Divisórias Mensais (Frente e Verso em paleta pastel botânica e tipografia editorial)
- * - Páginas Mensais (Calendário Mensal Completo + Controle Financeiro Mensal)
- * - Layout do Miolo Diário (Cabeçalho editorial pastel, Mini Calendário, Prioridades em lavanda, Pauta com Horários, Lembretes em sálvia, Autocuidado e Frase caligráfica)
+ * Constrói a configuração completa da Agenda Padrão (Edição Pastel Artística) ou Permanente (Não Datada).
  */
 export interface PastelModelOptions {
+    isPermanent?: boolean;
+    pageCount?: number;
     projectType?: 'agenda' | 'planner';
     layoutType?: '1_per_page' | '2_per_page' | '1_per_page_weekend_shared' | 'weekly_vertical' | 'weekly_horizontal' | 'weekly_one_page_vertical' | 'weekly_one_page_horizontal';
     pageSize?: 'A5' | 'A4' | 'Letter' | 'Custom';
@@ -997,53 +1145,97 @@ export const buildPastelModelConfig = (
     year: number = new Date().getFullYear() + 1
 ): Partial<AgendaConfig> => {
     const {
+        isPermanent = false,
+        pageCount,
         projectType = 'agenda',
         layoutType = '1_per_page',
         pageSize = 'A5',
-        dailyElements = STANDARD_DAILY_MIOLO_ELEMENTS,
-        topElements = STANDARD_HALF_PAGE_TOP_ELEMENTS,
-        bottomElements = STANDARD_HALF_PAGE_BOTTOM_ELEMENTS,
+        dailyElements = isPermanent ? DAILY_PERMANENT : STANDARD_DAILY_MIOLO_ELEMENTS,
+        topElements = isPermanent ? PERMANENT_2DPP_TOP : STANDARD_HALF_PAGE_TOP_ELEMENTS,
+        bottomElements = isPermanent ? PERMANENT_2DPP_BOTTOM : STANDARD_HALF_PAGE_BOTTOM_ELEMENTS,
         weeklyLeftElements,
         weeklyRightElements,
         extraIntroTemplateIds = []
     } = options;
 
-    const allIntroIds = Array.from(new Set([...STANDARD_INTRO_TEMPLATE_IDS, ...extraIntroTemplateIds]));
+    const baseIntroIds = isPermanent ? PERMANENT_INTRO_TEMPLATE_IDS : STANDARD_INTRO_TEMPLATE_IDS;
+    const allIntroIds = Array.from(new Set([...baseIntroIds, ...extraIntroTemplateIds]));
 
     const introPages: IntroPage[] = allIntroIds
         .map(id => INTRO_TEMPLATES.find(t => t.id === id))
         .filter((t): t is IntroPage => Boolean(t))
         .map(tpl => ({
             id: `intro-${tpl.id}-${Math.random().toString(36).substring(2, 7)}`,
-            name: tpl.name,
-            elements: tpl.elements.map(el => cloneElementWithNewId(el, year))
+            name: isPermanent && tpl.id === 'tpl-metas' ? 'Minhas Metas & Sonhos (Pastel)' : tpl.name,
+            elements: tpl.elements.map(el => {
+                const cloned = cloneElementWithNewId(el, year);
+                if (isPermanent && cloned.type === 'text' && cloned.content === 'MINHAS METAS PARA O ANO') {
+                    cloned.content = 'MINHAS METAS & SONHOS';
+                }
+                return cloned;
+            })
         }));
 
-    const monthlyIntroPages: IntroPage[] = STANDARD_MONTHLY_INTRO_PAGES.map(tpl => ({
+    const sourceMonthlyIntros = isPermanent ? PERMANENT_MONTHLY_INTRO_PAGES : STANDARD_MONTHLY_INTRO_PAGES;
+    const monthlyIntroPages: IntroPage[] = sourceMonthlyIntros.map(tpl => ({
         id: `m-intro-${tpl.id}-${Math.random().toString(36).substring(2, 7)}`,
         name: tpl.name,
         elements: tpl.elements.map(el => cloneElementWithNewId(el, year))
     }));
+
+    const dividerFrontSource = isPermanent ? PERMANENT_DIVIDER_FRONT_ELEMENTS : STANDARD_DIVIDER_FRONT_ELEMENTS;
+    const dividerVersoSource = isPermanent ? PERMANENT_DIVIDER_VERSO_ELEMENTS : STANDARD_DIVIDER_VERSO_ELEMENTS;
 
     const monthlyDividerStyle: MonthlyDividerStyle = {
         layout: 'custom',
         titleFont: 'Playfair Display',
         titleColor: '#4c0519',
         accentColor: '#be185d',
-        includeMiniCalendar: true,
+        includeMiniCalendar: !isPermanent,
+        showYear: !isPermanent,
         borderStyle: 'none',
-        elements: STANDARD_DIVIDER_FRONT_ELEMENTS.map(el => cloneElementWithNewId(el, year)),
-        versoElements: STANDARD_DIVIDER_VERSO_ELEMENTS.map(el => cloneElementWithNewId(el, year))
+        elements: dividerFrontSource.map(el => cloneElementWithNewId(el, year)),
+        versoElements: dividerVersoSource.map(el => cloneElementWithNewId(el, year))
     };
 
-    const clonedDaily = dailyElements.map(el => cloneElementWithNewId(el, year));
-    const clonedSaturday = dailyElements.map(el => cloneElementWithNewId(el, year));
-    const clonedSunday = dailyElements.map(el => cloneElementWithNewId(el, year));
+    const effectiveDailySource = (isPermanent && layoutType === '2_per_page') ? topElements : dailyElements;
+    const clonedDaily = effectiveDailySource.map(el => cloneElementWithNewId(el, year));
+    const clonedSaturday = effectiveDailySource.map(el => cloneElementWithNewId(el, year));
+    const clonedSunday = effectiveDailySource.map(el => cloneElementWithNewId(el, year));
     const clonedTop = topElements.map(el => cloneElementWithNewId(el, year));
     const clonedBottom = bottomElements.map(el => cloneElementWithNewId(el, year));
 
+    if (isPermanent) {
+        return {
+            projectType,
+            isPermanent: true,
+            pageCount: pageCount || (layoutType === '2_per_page' ? 366 : 365),
+            layoutType,
+            pageSize,
+            includeHolidays: false,
+            includeMoonPhases: false,
+            includeQuotes: true,
+            includeVerses: true,
+            includeMonthlyDividers: false,
+            includeMonthlyIntroPages: false,
+            startMonthOnRightPage: false,
+            introPages,
+            monthlyIntroPages,
+            monthlyDividerStyle,
+            elements: clonedDaily,
+            elementsSaturday: clonedSaturday,
+            elementsSunday: clonedSunday,
+            elementsTop: clonedTop,
+            elementsBottom: clonedBottom,
+            elementsWeeklyLeft: undefined,
+            elementsWeeklyRight: undefined
+        };
+    }
+
     return {
         projectType,
+        isPermanent: false,
+        pageCount: undefined,
         layoutType,
         pageSize,
         includeHolidays: true,
@@ -1067,4 +1259,19 @@ export const buildPastelModelConfig = (
 
 export const buildStandardAgendaConfig = (year: number = new Date().getFullYear() + 1): Partial<AgendaConfig> => {
     return buildPastelModelConfig({}, year);
+};
+
+export const buildPermanentAgendaConfig = (
+    layoutType: '1_per_page' | '2_per_page' = '1_per_page',
+    pageCount?: number
+): Partial<AgendaConfig> => {
+    return buildPastelModelConfig({
+        isPermanent: true,
+        projectType: 'agenda',
+        layoutType,
+        pageCount,
+        dailyElements: DAILY_PERMANENT,
+        topElements: PERMANENT_2DPP_TOP,
+        bottomElements: PERMANENT_2DPP_BOTTOM
+    });
 };

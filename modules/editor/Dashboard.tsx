@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { localStorage, sessionStorage } from '../../services/safeStorage';
 import { SystemRequirementsModal } from './components/SystemRequirementsModal';
 import { createPortal } from 'react-dom';
-import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem, SpecialDateItem, CustomTemplateItem } from '../../types';
-import { generateCalendarYear, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday, getYearHolidays, formatHolidayItemText, generateHolidayListFullText, HolidayDateFormat, FormattedHolidayItem } from '../../core/backend/calendar';
+import { AgendaConfig, User, DayData, LayoutElement, ElementType, PageLayoutType, TextStyleConfig, PageSize, PageOrientation, PageMargins, IntroPage, BackgroundConfig, PdfImportDestination, PdfImportBatchItem, SpecialDateItem, CustomTemplateItem, FooterTrackerConfig, FooterTrackerType } from '../../types';
+import { generateCalendarYear, generatePermanentAgendaDays, getMonthName, getDayName, generatePlannerDays, generateGenericPages, isProjectYearRestricted, checkIsHoliday, getYearHolidays, formatHolidayItemText, generateHolidayListFullText, HolidayDateFormat, FormattedHolidayItem } from '../../core/backend/calendar';
 import { generateMonthlyQuotes } from '../../core/backend/ai';
 import { BIBLE_VERSES, getVerseForDay } from '../../core/constants/verses';
 import { MOTIVATIONAL_QUOTES, getQuoteForDay, getRandomQuote, QuoteCategory, QUOTE_CATEGORIES_METADATA } from '../../core/constants/quotes';
@@ -18,7 +18,7 @@ import { compressImage } from './utils/imageCompressor';
 import { ImageManager, useImageSrc } from './utils/imageManager';
 import { getEffectiveBackgroundForPage, BackgroundCategoryType } from '../../core/logic/backgroundRules';
 import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
-import { detectInstalledFonts, getCachedInstalledFonts } from '../../core/logic/fontDetector';
+import { detectInstalledFonts, getCachedInstalledFonts, ensureFontLoaded, injectLocalFontFaceStyles, getSafeFontFamily } from '../../core/logic/fontDetector';
 import { PdfImportModal } from './components/PdfImportModal';
 import { TemplateGalleryModal } from './components/TemplateGalleryModal';
 import { VectorShapeGalleryModal } from './components/VectorShapeGalleryModal';
@@ -27,11 +27,15 @@ import { SpecialDatesModal } from './components/SpecialDatesModal';
 import { enrichDayDataWithSpecialDates, getSpecialInfoForDay, getSpecialDateDisplaySample } from '../../core/logic/specialDates';
 import { StylesManagerPanel, ElementQuickStylesBar, StyleTabType } from './components/StylesManagerPanel';
 import { getProjectStyles, applyColorStyleToElement } from '../../core/logic/styleSystem';
+import { applyHtml2CanvasTextStrokeFallback } from '../../core/logic/textStroke';
 import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBounds } from './components/elements/vectorShapesData';
-import { FooterTrackerConfig, FooterTrackerType, FooterTrackerSection } from '../../types';
 import * as icons from 'lucide-react';
+import { CoverCanvasOverlay } from './components/cover/CoverCanvasOverlay';
+import { CoverToolsPanel } from './components/cover/CoverToolsPanel';
+import { createDefaultCoverConfig } from './components/cover/coverGabaritoData';
+import { CoverProjectConfig, CoverPage } from '../../types';
 
-import { exportProject, importProject } from '../../core/logic/fileSystem';
+import { exportProject, importProjectOrTemplates } from '../../core/logic/fileSystem';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
@@ -969,9 +973,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [config, _setConfig] = useState<AgendaConfig>({
     name: initialConfig?.name || 'Meu Novo Projeto',
     projectType: initialConfig?.projectType || 'agenda',
+    isPermanent: initialConfig?.isPermanent ?? false,
     year: initialConfig?.year || new Date().getFullYear() + 1,
+    pageCount: initialConfig?.pageCount,
     startMonth: initialConfig?.startMonth ?? 0,
     durationMonths: initialConfig?.durationMonths ?? 12,
+    startOfWeekDay: initialConfig?.startOfWeekDay,
+    weeklyStartMode: initialConfig?.weeklyStartMode,
+    showPaddingDaysNumbers: initialConfig?.showPaddingDaysNumbers,
     layoutType: initialConfig?.layoutType || '1_per_page',
     pageSize: initialConfig?.pageSize || 'A5',
     customPageSize: initialConfig?.customPageSize || (initialConfig?.pageSize === 'Custom' ? { width: 148, height: 210 } : undefined),
@@ -979,9 +988,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     includeHolidays: initialConfig?.includeHolidays ?? true,
     includeMoonPhases: initialConfig?.includeMoonPhases ?? false,
     includeQuotes: initialConfig?.includeQuotes ?? false,
+    quoteCategory: initialConfig?.quoteCategory,
+    quoteCustomList: initialConfig?.quoteCustomList,
     includeVerses: initialConfig?.includeVerses ?? true,
     mirrorEvenPages: initialConfig?.mirrorEvenPages ?? true,
     mirrorContentOnVerso: initialConfig?.mirrorContentOnVerso ?? false,
+    customVerso: initialConfig?.customVerso,
+    versoAdvancesSequence: initialConfig?.versoAdvancesSequence,
     startMonthOnRightPage: initialConfig?.startMonthOnRightPage ?? true,
     includeMonthlyDividers: initialConfig?.includeMonthlyDividers ?? true,
     includeMonthlyIntroPages: initialConfig?.includeMonthlyIntroPages ?? true,
@@ -996,7 +1009,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     specialDates: initialConfig?.specialDates || [],
     showSpecialDateBadges: initialConfig?.showSpecialDateBadges ?? true,
     specialDateBadgePosition: initialConfig?.specialDateBadgePosition || 'top',
+    customCalendarStyle: initialConfig?.customCalendarStyle,
+    background: initialConfig?.background,
+    backgrounds: initialConfig?.backgrounds,
+    backgroundRules: initialConfig?.backgroundRules,
+    styles: initialConfig?.styles,
+    cover: initialConfig?.cover,
     elements: initialConfig?.elements !== undefined ? initialConfig.elements : getDefaultElements(),
+    elementsVerso: initialConfig?.elementsVerso,
     elementsSaturday: initialConfig?.elementsSaturday,
     elementsSunday: initialConfig?.elementsSunday,
     elementsTop: initialConfig?.elementsTop,
@@ -1005,9 +1025,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     elementsWeeklyRight: initialConfig?.elementsWeeklyRight,
     elementsWeeklyVersoLeft: initialConfig?.elementsWeeklyVersoLeft,
     elementsWeeklyVersoRight: initialConfig?.elementsWeeklyVersoRight,
-    introPages: initialConfig?.introPages || INTRO_TEMPLATES,
+    introPages: initialConfig?.introPages !== undefined ? initialConfig.introPages : INTRO_TEMPLATES,
     monthlyIntroPages: initialConfig?.monthlyIntroPages || []
   });
+
+  const latestConfigRef = useRef<AgendaConfig>(config);
+  latestConfigRef.current = config;
 
   useEffect(() => {
     if (initialConfig) {
@@ -1043,7 +1066,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         };
       });
 
-      if (initialConfig.layoutType === 'weekly_vertical' || initialConfig.layoutType === 'weekly_horizontal') {
+      if (initialConfig.projectType === 'cover') {
+        setEditMode('cover');
+      } else if (initialConfig.layoutType === 'weekly_vertical' || initialConfig.layoutType === 'weekly_horizontal') {
         setEditorViewMode('weekly_left');
       } else if (initialConfig.layoutType === '1_per_page' || initialConfig.projectType === 'agenda') {
         setEditorViewMode('standard');
@@ -1586,7 +1611,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
   };
 
-  const [editMode, setEditMode] = useState<'daily' | 'intro' | 'monthly_intro' | 'divider'>('daily');
+  const [editMode, setEditMode] = useState<'daily' | 'intro' | 'monthly_intro' | 'divider' | 'cover'>('daily');
   const [dividerViewMode, setDividerViewMode] = useState<'front' | 'verso'>('front');
   const [currentIntroPageId, setCurrentIntroPageId] = useState<string | null>(config.introPages[0]?.id || null);
   const [currentMonthlyIntroPageId, setCurrentMonthlyIntroPageId] = useState<string | null>(config.monthlyIntroPages?.[0]?.id || null);
@@ -1644,11 +1669,96 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const handleExport = async () => {
     try {
-      const exportable = await ImageManager.prepareConfigForExport(config);
+      setToastMessage('Preparando imagens e salvando projeto...');
+      const exportable = await ImageManager.prepareConfigForExport(latestConfigRef.current);
       exportProject(exportable);
+      setToastMessage('Projeto salvo com sucesso! Aguarde o download concluir.');
     } catch (e) {
       console.error('Error preparing export', e);
-      exportProject(config);
+      try {
+        exportProject(latestConfigRef.current);
+        setToastMessage('Projeto salvo (aviso: algumas imagens pesadas não puderam ser embutidas).');
+      } catch (innerErr) {
+        console.error('Fatal export error', innerErr);
+        alert('Não foi possível salvar o arquivo do projeto. Verifique se há espaço livre no seu dispositivo.');
+      }
+    }
+  };
+
+  const handleExportCoverPdf = async (mode: 'color' | 'mask_k100', options?: { includeGuides?: boolean }) => {
+    const cover = config.cover || createDefaultCoverConfig();
+    const activeCoverPage = cover.pages.find(p => p.id === cover.activeCoverPageId) || cover.pages[0];
+    const target = document.getElementById('cover-canvas-target');
+    if (!target) {
+      alert('Elemento da capa não encontrado na tela para exportação.');
+      return;
+    }
+
+    const includeGuides = Boolean(options?.includeGuides);
+    const overlayEl = target.querySelector('.cover-canvas-overlay') as HTMLElement | null;
+    const prevDisplay = overlayEl ? overlayEl.style.display : '';
+
+    try {
+      if (!includeGuides && overlayEl) {
+        overlayEl.style.display = 'none';
+      }
+
+      const { default: html2canvas } = await import('html2canvas');
+      const { jsPDF } = await import('jspdf');
+
+      const isEndsheet = activeCoverPage.type === 'endsheet_front' || activeCoverPage.type === 'endsheet_back' || (activeCoverPage as any).type === 'guard' || activeCoverPage.id?.includes('guard') || activeCoverPage.id?.includes('endsheet');
+      const effectiveBleed = isEndsheet ? 0 : cover.bleedMm;
+      const isSpread = activeCoverPage.type === 'spread' || cover.spine.enabled;
+      const totalW_MM = isSpread
+        ? (cover.cardboardSize.width * 2) + cover.spine.calculatedSpineWidthMm + (cover.spine.hingeGapMm * 2) + (effectiveBleed * 2)
+        : cover.cardboardSize.width + (effectiveBleed * 2);
+      const totalH_MM = cover.cardboardSize.height + (effectiveBleed * 2);
+
+      const canvas = await html2canvas(target, {
+        scale: 3,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        onclone: (clonedDoc) => {
+          applyHtml2CanvasTextStrokeFallback(clonedDoc);
+        },
+        ignoreElements: (element) => {
+          if (includeGuides) return false;
+          return Boolean(
+            element.classList?.contains('cover-canvas-overlay') ||
+            element.closest?.('.cover-canvas-overlay') ||
+            element.closest?.('[data-cover-guides="true"]') ||
+            element.closest?.('[data-html2canvas-ignore="true"]')
+          );
+        }
+      });
+
+      const orientation = totalW_MM > totalH_MM ? 'landscape' : 'portrait';
+      const pdf = new jsPDF({
+        orientation,
+        unit: 'mm',
+        format: [totalW_MM, totalH_MM],
+        compress: true
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      pdf.addImage(imgData, 'JPEG', 0, 0, totalW_MM, totalH_MM);
+
+      const sanitizedName = activeCoverPage.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const guideSuffix = includeGuides ? '_COM_GABARITO' : '_LIMPA';
+      const fileName = mode === 'mask_k100'
+        ? `MASCARA_FOIL_${sanitizedName}_${Math.round(totalW_MM)}x${Math.round(totalH_MM)}mm.pdf`
+        : `CAPA_IMPRESSA_${sanitizedName}${guideSuffix}_${Math.round(totalW_MM)}x${Math.round(totalH_MM)}mm.pdf`;
+
+      pdf.save(fileName);
+      setToastMessage(`PDF da capa exportado (${Math.round(totalW_MM)} × ${Math.round(totalH_MM)} mm) - ${includeGuides ? 'Com Gabarito' : 'Arte Limpa'}`);
+    } catch (err) {
+      console.error('Erro ao exportar capa em PDF:', err);
+      alert('Erro ao exportar o PDF da capa.');
+    } finally {
+      if (overlayEl) {
+        overlayEl.style.display = prevDisplay;
+      }
     }
   };
 
@@ -1688,11 +1798,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   // -- PRELOAD AND MIGRATE IMAGES ON MOUNT --
   useEffect(() => {
+    if (initialConfig?.projectType === 'cover') {
+      setEditMode('cover');
+    }
     const initializeImages = async () => {
       try {
-        await ImageManager.preloadConfigImages(config);
-        const migrated = await ImageManager.migrateConfigImages(config);
-        if (JSON.stringify(migrated) !== JSON.stringify(config)) {
+        const snapshot = latestConfigRef.current;
+        await ImageManager.preloadConfigImages(snapshot);
+        let didMigrate = false;
+        const migrated = await ImageManager.migrateConfigImages(snapshot, () => {
+          didMigrate = true;
+        });
+        if (didMigrate && latestConfigRef.current === snapshot) {
           setConfigSilent(migrated);
         }
       } catch (err) {
@@ -1700,7 +1817,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
     };
     initializeImages();
-  }, []);
+  }, [initialConfig]);
+
+  // -- NORMALIZE LEGACY COVER WIRE-O & SAFE ZONE CONFIG --
+  useEffect(() => {
+    if (!config.cover) return;
+    const needsSafeZoneCleanup = config.cover.guides?.showSafeZoneLine === true;
+    const needsLegacyWireMigration = needsSafeZoneCleanup && config.cover.wireO?.marginMm === 8.5;
+    if (needsSafeZoneCleanup || needsLegacyWireMigration) {
+      setConfigSilent({
+        ...config,
+        cover: {
+          ...config.cover,
+          guides: {
+            ...config.cover.guides,
+            showSafeZoneLine: false
+          },
+          wireO: {
+            ...config.cover.wireO,
+            marginMm: needsLegacyWireMigration ? 5 : (config.cover.wireO?.marginMm ?? 5)
+          }
+        }
+      });
+    }
+  }, [config.cover]);
 
   // -- LOCAL STORAGE PERSISTENCE --
   useEffect(() => {
@@ -1740,7 +1880,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const confirmImport = async () => {
     if (!pendingFile) return;
     try {
-      const importedConfig = await importProject(pendingFile);
+      const result = await importProjectOrTemplates(pendingFile);
+
+      if (result.kind === 'templates') {
+        const migratedTemplates: CustomTemplateItem[] = await ImageManager.migrateConfigImages(result.templates);
+        const updated = [...customTemplates];
+        for (const tmpl of migratedTemplates) {
+          if (!updated.some(t => t.id === tmpl.id)) {
+            updated.push(tmpl);
+          } else {
+            updated.push({ ...tmpl, id: 'custom-' + Math.random().toString(36).substring(2, 11) });
+          }
+        }
+        setCustomTemplates(updated);
+        localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+        setTemplateCategory('custom');
+        setTemplateModal(true);
+        setToastMessage(`${migratedTemplates.length} modelo(s) importado(s) em Meus Modelos ⭐!`);
+        return;
+      }
+
+      const importedConfig = result.config;
       const migratedConfig = await ImageManager.migrateConfigImages({
         ...importedConfig,
         startMonthOnRightPage: importedConfig.startMonthOnRightPage ?? true,
@@ -1752,13 +1912,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setConfig(migratedConfig);
       // Reset state based on new config
       setSelectedIds([]);
-      setEditMode('daily');
+      if (importedConfig.projectType === 'cover') {
+        setEditMode('cover');
+      } else {
+        setEditMode('daily');
+        if (importedConfig.layoutType === 'weekly_vertical' || importedConfig.layoutType === 'weekly_horizontal') {
+          setEditorViewMode('weekly_left');
+        } else {
+          setEditorViewMode('standard');
+        }
+      }
       if (importedConfig.introPages.length > 0) {
         setCurrentIntroPageId(importedConfig.introPages[0].id);
       }
       if (importedConfig.monthlyIntroPages && importedConfig.monthlyIntroPages.length > 0) {
         setCurrentMonthlyIntroPageId(importedConfig.monthlyIntroPages[0].id);
       }
+      setToastMessage('Projeto importado com sucesso!');
     } catch (err) {
       alert('Erro ao importar projeto: ' + (err instanceof Error ? err.message : 'Arquivo inválido'));
     } finally {
@@ -1774,21 +1944,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const templateFileInputRef = useRef<HTMLInputElement>(null);
 
-  const exportCustomTemplates = () => {
+  const exportCustomTemplates = async () => {
     if (customTemplates.length === 0) {
       alert("Você não possui modelos personalizados salvos para exportar.");
       return;
     }
     try {
-      const dataStr = JSON.stringify(customTemplates, null, 2);
-      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-      
+      const exportableTemplates = await ImageManager.prepareConfigForExport(customTemplates);
+      const dataStr = JSON.stringify(exportableTemplates);
+      const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
       const exportFileDefaultName = 'agendamaster_modelos_personalizados.json';
-      
+
       const linkElement = document.createElement('a');
-      linkElement.setAttribute('href', dataUri);
-      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.href = url;
+      linkElement.download = exportFileDefaultName;
+      document.body.appendChild(linkElement);
       linkElement.click();
+      document.body.removeChild(linkElement);
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (_) {}
+      }, 60_000);
     } catch (e) {
       console.error('[Export Templates] Erro ao exportar modelos:', e);
       alert('Houve um erro ao exportar seus modelos personalizados.');
@@ -1800,9 +1978,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
-        const contentStr = event.target?.result as string;
+        const contentStr = String(event.target?.result || '').replace(/^\uFEFF/, '').trim();
         const parsed = JSON.parse(contentStr);
         
         if (!Array.isArray(parsed)) {
@@ -1842,8 +2020,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         if (confirm(`Deseja importar ${validTemplates.length} modelo(s) personalizado(s)? Se houver modelos com nomes duplicados, eles coexistirão.`)) {
+          const migratedTemplates: CustomTemplateItem[] = await ImageManager.migrateConfigImages(validTemplates);
           const updated = [...customTemplates];
-          validTemplates.forEach(newT => {
+          migratedTemplates.forEach(newT => {
             if (!updated.some(t => t.id === newT.id)) {
               updated.push(newT);
             } else {
@@ -1853,7 +2032,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           
           setCustomTemplates(updated);
           localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
-          alert(`${validTemplates.length} modelo(s) importado(s) com sucesso!`);
+          alert(`${migratedTemplates.length} modelo(s) importado(s) com sucesso!`);
         }
       } catch (err: any) {
         console.error('[Import Templates] Erro ao ler ou validar o arquivo:', err);
@@ -2185,35 +2364,78 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const detected = await detectInstalledFonts();
       if (detected && detected.length > 0) {
         setLocalFonts(detected);
+        injectLocalFontFaceStyles(detected);
+        
+        // Se houver um elemento selecionado, garante que a fonte dele seja imediatamente carregada e aplicada
+        if (selectedIds.length > 0) {
+          const currentList = getActiveElements();
+          const selectedEl = currentList.find(item => item.id === selectedIds[0]);
+          if (selectedEl?.style?.fontFamily) {
+            await ensureFontLoaded(selectedEl.style.fontFamily);
+          }
+        }
+        setToastMessage(`✨ ${detected.length} fontes do seu computador prontas para uso!`);
+      } else {
+        setToastMessage('Nenhuma fonte adicional detectada no computador.');
       }
     } catch (e) {
       console.warn('Detecção de fontes do computador:', e);
+      setToastMessage('Não foi possível ler as fontes do computador.');
     } finally {
       setLocalFontsLoading(false);
     }
   };
 
-  const handleAddManualFont = () => {
+  const handleAddManualFont = async () => {
     const fontName = prompt(
-      "Digite o nome da fonte instalada no seu computador (ex: Century Gothic, Calibri, Garamond):\n\nEla ficará disponível imediatamente na lista de fontes do editor."
+      "Digite o nome da fonte instalada no seu computador (ex: Century Gothic, Edwardian Script ITC, Calibri):\n\nEla ficará disponível imediatamente na lista de fontes do editor."
     );
     if (fontName && fontName.trim()) {
       const trimmed = fontName.trim();
       const updated = Array.from(new Set([...manualFonts, trimmed])).sort();
       setManualFonts(updated);
-      localStorage.setItem('agendamaster_manual_fonts', JSON.stringify(updated));
+      try {
+        localStorage.setItem('agendamaster_manual_fonts', JSON.stringify(updated));
+      } catch (e) {}
+
+      // Registra e carrega a fonte imediatamente
+      await ensureFontLoaded(trimmed);
+
+      if (selectedIds.length > 0) {
+        updateElementStyle(selectedIds[0], { fontFamily: trimmed });
+      }
+      setToastMessage(`Fonte "${trimmed}" adicionada e aplicada!`);
     }
   };
 
   // Identificar automaticamente as fontes instaladas no computador ao inicializar
   useEffect(() => {
+    // 1. Aplica fontes já armazenadas em cache imediatamente
+    const cached = getCachedInstalledFonts();
+    if (cached.length > 0) {
+      setLocalFonts(cached);
+      injectLocalFontFaceStyles(cached);
+    }
+
+    // 2. Executa detecção completa em segundo plano
     detectInstalledFonts().then((detected) => {
       if (detected && detected.length > 0) {
         setLocalFonts(detected);
+        injectLocalFontFaceStyles(detected);
       }
     }).catch((err: any) => {
       console.warn('Detecção automática de fontes locais:', err);
     });
+
+    // 3. Listener para re-renderização quando uma nova fonte é aplicada com sucesso
+    const onFontApplied = () => {
+      // Força atualização suave do canvas
+      setConfig(prev => ({ ...prev }));
+    };
+    window.addEventListener('font-applied', onFontApplied);
+    return () => {
+      window.removeEventListener('font-applied', onFontApplied);
+    };
   }, []);
 
   // Desativa automaticamente modo de simulação de preenchimento máximo (simulateMaxSpace) de todos os elementos
@@ -2296,7 +2518,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           config.year,
           config.startMonth ?? 0,
           config.durationMonths ?? 12,
-          user.plan
+          user.plan,
+          Boolean(config.isPermanent)
       );
 
       if (isYearRestricted) {
@@ -2696,11 +2919,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const availW = Math.max(160, container.clientWidth - 40);
     const availH = Math.max(160, container.clientHeight - 40);
     const baseW = 400;
-    const baseH = (PAGE_HEIGHT_MM / Math.max(1, PAGE_WIDTH_MM)) * 400;
+    let aspectRatio = PAGE_HEIGHT_MM / Math.max(1, PAGE_WIDTH_MM);
+    if (editMode === 'cover') {
+      const cov = config.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM);
+      const activeP = cov.pages.find(p => p.id === cov.activeCoverPageId) || cov.pages[0];
+      const isEnd = activeP?.type === 'endsheet_front' || activeP?.type === 'endsheet_back' || activeP?.id?.includes('endsheet') || activeP?.id?.includes('guard');
+      const effBleed = isEnd ? 0 : cov.bleedMm;
+      const isSpr = !isEnd && (activeP?.type === 'spread' || cov.spine.enabled);
+      const wMm = isSpr
+        ? (cov.cardboardSize.width * 2) + cov.spine.calculatedSpineWidthMm + (cov.spine.hingeGapMm * 2) + (effBleed * 2)
+        : cov.cardboardSize.width + (effBleed * 2);
+      const hMm = cov.cardboardSize.height + (effBleed * 2);
+      aspectRatio = hMm / Math.max(1, wMm);
+    }
+    const baseH = aspectRatio * 400;
     const fitZoom = Math.min(availW / baseW, availH / baseH);
     const clamped = Math.max(0.35, Math.min(1.5, Math.round(fitZoom * 20) / 20));
     setZoom(clamped);
-  }, [PAGE_HEIGHT_MM, PAGE_WIDTH_MM]);
+  }, [PAGE_HEIGHT_MM, PAGE_WIDTH_MM, editMode, config.cover]);
 
   const hasAutoFittedRef = useRef(false);
   useEffect(() => {
@@ -2730,6 +2966,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     
     if (isNotebookOrDevotional) {
         data = generateGenericPages(config.pageCount || 100);
+    } else if (config.isPermanent) {
+        const defaultPermCount = config.layoutType === '2_per_page' ? 366 : 365;
+        const splitIntoCycles = Boolean(config.includeMonthlyDividers || config.includeMonthlyIntroPages);
+        const daysPerCycle = config.layoutType === '2_per_page' ? 32 : 31;
+        data = generatePermanentAgendaDays(
+            config.pageCount || defaultPermCount,
+            splitIntoCycles,
+            daysPerCycle
+        );
     } else if (isWeekly) {
         data = generatePlannerDays(
             config.year,
@@ -2751,12 +2996,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     }
     
-    if (config.specialDates && config.specialDates.length > 0) {
+    if (!config.isPermanent && config.specialDates && config.specialDates.length > 0) {
         data = data.map(d => enrichDayDataWithSpecialDates(d, config.specialDates));
     }
     
     setGeneratedData(data);
-  }, [config.year, config.includeHolidays, config.municipalHolidays, config.specialDates, config.layoutType, config.projectType, config.pageCount, config.startMonth, config.durationMonths, config.weeklyStartMode, config.startOfWeekDay, config.showPaddingDaysNumbers]);
+  }, [config.year, config.isPermanent, config.includeHolidays, config.municipalHolidays, config.specialDates, config.layoutType, config.projectType, config.pageCount, config.startMonth, config.durationMonths, config.weeklyStartMode, config.startOfWeekDay, config.showPaddingDaysNumbers, config.includeMonthlyDividers, config.includeMonthlyIntroPages]);
 
   useEffect(() => {
     if (config.includeQuotes && quotes.length === 0) {
@@ -2858,6 +3103,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               return [];
           }
           return config.monthlyDividerStyle?.elements || [];
+      }
+      if (editMode === 'cover') {
+          const cover = config.cover || createDefaultCoverConfig();
+          const activePage = cover.pages.find(p => p.id === cover.activeCoverPageId) || cover.pages[0];
+          return activePage ? activePage.elements : [];
       }
       return [];
   };
@@ -3123,6 +3373,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   elements: getNew(prev.monthlyDividerStyle?.elements || [])
               }
           }));
+      } else if (editMode === 'cover') {
+          setter(prev => {
+              const cover = prev.cover || createDefaultCoverConfig();
+              const activePageId = cover.activeCoverPageId || 'cover_front';
+              const updatedPages = cover.pages.map(page => {
+                  if (page.id === activePageId) {
+                      return { ...page, elements: getNew(page.elements || []) };
+                  }
+                  return page;
+              });
+              return {
+                  ...prev,
+                  cover: {
+                      ...cover,
+                      pages: updatedPages
+                  }
+              };
+          });
       }
   };
 
@@ -3290,8 +3558,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                           const padHPx = Math.max(2, Math.round(4 * scaleFactor));
                           const localRectW = (rect.width / editorRect.width) * containerWPx;
                           const localRectH = (rect.height / editorRect.height) * containerHPx;
-                          naturalWPx = localRectW + padWPx;
-                          naturalHPx = localRectH + padHPx;
+                          const strokeDomExtraPx = (Number(effectiveStyle?.textStrokeWidth || 0) * 2) * scaleFactor;
+                          naturalWPx = localRectW + padWPx + strokeDomExtraPx;
+                          naturalHPx = localRectH + padHPx + strokeDomExtraPx;
                       }
                   }
               } catch (e) {
@@ -3391,13 +3660,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   if (colRows > maxColRows) maxColRows = colRows;
               }
 
+              const strokeExtraPx = (Number(effectiveStyle?.textStrokeWidth || 0) * 2) * scaleFactor;
               const totalTextHeight = maxColRows * (editorFontSizePx * lineHeightMult + 2 * scaleFactor);
-              naturalHPx = totalTextHeight + padH;
-              naturalWPx = Math.min(containerWPx * 0.94, Math.max(currentWPx, (cols * Math.min(maxLineWidth, availColW)) + (cols - 1) * scaledColGap + padW));
+              naturalHPx = totalTextHeight + padH + strokeExtraPx;
+              naturalWPx = Math.min(containerWPx * 0.94, Math.max(currentWPx, (cols * Math.min(maxLineWidth, availColW)) + (cols - 1) * scaledColGap + padW + strokeExtraPx));
           } else {
+              const strokeExtraPx = (Number(effectiveStyle?.textStrokeWidth || 0) * 2) * scaleFactor;
               const totalTextHeight = lines.length > 1 ? (lines.length * editorFontSizePx * lineHeightMult) : singleLineGlyphH;
-              naturalWPx = maxLineWidth + padW;
-              naturalHPx = totalTextHeight + padH;
+              naturalWPx = maxLineWidth + padW + strokeExtraPx;
+              naturalHPx = totalTextHeight + padH + strokeExtraPx;
           }
       }
     } else if (el.type === 'full_calendar') {
@@ -3796,9 +4067,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const isTargetWeekly = (resolved.layoutType || config.layoutType)?.startsWith('weekly');
 
       if (mioloOnly) {
+          const isResolvedPermanent = Boolean(resolved.isPermanent);
           setConfig(prev => ({
               ...prev,
               projectType: isBlank ? prev.projectType : (resolved.projectType || prev.projectType),
+              isPermanent: isBlank ? prev.isPermanent : isResolvedPermanent,
+              pageCount: isBlank
+                  ? prev.pageCount
+                  : (isResolvedPermanent ? (resolved.pageCount || 365) : undefined),
+              includeHolidays: isBlank
+                  ? prev.includeHolidays
+                  : (isResolvedPermanent ? false : true),
+              ...(isResolvedPermanent
+                  ? {
+                        includeMonthlyDividers: false,
+                        includeMonthlyIntroPages: false,
+                        startMonthOnRightPage: false,
+                    }
+                  : {}),
               layoutType: isBlank ? prev.layoutType : (resolved.layoutType || prev.layoutType),
               elements: isBlank ? [] : (resolved.elements !== undefined ? resolved.elements : prev.elements),
               elementsVerso: isBlank ? [] : (resolved.elementsVerso !== undefined ? resolved.elementsVerso : prev.elementsVerso),
@@ -3813,7 +4099,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           setEditorViewMode('standard');
           setSelectedIds([]);
           setTemplateModal(false);
-          setToastMessage(isBlank ? 'Miolo em Branco (100% limpo) aplicado com sucesso!' : `Miolo "${item.name}" aplicado mantendo suas Páginas Iniciais e Divisórias!`);
+          setToastMessage(isBlank ? 'Miolo em Branco (100% limpo) aplicado com sucesso!' : `Miolo "${item.name}" aplicado com sucesso!`);
           return;
       }
 
@@ -3821,6 +4107,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           setConfig(prev => ({
               ...prev,
               projectType: resolved.projectType || prev.projectType,
+              isPermanent: false,
+              pageCount: undefined,
               layoutType: resolved.layoutType || prev.layoutType,
               elements: [],
               elementsSaturday: [],
@@ -3918,6 +4206,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           setConfig(prev => ({
               ...prev,
               ...(template.layoutType ? { layoutType: template.layoutType } : {}),
+              ...(template.isPermanent !== undefined
+                  ? {
+                        isPermanent: Boolean(template.isPermanent),
+                        includeHolidays: template.isPermanent ? false : prev.includeHolidays,
+                        pageCount: template.isPermanent ? (prev.pageCount || 365) : undefined,
+                    }
+                  : {}),
               elements: (template.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
               elementsVerso: template.elementsVerso ? template.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsVerso,
               elementsWeeklyLeft: template.elementsWeeklyLeft ? template.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyLeft,
@@ -4000,6 +4295,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           templateType: 'miolo',
           layoutType: config.layoutType,
           projectType: config.projectType,
+          isPermanent: config.isPermanent,
           elements: activeElements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
           elementsVerso: config.elementsVerso ? config.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
           elementsWeeklyLeft: config.elementsWeeklyLeft ? config.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
@@ -4329,6 +4625,54 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           setActiveTab('editor');
           setToastMessage(`Layout do Miolo (Frente / Página Direita) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
         }
+        break;
+      }
+
+      case 'cover_front':
+      case 'cover_back':
+      case 'endsheet_front':
+      case 'endsheet_back': {
+        const coverTargetId = destination === 'cover_front' ? 'cover_front'
+          : destination === 'cover_back' ? 'cover_back'
+          : destination === 'endsheet_front' ? 'endsheet_front'
+          : 'endsheet_back';
+
+        const destinationNames: Record<string, string> = {
+          cover_front: 'Capa Frente',
+          cover_back: 'Contracapa (Verso)',
+          endsheet_front: 'Guarda Dianteira',
+          endsheet_back: 'Guarda Traseira'
+        };
+
+        setConfig(prev => {
+          const currentCover = prev.cover || createDefaultCoverConfig();
+          const updatedPages = currentCover.pages.map(p => {
+            if (p.id === coverTargetId) {
+              return {
+                ...p,
+                elements: metadata.applyBackground && !processedElements.length ? p.elements : (processedElements.length > 0 ? processedElements : p.elements),
+                background: newBgConfig || (metadata.clearBackground ? undefined : p.background)
+              };
+            }
+            return p;
+          });
+
+          return {
+            ...prev,
+            cover: {
+              ...currentCover,
+              pages: updatedPages,
+              activeCoverPageId: coverTargetId
+            }
+          };
+        });
+
+        setEditMode('cover');
+        setActiveTab('editor');
+        if (processedElements.length > 0) {
+          setSelectedIds(processedElements.map(e => e.id));
+        }
+        setToastMessage(`Página do PDF importada com sucesso como ${destinationNames[destination] || 'Capa'} no Studio de Capas!`);
         break;
       }
 
@@ -4764,6 +5108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           let mioloFrontBg: BackgroundConfig | undefined = undefined;
           let mioloVersoElements: LayoutElement[] | undefined = undefined;
           let mioloVersoBg: BackgroundConfig | undefined = undefined;
+          const coverUpdates: Record<string, { elements: LayoutElement[]; bgUrl?: string }> = {};
 
           for (let i = 0; i < metadata.batchPages.length; i++) {
             const bp = metadata.batchPages[i];
@@ -4855,6 +5200,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   showOnDailyPages: true
                 };
               }
+            } else if (bp.destination === 'cover_front' || bp.destination === 'cover_back' || bp.destination === 'endsheet_front' || bp.destination === 'endsheet_back') {
+              coverUpdates[bp.destination] = {
+                elements: processedBpElements,
+                bgUrl: bpBgUrl
+              };
             }
           }
 
@@ -4880,9 +5230,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               versoBackground: divVersoBg || prev.monthlyDividerStyle?.versoBackground
             } : prev.monthlyDividerStyle;
 
+            let updatedCover = prev.cover || createDefaultCoverConfig();
+            if (Object.keys(coverUpdates).length > 0) {
+              const newPages = updatedCover.pages.map(p => {
+                const update = coverUpdates[p.id];
+                if (update) {
+                  return {
+                    ...p,
+                    elements: update.elements && update.elements.length > 0 ? update.elements : p.elements,
+                    background: update.bgUrl ? {
+                      id: `bg-cover-${p.id}-${Date.now()}`,
+                      name: `Fundo ${p.name}`,
+                      type: 'image' as const,
+                      image: { url: update.bgUrl, opacity: 1, fit: 'fill' as const },
+                      opacity: 1
+                    } : p.background
+                  };
+                }
+                return p;
+              });
+              updatedCover = { ...updatedCover, pages: newPages };
+            }
+
             return {
               ...prev,
               ...dimensionUpdates,
+              cover: updatedCover,
               introPages: newIntroPages.length > 0 ? newIntroPages : prev.introPages,
               monthlyIntroPages: newMonthlyIntroPages.length > 0 ? newMonthlyIntroPages : prev.monthlyIntroPages,
               includeMonthlyDividers: (divFrontElements || divVersoElements) ? true : prev.includeMonthlyDividers,
@@ -5507,6 +5880,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     if (nextIdx === 1) newElement.y = 55;
                 }
             }
+        } else {
+            // Layout de Agenda Diária / Multi-dias (suporta 1, 2, 3 ou mais dias na mesma página)
+            const existingNumberIndices = activeList
+                .filter(el => el.type === 'day_number' || (el.type === 'date_placeholder' && (el.style.variant === 'day_number' || !el.style.variant)))
+                .map(el => el.style.dayIndex ?? 0);
+            const existingNameIndices = activeList
+                .filter(el => el.type === 'day_name' || (el.type === 'date_placeholder' && el.style.variant === 'day_name'))
+                .map(el => el.style.dayIndex ?? 0);
+
+            if (isDayNumber) {
+                let nextIdx = 0;
+                while (existingNumberIndices.includes(nextIdx)) {
+                    nextIdx++;
+                }
+                newElement.style.dayIndex = nextIdx;
+                if (nextIdx > 0) {
+                    newElement.y = Math.min(85, 10 + (nextIdx * 28));
+                }
+            } else if (isDayName) {
+                const unpaired = existingNumberIndices.find(idx => !existingNameIndices.includes(idx));
+                const nextIdx = unpaired !== undefined ? unpaired : (existingNameIndices.length > 0 ? Math.max(...existingNameIndices) + 1 : 0);
+                newElement.style.dayIndex = nextIdx;
+                if (nextIdx > 0) {
+                    newElement.y = Math.min(85, 10 + (nextIdx * 28));
+                }
+            } else if (isDayBox) {
+                const existingBoxIndices = activeList
+                    .filter(el => el.type === 'planner_day_box')
+                    .map(el => el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex ?? 0);
+                let nextIdx = 0;
+                while (existingBoxIndices.includes(nextIdx)) {
+                    nextIdx++;
+                }
+                newElement.style.dayIndex = nextIdx;
+                newElement.style.plannerDayBox = {
+                    contentStyle: 'lines',
+                    ...(newElement.style.plannerDayBox || {}),
+                    dayIndex: nextIdx
+                };
+                if (nextIdx > 0) {
+                    newElement.y = Math.min(80, 10 + (nextIdx * 30));
+                }
+            }
         }
     }
 
@@ -6061,6 +6477,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     dayIndex: nextDay
                 };
             }
+        } else if (isDateElem) {
+            // Em agendas não-semanais, duplicação avança a sequência numérica para o próximo dia (ex: 2º dia, 3º dia, etc.)
+            const sameTypeElems = activeList.filter(el => 
+                (element.type === 'day_number' && (el.type === 'day_number' || (el.type === 'date_placeholder' && (!el.style.variant || el.style.variant === 'day_number')))) ||
+                (element.type === 'day_name' && (el.type === 'day_name' || (el.type === 'date_placeholder' && el.style.variant === 'day_name'))) ||
+                (element.type === 'planner_day_box' && el.type === 'planner_day_box') ||
+                el.type === element.type
+            );
+            const usedIndices = sameTypeElems.map(el => el.type === 'planner_day_box' ? (el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex ?? 0) : (el.style.dayIndex ?? 0));
+            const currentIdx = element.type === 'planner_day_box' ? (element.style.plannerDayBox?.dayIndex ?? element.style.dayIndex ?? 0) : (element.style.dayIndex ?? 0);
+            let nextDay = currentIdx + 1;
+            while (usedIndices.includes(nextDay)) {
+                nextDay++;
+            }
+            cloned.style.dayIndex = nextDay;
+            if (cloned.type === 'planner_day_box') {
+                cloned.style.plannerDayBox = {
+                    contentStyle: cloned.style.plannerDayBox?.contentStyle || 'lines',
+                    ...(cloned.style.plannerDayBox || {}),
+                    dayIndex: nextDay
+                };
+            }
+            if (element.y + 25 <= 88) {
+                cloned.y = element.y + 25;
+            }
         }
 
         newElements.push({
@@ -6263,6 +6704,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const updateElementStyle = (id: string, styleUpdate: any, silent = false) => {
+    if (styleUpdate) {
+      const fontToEnsure = styleUpdate.fontFamily || 
+        styleUpdate.plannerDayBox?.headerFontFamily || 
+        styleUpdate.fullCalendar?.title?.fontFamily || 
+        styleUpdate.fullCalendar?.weekDays?.fontFamily || 
+        styleUpdate.fullCalendar?.days?.fontFamily || 
+        styleUpdate.table?.textStyle?.fontFamily;
+      if (fontToEnsure) {
+        ensureFontLoaded(fontToEnsure);
+      }
+    }
     const currentPageHeight = getCurrentPageHeight();
     updateActiveElements(prevList => prevList.map(e => {
         if (e.id !== id) return e;
@@ -7159,9 +7611,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     startMarqueeSelectionRef.current = startMarqueeSelection;
   }, [startMarqueeSelection]);
 
-  const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right', introPageId?: string) => {
+  const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'cover', introPageId?: string) => {
     window.focus();
-    if (templateType === 'intro' && introPageId) {
+    if (templateType === 'cover') {
+        setEditMode('cover');
+        if (introPageId && config.cover) {
+            setConfig(prev => ({
+                ...prev,
+                cover: {
+                    ...(prev.cover || createDefaultCoverConfig()),
+                    activeCoverPageId: introPageId
+                }
+            }));
+        }
+    } else if (templateType === 'intro' && introPageId) {
         if (introPageId === 'divider' || introPageId === 'divider_verso') {
             setEditMode('divider');
             setDividerViewMode(introPageId === 'divider_verso' ? 'verso' : 'front');
@@ -7237,7 +7700,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         el.type === 'quote' ? 14 :
                         (el.type === 'verse' || el.type === 'holiday') ? 11 : 16
                     ),
+                    textStrokeWidth: el.style.textStrokeWidth || 0,
                     tableFontSize: el.style.table?.textStyle?.fontSize || 10,
+                    tableTextStrokeWidth: el.style.table?.textStyle?.textStrokeWidth || 0,
                     calendarFontSizes: el.style.fullCalendar ? {
                         title: el.style.fullCalendar.title?.fontSize || (el.type === 'mini_calendar' ? 8.5 : 12),
                         weekDays: el.style.fullCalendar.weekDays?.fontSize || (el.type === 'mini_calendar' ? 6.5 : 8),
@@ -7337,7 +7802,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     (el.type === 'verse' || el.type === 'holiday') ? 11 : 
                     (el.type === 'date_placeholder' ? 24 : 16)
                 ),
+                textStrokeWidth: el.style.textStrokeWidth || 0,
                 tableFontSize: el.style.table?.textStyle?.fontSize || 10,
+                tableTextStrokeWidth: el.style.table?.textStyle?.textStrokeWidth || 0,
                 calendarFontSizes: (el.type === 'mini_calendar' || el.type === 'full_calendar') ? {
                     title: el.style.fullCalendar?.title?.fontSize ?? defaultTitle,
                     weekDays: el.style.fullCalendar?.weekDays?.fontSize ?? defaultWeek,
@@ -7580,14 +8047,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 if (textTypes.includes(element.type) && initial.fontSize) {
                     const newFontSize = Math.max(4, Math.round(initial.fontSize * fontScale));
-                    newElementConfig.style = { ...newElementConfig.style, fontSize: newFontSize };
+                    const nextStroke = initial.textStrokeWidth > 0
+                        ? Math.max(0.1, Math.round(initial.textStrokeWidth * fontScale * 10) / 10)
+                        : newElementConfig.style.textStrokeWidth;
+                    newElementConfig.style = { ...newElementConfig.style, fontSize: newFontSize, ...(initial.textStrokeWidth > 0 ? { textStrokeWidth: nextStroke } : {}) };
                 } else if (element.type === 'table' && initial.tableFontSize) {
                     const newFontSize = Math.max(4, Math.round(initial.tableFontSize * fontScale));
+                    const nextStroke = initial.tableTextStrokeWidth > 0
+                        ? Math.max(0.1, Math.round(initial.tableTextStrokeWidth * fontScale * 10) / 10)
+                        : newElementConfig.style.table?.textStyle?.textStrokeWidth;
                     newElementConfig.style = { 
                         ...newElementConfig.style, 
                         table: { 
                             ...newElementConfig.style.table, 
-                            textStyle: { ...newElementConfig.style.table?.textStyle, fontSize: newFontSize } 
+                            textStyle: {
+                                ...newElementConfig.style.table?.textStyle,
+                                fontSize: newFontSize,
+                                ...(initial.tableTextStrokeWidth > 0 ? { textStrokeWidth: nextStroke } : {})
+                            } 
                         } 
                     };
                 } else if ((element.type === 'full_calendar' || element.type === 'mini_calendar') && initial.calendarFontSizes) {
@@ -7776,15 +8253,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             if (textTypes.includes(element.type) && isCorner && initial.fontSize) {
                 const newFontSize = Math.max(4, Math.round(initial.fontSize * scale));
-                newElementConfig.style = { ...newElementConfig.style, fontSize: newFontSize };
+                const nextStroke = initial.textStrokeWidth > 0
+                    ? Math.max(0.1, Math.round(initial.textStrokeWidth * scale * 10) / 10)
+                    : newElementConfig.style.textStrokeWidth;
+                newElementConfig.style = { ...newElementConfig.style, fontSize: newFontSize, ...(initial.textStrokeWidth > 0 ? { textStrokeWidth: nextStroke } : {}) };
             } else if (element.type === 'table' && isCorner && initial.tableFontSize) {
                 const tableScale = finalW / (initial.w || 1);
                 const newFontSize = Math.max(4, Math.round(initial.tableFontSize * tableScale));
+                const nextStroke = initial.tableTextStrokeWidth > 0
+                    ? Math.max(0.1, Math.round(initial.tableTextStrokeWidth * tableScale * 10) / 10)
+                    : newElementConfig.style.table?.textStyle?.textStrokeWidth;
                 newElementConfig.style = { 
                     ...newElementConfig.style, 
                     table: { 
                         ...newElementConfig.style.table, 
-                        textStyle: { ...newElementConfig.style.table?.textStyle, fontSize: newFontSize } 
+                        textStyle: {
+                            ...newElementConfig.style.table?.textStyle,
+                            fontSize: newFontSize,
+                            ...(initial.tableTextStrokeWidth > 0 ? { textStrokeWidth: nextStroke } : {})
+                        } 
                     } 
                 };
             } else if ((element.type === 'full_calendar' || element.type === 'mini_calendar') && initial.calendarFontSizes) {
@@ -8269,6 +8756,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [setConfig, updateActiveElements]);
 
   const getProjectFirstDay = useCallback((offset: number = 0): DayData => {
+    if (config.isPermanent) {
+      return {
+        dayOfMonth: 0,
+        month: 0,
+        year: 0,
+        dayOfWeek: offset % 7,
+        holiday: undefined,
+        moonPhase: undefined,
+        date: new Date(2025, 0, 1 + offset)
+      };
+    }
     const year = config.year || new Date().getFullYear();
     const month = config.startMonth ?? 0;
     const date = new Date(year, month, 1 + offset);
@@ -8284,7 +8782,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     return config.specialDates && config.specialDates.length > 0
       ? enrichDayDataWithSpecialDates(baseDay, config.specialDates)
       : baseDay;
-  }, [config.year, config.startMonth, config.municipalHolidays, config.specialDates]);
+  }, [config.isPermanent, config.year, config.startMonth, config.municipalHolidays, config.specialDates]);
 
   const renderTemplate = (
     elements: LayoutElement[], 
@@ -8294,7 +8792,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     pageNumber?: number, 
     pageWidth: number = 800, 
     pageHeight: number = 600,
-    templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right',
+    templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'cover',
     introPageId?: string,
     weekDays?: DayData[]
   ) => {
@@ -8626,6 +9124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             pageWidth={pageWidth}
                             pageHeight={pageHeight}
                             calendarIndex={miniCalendarIndexMap.get(el.id)}
+                            isWeekly={config.layoutType.startsWith('weekly')}
                         />
                     ) : (
                         <span style={{ pointerEvents: isSelected ? 'auto' : 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'inherit', alignItems: 'inherit', justifyContent: 'inherit' }}>
@@ -8647,6 +9146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 pageWidth={pageWidth}
                                 pageHeight={pageHeight}
                                 calendarIndex={miniCalendarIndexMap.get(el.id)}
+                                isWeekly={config.layoutType.startsWith('weekly')}
                             />
                         </span>
                     )}
@@ -8839,22 +9339,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return mapping;
     }
 
-    // Verificar se algum elemento tem dayIndex explícito diferente de 0
+    // Verificar se os números de dias têm índices explícitos variados e distintos (sem conflito/duplicidade)
+    const dayNumbers = dateElements.filter(el =>
+        el.type === 'day_number' || (el.type === 'date_placeholder' && (!el.style.variant || el.style.variant === 'day_number')) || el.type === 'planner_day_box'
+    );
+    const dayNumberIndices = dayNumbers.map(el => el.type === 'planner_day_box' ? (el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex ?? 0) : (el.style.dayIndex ?? 0));
+    const hasDuplicateDayNumbers = dayNumbers.length > 1 && new Set(dayNumberIndices).size < dayNumbers.length;
     const hasExplicitIndices = dateElements.some(el => el.style.dayIndex !== undefined && el.style.dayIndex !== 0);
-    if (hasExplicitIndices) {
+
+    // Se todos os números de dia já têm índices explícitos válidos e distintos entre si:
+    if (hasExplicitIndices && !hasDuplicateDayNumbers) {
         const mapping: Record<string, number> = {};
-        elements.forEach(el => mapping[el.id] = el.style.dayIndex ?? 0);
+        elements.forEach(el => mapping[el.id] = el.type === 'planner_day_box' ? (el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex ?? 0) : (el.style.dayIndex ?? 0));
         return mapping;
     }
 
-    // Lógica de auto-sequenciamento para layouts diários / 2 por página:
+    // Auto-sequenciamento inteligente para múltiplos dias na mesma página (ex: 2, 3 ou mais dias):
     // Ordenar pela posição visual: Topo para Baixo, depois Esquerda para Direita
     const sorted = [...dateElements].sort((a, b) => {
-        if (Math.abs(a.y - b.y) < 2) return a.x - b.x;
+        if (Math.abs(a.y - b.y) < 3) return a.x - b.x;
         return a.y - b.y;
     });
 
+    const sortedDayNumbers = sorted.filter(el =>
+        el.type === 'day_number' || (el.type === 'date_placeholder' && (!el.style.variant || el.style.variant === 'day_number')) || el.type === 'planner_day_box'
+    );
+
     const mapping: Record<string, number> = {};
+
+    // Se houver múltiplos números de dia (ex: 3 elementos número do dia), atribuir sequencialmente 0, 1, 2...
+    if (sortedDayNumbers.length > 1) {
+        sortedDayNumbers.forEach((dEl, idx) => {
+            mapping[dEl.id] = idx;
+        });
+
+        // Para os outros elementos de data (como dia da semana ou mês), parear com o número de dia mais próximo verticalmente
+        sorted.forEach(el => {
+            if (mapping[el.id] !== undefined) return;
+            let closestIdx = 0;
+            let minDistance = Infinity;
+            sortedDayNumbers.forEach((dEl, idx) => {
+                const dist = Math.abs(el.y - dEl.y);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestIdx = idx;
+                }
+            });
+            mapping[el.id] = closestIdx;
+        });
+
+        return mapping;
+    }
+
+    // Fallback padrão se não houver múltiplos day_numbers distintos:
     let currentIdx = 0;
     const seenTypes = new Set<string>();
 
@@ -9009,6 +9546,67 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     }
 
+    if (editMode === 'cover') {
+        const cover = config.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM);
+        const activeCoverPage = cover.pages.find(p => p.id === cover.activeCoverPageId) || cover.pages[0];
+        const isEndsheet = activeCoverPage.type === 'endsheet_front' || activeCoverPage.type === 'endsheet_back' || (activeCoverPage as any).type === 'guard' || activeCoverPage.id?.includes('guard') || activeCoverPage.id?.includes('endsheet');
+        const effectiveBleed = isEndsheet ? 0 : cover.bleedMm;
+        const isSpread = !isEndsheet && (activeCoverPage.type === 'spread' || cover.spine.enabled);
+        const totalW_MM = isSpread
+            ? (cover.cardboardSize.width * 2) + cover.spine.calculatedSpineWidthMm + (cover.spine.hingeGapMm * 2) + (effectiveBleed * 2)
+            : cover.cardboardSize.width + (effectiveBleed * 2);
+        const totalH_MM = cover.cardboardSize.height + (effectiveBleed * 2);
+
+        const coverCanvasWPx = EDITOR_WIDTH_PX;
+        const coverCanvasHPx = Math.round(EDITOR_WIDTH_PX * (totalH_MM / totalW_MM));
+
+        const coverContainerStyle: React.CSSProperties = {
+            width: `${coverCanvasWPx}px`,
+            height: `${coverCanvasHPx}px`,
+            backgroundColor: activeCoverPage.background?.color || '#ffffff',
+            position: 'relative',
+            overflow: 'hidden'
+        };
+
+        return (
+            <RulerWrapper
+                widthPx={coverCanvasWPx}
+                heightPx={coverCanvasHPx}
+                widthMm={totalW_MM}
+                heightMm={totalH_MM}
+                scale={coverCanvasWPx / totalW_MM}
+                enabled={showRulers && printStatus === 'idle' && activeTab === 'editor'}
+                guides={guides}
+                setGuides={setGuides}
+                responsiveScale={responsiveScale}
+                isDragging={isDragging || !!resizeDir}
+            >
+                <div id="cover-canvas-target" className={containerClass} style={coverContainerStyle}>
+                    {renderBackgroundsForPage('intro', 1, activeCoverPage.background)}
+                    <div className="w-full h-full relative z-10">
+                        {renderTemplate(
+                            activeCoverPage.elements, 
+                            null, 
+                            true, 
+                            true, 
+                            undefined, 
+                            coverCanvasWPx, 
+                            coverCanvasHPx, 
+                            'cover', 
+                            activeCoverPage.id
+                        )}
+                    </div>
+                    <CoverCanvasOverlay
+                        coverConfig={cover}
+                        activePage={activeCoverPage}
+                        canvasWidthPx={coverCanvasWPx}
+                        canvasHeightPx={coverCanvasHPx}
+                    />
+                </div>
+            </RulerWrapper>
+        );
+    }
+
     const activeElements = getActiveElements();
     const shouldMirrorInEditor = isEditorEven && !config.customVerso;
     const elementsToRenderInEditor = shouldMirrorInEditor ? getMirroredElements(activeElements) : activeElements;
@@ -9130,29 +9728,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
         const startYear = config.year;
         const startMonth = config.startMonth ?? 0;
-        const firstProjectDate = new Date(startYear, startMonth, 1);
         const startOfWeek = config.startOfWeekDay ?? 1;
-        const isStrictFirstDay = config.weeklyStartMode === 'strict_first_day';
-        const showPaddingNumbers = config.showPaddingDaysNumbers !== false;
 
-        const diff = (firstProjectDate.getDay() - startOfWeek + 7) % 7;
-        const weekStartDate = new Date(firstProjectDate);
-        weekStartDate.setDate(firstProjectDate.getDate() - diff);
+        // No editor (design de layout), usamos uma semana de amostra 100% preenchida no meio do mês
+        // para que todos os dias da semana (Segunda a Domingo) tenham números reais (ex: 12 a 18) e nunca fiquem em branco
+        const midMonthRef = new Date(startYear, startMonth, 12);
+        const midDiff = (midMonthRef.getDay() - startOfWeek + 7) % 7;
+        const sampleWeekStart = new Date(startYear, startMonth, 12 - midDiff);
 
         const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(weekStartDate);
-            d.setDate(weekStartDate.getDate() + i);
-            const isPrevOrNextMonth = d.getMonth() !== startMonth || d.getFullYear() !== startYear;
-            const shouldHideNumber = isStrictFirstDay ? isPrevOrNextMonth : (isPrevOrNextMonth && !showPaddingNumbers);
+            const d = new Date(sampleWeekStart);
+            d.setDate(sampleWeekStart.getDate() + i);
             return {
-                dayOfMonth: shouldHideNumber ? 0 : d.getDate(),
+                dayOfMonth: d.getDate(),
                 month: startMonth,
                 year: startYear,
                 dayOfWeek: d.getDay(),
-                holiday: shouldHideNumber ? undefined : checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
-                moonPhase: shouldHideNumber ? undefined : 'Lua nova',
+                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
+                moonPhase: 'Lua nova',
                 date: d,
-                isPaddingDay: isPrevOrNextMonth
+                isPaddingDay: false
             };
         });
 
@@ -9169,10 +9764,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
         const startYear = config.year;
         const startMonth = config.startMonth ?? 0;
-        const firstProjectDate = new Date(startYear, startMonth, 1);
         const startOfWeek = config.startOfWeekDay ?? 1;
-        const isStrictFirstDay = config.weeklyStartMode === 'strict_first_day';
-        const showPaddingNumbers = config.showPaddingDaysNumbers !== false;
 
         const isVersoSpread = config.customVerso && (
             editorViewMode === 'weekly_verso_left' || 
@@ -9180,30 +9772,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             editorViewMode === 'verso'
         );
 
-        const diff = (firstProjectDate.getDay() - startOfWeek + 7) % 7;
-        let weekStartDate = new Date(firstProjectDate);
-        weekStartDate.setDate(firstProjectDate.getDate() - diff);
+        // No editor (design de layout), usamos uma semana de amostra 100% preenchida no meio do mês
+        // para que todos os dias da semana (Segunda a Domingo) tenham números reais (ex: 12 a 18) e nunca fiquem em branco
+        const midMonthRef = new Date(startYear, startMonth, 12);
+        const midDiff = (midMonthRef.getDay() - startOfWeek + 7) % 7;
+        let sampleWeekStart = new Date(startYear, startMonth, 12 - midDiff);
 
         // Se estiver visualizando o Verso da semana e avança sequência:
         if (isVersoSpread && config.versoAdvancesSequence !== false) {
-            weekStartDate = new Date(weekStartDate);
-            weekStartDate.setDate(weekStartDate.getDate() + 7);
+            sampleWeekStart = new Date(sampleWeekStart);
+            sampleWeekStart.setDate(sampleWeekStart.getDate() + 7);
         }
 
         const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(weekStartDate);
-            d.setDate(weekStartDate.getDate() + i);
-            const isPrevOrNextMonth = d.getMonth() !== startMonth || d.getFullYear() !== startYear;
-            const shouldHideNumber = isStrictFirstDay ? isPrevOrNextMonth : (isPrevOrNextMonth && !showPaddingNumbers);
+            const d = new Date(sampleWeekStart);
+            d.setDate(sampleWeekStart.getDate() + i);
             return {
-                dayOfMonth: shouldHideNumber ? 0 : d.getDate(),
+                dayOfMonth: d.getDate(),
                 month: startMonth,
                 year: startYear,
                 dayOfWeek: d.getDay(),
-                holiday: shouldHideNumber ? undefined : checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
-                moonPhase: shouldHideNumber ? undefined : 'Lua nova',
+                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
+                moonPhase: 'Lua nova',
                 date: d,
-                isPaddingDay: isPrevOrNextMonth
+                isPaddingDay: false
             };
         });
 
@@ -9402,6 +9994,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     }
     return null;
+  };
+
+  const renderCoverPageForMockup = (pageTypeOrId: string) => {
+    const cover = config.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM);
+    const targetPage =
+      cover.pages.find(p => p.id === pageTypeOrId || p.type === pageTypeOrId) ||
+      cover.pages[0];
+    if (!targetPage) return null;
+
+    const isEndsheet =
+      targetPage.type === 'endsheet_front' ||
+      targetPage.type === 'endsheet_back' ||
+      (targetPage as any).type === 'guard' ||
+      targetPage.id?.includes('guard') ||
+      targetPage.id?.includes('endsheet');
+    const effectiveBleed = isEndsheet ? 0 : cover.bleedMm;
+    const isSpread = !isEndsheet && (targetPage.type === 'spread' || cover.spine.enabled);
+    const totalW_MM = isSpread
+      ? (cover.cardboardSize.width * 2) + cover.spine.calculatedSpineWidthMm + (cover.spine.hingeGapMm * 2) + (effectiveBleed * 2)
+      : cover.cardboardSize.width + (effectiveBleed * 2);
+    const totalH_MM = cover.cardboardSize.height + (effectiveBleed * 2);
+
+    const internalW = 400;
+    const internalH = 400 * (totalH_MM / Math.max(1, totalW_MM));
+    const backgroundColor = targetPage.background?.color || '#ffffff';
+
+    const node = (
+      <div
+        style={{
+          width: `${internalW}px`,
+          height: `${internalH}px`,
+          backgroundColor,
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+      >
+        {renderBackgroundsForPage('intro', 1, targetPage.background)}
+        <div className="w-full h-full relative z-10">
+          {renderTemplate(
+            targetPage.elements || [],
+            null,
+            false,
+            false,
+            undefined,
+            internalW,
+            internalH,
+            'cover',
+            targetPage.id
+          )}
+        </div>
+      </div>
+    );
+
+    return {
+      node,
+      widthPx: internalW,
+      heightPx: internalH,
+      totalWidthMm: totalW_MM,
+      totalHeightMm: totalH_MM,
+      effectiveBleedMm: effectiveBleed,
+      isSpread,
+      backgroundColor,
+      hasElements: Boolean((targetPage.elements && targetPage.elements.length > 0) || targetPage.background?.image?.url || (targetPage.background?.color && targetPage.background.color !== '#ffffff'))
+    };
   };
 
   const renderPrintLayout = (limitStart?: number, limitEnd?: number, maxRenderCount?: number, countOnly?: boolean, hidePageNumbers?: boolean) => {
@@ -10282,7 +10938,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const renderBorderControls = (style: LayoutElement['style'], onChange: (update: Partial<LayoutElement['style']>) => void) => (
       <div className="space-y-3 pt-3 border-t border-gray-100">
-          <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Borda e Contorno</h4>
+          <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Borda do Quadro (Caixa)</h4>
           <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                   <label className="text-[10px] font-bold text-gray-500">Espessura</label>
@@ -10407,23 +11063,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
              <div className="relative">
                <select 
                  value={values.fontFamily || 'Inter'} 
-                 onChange={(e) => onChange({ fontFamily: e.target.value })} 
+                 onChange={async (e) => {
+                   const newFont = e.target.value;
+                   onChange({ fontFamily: newFont });
+                   await ensureFontLoaded(newFont);
+                 }} 
                  className="w-full text-xs p-1.5 border border-gray-200 rounded appearance-none bg-white font-sans text-gray-800"
                >
                  <optgroup label="Padrão">
                    {AVAILABLE_FONTS.map(font => (
-                     <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                     <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
                    ))}
                  </optgroup>
                  <optgroup label={`Fontes do Computador (${allSystemFonts.length})`}>
                    {allSystemFonts.map(font => (
-                     <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                     <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
                    ))}
                  </optgroup>
                  {customFonts.length > 0 && (
                    <optgroup label="Minhas Fontes">
                      {customFonts.map(font => (
-                       <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                       <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
                      ))}
                    </optgroup>
                  )}
@@ -10474,6 +11134,162 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
              </div>
            </div>
            <div className="flex-1"><label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Cor Fundo</label><div className="flex h-[30px] border border-gray-200 rounded overflow-hidden"><input type="color" value={(values.backgroundColor && values.backgroundColor.startsWith('#')) ? values.backgroundColor : '#ffffff'} onChange={(e) => onChange({ backgroundColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" /><div className="flex-1 flex items-center px-1"><button onClick={() => onChange({ backgroundColor: 'transparent' })} className="text-[10px] text-gray-500 hover:text-red-500 bg-transparent">Sem Fundo</button></div></div></div>
+           <div className="p-2.5 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-2">
+             <div className="flex items-center justify-between">
+               <label className="text-[10px] font-bold text-indigo-900 uppercase tracking-tight">
+                 Contorno das Letras (Fonte)
+               </label>
+               {(values.textStrokeWidth || 0) > 0 && (
+                 <button
+                   type="button"
+                   onClick={() => onChange({ textStrokeWidth: 0, textFillTransparent: false, textStrokeJoin: 'miter' })}
+                   className="text-[10px] font-bold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
+                 >
+                   Remover
+                 </button>
+               )}
+             </div>
+             <div className="space-y-1">
+               <div className="flex items-center justify-between">
+                 <span className="text-[10px] text-gray-600 font-medium">Espessura</span>
+                 <span className="text-[10px] font-mono font-bold text-indigo-700">
+                   {(values.textStrokeWidth || 0).toFixed(1)}px
+                 </span>
+               </div>
+               <div className="flex items-center gap-1.5">
+                 <input
+                   type="range"
+                   min="0"
+                   max="8"
+                   step="0.1"
+                   value={values.textStrokeWidth || 0}
+                   onChange={(e) => {
+                     const nextW = Math.max(0, parseFloat(e.target.value) || 0);
+                     onChange({
+                       textStrokeWidth: nextW,
+                       ...(nextW > 0 && !values.textStrokeColor ? { textStrokeColor: '#000000' } : {}),
+                     });
+                   }}
+                   className="flex-1 accent-indigo-600 h-1.5 bg-white rounded cursor-pointer"
+                 />
+                 <input
+                   type="number"
+                   min="0"
+                   max="20"
+                   step="0.1"
+                   value={values.textStrokeWidth ?? 0}
+                   onChange={(e) => {
+                     const nextW = Math.max(0, parseFloat(e.target.value) || 0);
+                     onChange({
+                       textStrokeWidth: nextW,
+                       ...(nextW > 0 && !values.textStrokeColor ? { textStrokeColor: '#000000' } : {}),
+                     });
+                   }}
+                   className="w-14 text-[11px] p-1 h-[26px] text-center border border-gray-200 rounded bg-white font-semibold"
+                 />
+               </div>
+             </div>
+             <div className="flex items-center gap-2 pt-0.5">
+               <div className="flex-1">
+                 <span className="block text-[9.5px] font-bold text-gray-500 uppercase mb-1">Cor do Contorno</span>
+                 <div className="flex h-[28px] border border-gray-200 rounded overflow-hidden bg-white">
+                   <input
+                     type="color"
+                     value={(values.textStrokeColor && values.textStrokeColor.startsWith('#')) ? values.textStrokeColor : '#000000'}
+                     onChange={(e) => onChange({
+                       textStrokeColor: e.target.value,
+                       ...(!(values.textStrokeWidth && values.textStrokeWidth > 0) ? { textStrokeWidth: 1 } : {}),
+                     })}
+                     className="w-7 h-full p-0 border-0 cursor-pointer shrink-0"
+                   />
+                   <input
+                     type="text"
+                     value={values.textStrokeColor || '#000000'}
+                     onChange={(e) => onChange({
+                       textStrokeColor: e.target.value,
+                       ...(!(values.textStrokeWidth && values.textStrokeWidth > 0) ? { textStrokeWidth: 1 } : {}),
+                     })}
+                     className="w-full text-[10px] uppercase px-1.5 border-l border-gray-200 bg-white"
+                   />
+                 </div>
+               </div>
+               <div className="shrink-0">
+                 <span className="block text-[9.5px] font-bold text-gray-500 uppercase mb-1">Preenchimento</span>
+                 <button
+                   type="button"
+                   onClick={() => {
+                     const nextHollow = !values.textFillTransparent;
+                     onChange({
+                       textFillTransparent: nextHollow,
+                       ...(nextHollow && !(values.textStrokeWidth && values.textStrokeWidth > 0)
+                         ? { textStrokeWidth: 1, textStrokeColor: values.textStrokeColor || values.color || '#000000' }
+                         : {}),
+                     });
+                   }}
+                   className={`h-[28px] px-2.5 rounded border text-[10px] font-bold transition-all cursor-pointer ${
+                     values.textFillTransparent
+                       ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                       : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                   }`}
+                   title="Alternar letras vazadas (exibir apenas o contorno das letras)"
+                 >
+                   {values.textFillTransparent ? 'Vazado (Ativo)' : 'Vazado (Só Contorno)'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <span className="block text-[9.5px] font-bold text-gray-500 uppercase mb-1">Cantos do Contorno</span>
+                <div className="grid grid-cols-2 h-[28px] rounded border border-gray-200 overflow-hidden bg-white">
+                  <button
+                    type="button"
+                    onClick={() => onChange({ textStrokeJoin: 'miter' })}
+                    className={`text-[10px] font-bold transition-colors cursor-pointer ${
+                      values.textStrokeJoin !== 'round'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                    title="Contorno com cantos retos"
+                  >
+                    Reto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChange({
+                      textStrokeJoin: 'round',
+                      ...(!(values.textStrokeWidth && values.textStrokeWidth > 0)
+                        ? { textStrokeWidth: 1.2, textStrokeColor: values.textStrokeColor || '#000000' }
+                        : {}),
+                    })}
+                    className={`text-[10px] font-bold border-l border-gray-200 transition-colors cursor-pointer ${
+                      values.textStrokeJoin === 'round'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                    title="Arredondar os cantos e pontas do contorno das letras"
+                  >
+                    Arredondado
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-0.5">
+               <span className="text-[9.5px] text-gray-500">Contorna cada letra individualmente</span>
+               <div className="flex items-center gap-1">
+                 {['#ffffff', '#000000', '#f59e0b', '#b84a56', '#4f46e5'].map((sw) => (
+                   <button
+                     key={sw}
+                     type="button"
+                     onClick={() => onChange({
+                       textStrokeColor: sw,
+                       ...(!(values.textStrokeWidth && values.textStrokeWidth > 0) ? { textStrokeWidth: 1.2 } : {}),
+                     })}
+                     className="w-3.5 h-3.5 rounded-full border border-gray-300 cursor-pointer hover:scale-110 transition-transform"
+                     style={{ backgroundColor: sw }}
+                     title={`Aplicar contorno ${sw}`}
+                   />
+                 ))}
+               </div>
+             </div>
+           </div>
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Peso</label>
@@ -10587,8 +11403,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const activeList = getActiveElements();
   const selectedElement = activeList.find(e => e.id === selectedId);
 
-  const usableWidthMM = PAGE_WIDTH_MM - config.margins.inside - config.margins.outside;
-  const usableHeightMM = PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom;
+  const usableWidthMM = editMode === 'cover' ? (() => {
+      const cover = config.cover || createDefaultCoverConfig();
+      const activeCoverPage = cover.pages.find(p => p.id === cover.activeCoverPageId) || cover.pages[0];
+      const isEndsheet = activeCoverPage?.type === 'endsheet_front' || activeCoverPage?.type === 'endsheet_back';
+      const effectiveBleed = isEndsheet ? 0 : cover.bleedMm;
+      const isSpread = activeCoverPage?.type === 'spread' || cover.spine.enabled;
+      return isSpread
+          ? (cover.cardboardSize.width * 2) + cover.spine.calculatedSpineWidthMm + (cover.spine.hingeGapMm * 2) + (effectiveBleed * 2)
+          : cover.cardboardSize.width + (effectiveBleed * 2);
+  })() : (PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
+
+  const usableHeightMM = editMode === 'cover' ? (() => {
+      const cover = config.cover || createDefaultCoverConfig();
+      const activeCoverPage = cover.pages.find(p => p.id === cover.activeCoverPageId) || cover.pages[0];
+      const isEndsheet = activeCoverPage?.type === 'endsheet_front' || activeCoverPage?.type === 'endsheet_back';
+      const effectiveBleed = isEndsheet ? 0 : cover.bleedMm;
+      return cover.cardboardSize.height + (effectiveBleed * 2);
+  })() : (PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
 
   const actualTotalPagesCount = useMemo(() => {
     if (generatedData.length === 0) return 0;
@@ -10663,6 +11495,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       allowTaint: true,
                       imageTimeout: 15000,
                       onclone: (clonedDoc) => {
+                          applyHtml2CanvasTextStrokeFallback(clonedDoc);
                           const clonedEl = clonedDoc.getElementById(`preview-page-${pageNum}`);
                           if (clonedEl) {
                               clonedEl.style.boxShadow = 'none';
@@ -11934,13 +12767,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 {/* PRIMARY EXPORT CTA: BAIXAR PDF (Always prominent, never hidden!) */}
                 <button 
-                  onClick={handlePrintRequest} 
+                  onClick={editMode === 'cover' ? () => handleExportCoverPdf('color', { includeGuides: false }) : handlePrintRequest} 
                   disabled={printStatus !== 'idle'} 
                   className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] px-3 sm:px-4 py-1.5 rounded-xl border border-[#b84a56] disabled:opacity-50 shadow-md shadow-[#b84a56]/25 transition-all shrink-0 cursor-pointer active:scale-95 ring-2 ring-[#b84a56]/20 uppercase tracking-wide"
-                  title="Baixar Arquivo PDF Pronto para Impressão"
+                  title={editMode === 'cover' ? "Baixar PDF da Capa Atual (Arte Limpa)" : "Baixar Arquivo PDF Pronto para Impressão"}
                 >
                   <FileDown className="w-4 h-4 text-white shrink-0" />
-                  <span className="whitespace-nowrap font-black">Baixar PDF</span>
+                  <span className="whitespace-nowrap font-black">
+                    {editMode === 'cover' ? 'Baixar Capa (PDF)' : 'Baixar PDF'}
+                  </span>
                 </button>
 
                 <div className="h-4 w-px bg-[#eedad5] mx-0.5 shrink-0"></div>
@@ -12168,11 +13003,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         animate={isMobile ? { y: 0 } : { x: 0, opacity: 1 }}
                         exit={isMobile ? { y: '100%' } : { x: -288, opacity: 0 }}
                         transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-                        className={`${isMobile ? 'fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[80vh] border-t border-[#eedad5] flex flex-col no-print' : 'w-64 xl:w-72 bg-white border-r border-[#eedad5] flex flex-col shrink-0 z-20 overflow-hidden shadow-xs'}`}
+                        className={`${isMobile ? 'fixed inset-x-0 bottom-0 z-[1000] bg-white rounded-t-3xl shadow-2xl h-[80vh] border-t border-[#eedad5] flex flex-col no-print' : (editMode === 'cover' ? 'w-72 xl:w-80 bg-white border-r border-[#eedad5] flex flex-col shrink-0 z-20 overflow-hidden shadow-xs' : 'w-64 xl:w-72 bg-white border-r border-[#eedad5] flex flex-col shrink-0 z-20 overflow-hidden shadow-xs')}`}
                     >
                         {isMobile ? (
                             <div className="flex items-center justify-between p-4 border-b border-[#eedad5]">
-                                <span className="text-xs font-black uppercase tracking-widest text-[#b84a56]">Configuração e Estrutura</span>
+                                <span className="text-xs font-black uppercase tracking-widest text-[#b84a56]">{editMode === 'cover' ? 'Studio de Capas' : 'Configuração e Estrutura'}</span>
                                 <button onClick={() => setMobileDrawer('none')} className="p-1"><X className="w-5 h-5 text-slate-400" /></button>
                             </div>
                         ) : (
@@ -12181,7 +13016,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     <div className="bg-[#b84a56] text-white p-1 rounded-lg shadow-2xs">
                                         <Layout className="w-3.5 h-3.5" />
                                     </div>
-                                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 truncate">Ferramentas & Miolo</span>
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 truncate">{editMode === 'cover' ? 'Studio de Capas & Cartonagem' : 'Ferramentas & Miolo'}</span>
                                 </div>
                                 <button 
                                     onClick={() => setShowSidebar(false)} 
@@ -12193,6 +13028,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
                         <div className={`${isMobile ? 'flex-1 overflow-y-auto pb-20' : 'flex-1 overflow-y-auto custom-scrollbar'}`}>
+                            {editMode !== 'cover' && (
                             <div className="p-3.5 border-b border-[#eedad5] bg-[#faf6f4]/60">
                                 <button
                                     type="button"
@@ -12669,6 +13505,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     </div>
                                 )}
                             </div>
+                            )}
 
                     <div className="p-4 border-b border-[#eedad5]">
                         <div className="flex items-center mb-3 text-[#9f3d4a] font-bold text-xs uppercase tracking-wider"><Book className="w-4 h-4 mr-2 text-[#b84a56]" /><span>Estrutura</span></div>
@@ -12733,7 +13570,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             >
                                 Divisórias
                             </button>
+                            <button 
+                                onClick={() => { 
+                                    setEditMode('cover'); 
+                                    setSelectedIds([]); 
+                                    if (!config.cover) {
+                                        setConfig(prev => ({
+                                            ...prev,
+                                            cover: createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM)
+                                        }));
+                                    }
+                                }} 
+                                className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'cover' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
+                                title="Studio de Capas & Cartonagem"
+                            >
+                                Capas ✨
+                            </button>
                         </div>
+                        {editMode === 'cover' && (
+                            <div className="mb-3">
+                                <CoverToolsPanel
+                                    coverConfig={config.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM)}
+                                    mioloWidthMm={PAGE_WIDTH_MM}
+                                    mioloHeightMm={PAGE_HEIGHT_MM}
+                                    onChangeCoverConfig={(newCover) => setConfig(prev => ({ ...prev, cover: newCover }))}
+                                    onAddElementToActivePage={(el) => {
+                                        setConfig(prev => {
+                                            const currentCover = prev.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM);
+                                            const activeId = currentCover.activeCoverPageId || 'cover_front';
+                                            return {
+                                                ...prev,
+                                                cover: {
+                                                    ...currentCover,
+                                                    pages: currentCover.pages.map(p => p.id === activeId ? { ...p, elements: [...p.elements, el] } : p)
+                                                }
+                                            };
+                                        });
+                                    }}
+                                    onOpenMockupStudio={() => setActiveTab('mockup')}
+                                    onExportCoverPdf={(mode, opts) => handleExportCoverPdf(mode, opts)}
+                                />
+                            </div>
+                        )}
                         {editMode === 'daily' && (
                             <div className="mb-3 flex flex-col gap-1.5">
                                 <div className="flex gap-1.5">
@@ -13149,110 +14027,147 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <p className="text-[10px] text-indigo-700">Clique em qualquer elemento abaixo para adicioná-lo à página do verso.</p>
                             </div>
                         )}
-                        {/* Frase Motivacional Diária - Card Rápido */}
-                        <div className="mb-2.5 p-2.5 rounded-xl border border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] shadow-2xs">
-                            <div className="flex items-center justify-between gap-1 mb-1.5">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                    <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-[#b84a56] to-[#d98b95] text-white flex items-center justify-center shrink-0 shadow-2xs">
-                                        <Sparkles className="w-3.5 h-3.5" />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <span className="text-[11px] font-bold text-slate-800 block truncate">Frases Motivacionais</span>
-                                        <span className="text-[9px] text-[#9f3d4a] font-semibold block truncate">
-                                            {QUOTE_CATEGORIES_METADATA.find(c => c.id === (config.quoteCategory || 'feminine_strength'))?.shortName || 'Força Feminina'}
-                                        </span>
-                                    </div>
+                        {editMode === 'cover' ? (
+                            <div className="mt-3 pt-3 border-t border-[#eedad5]">
+                                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-2 px-1">
+                                    Adicionar à Capa:
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={() => addElement('text', 'Texto')} className="h-11 flex flex-col items-center justify-center border border-slate-200 bg-white rounded-xl hover:bg-[#fdeeed] hover:border-[#b84a56] transition-all cursor-pointer shadow-2xs" title="Inserir Texto">
+                                        <Type className="w-4 h-4 text-[#b84a56]"/>
+                                        <span className="text-[9px] font-bold text-slate-700 mt-0.5">Texto</span>
+                                    </button>
+                                    <button onClick={() => addElement('box', 'Moldura')} className="h-11 flex flex-col items-center justify-center border border-slate-200 bg-white rounded-xl hover:bg-[#fdeeed] hover:border-[#b84a56] transition-all cursor-pointer shadow-2xs" title="Inserir Moldura / Caixa">
+                                        <Square className="w-4 h-4 text-[#b84a56]"/>
+                                        <span className="text-[9px] font-bold text-slate-700 mt-0.5">Moldura</span>
+                                    </button>
+                                    <button onClick={() => addElement('circle', 'Medalhão')} className="h-11 flex flex-col items-center justify-center border border-slate-200 bg-white rounded-xl hover:bg-[#fdeeed] hover:border-[#b84a56] transition-all cursor-pointer shadow-2xs" title="Inserir Medalhão / Círculo">
+                                        <Circle className="w-4 h-4 text-[#b84a56]"/>
+                                        <span className="text-[9px] font-bold text-slate-700 mt-0.5">Medalhão</span>
+                                    </button>
+                                    <button onClick={() => { setShapeGalleryTargetId(null); setShapeGalleryOpen(true); }} className="h-11 flex flex-col items-center justify-center border border-amber-200 bg-amber-50/60 rounded-xl hover:bg-amber-100 hover:border-amber-400 transition-all cursor-pointer shadow-2xs" title="Galeria de Formas & Brasões Vetoriais">
+                                        <Shapes className="w-4 h-4 text-amber-700"/>
+                                        <span className="text-[9px] font-bold text-amber-800 mt-0.5">Brasões</span>
+                                    </button>
+                                    <button onClick={() => addElement('image', 'Imagem / Logo')} className="h-11 flex flex-col items-center justify-center border border-slate-200 bg-white rounded-xl hover:bg-[#fdeeed] hover:border-[#b84a56] transition-all cursor-pointer shadow-2xs" title="Inserir Imagem ou Logo">
+                                        <Upload className="w-4 h-4 text-[#b84a56]"/>
+                                        <span className="text-[9px] font-bold text-slate-700 mt-0.5">Imagem</span>
+                                    </button>
+                                    <button onClick={() => addElement('lines', 'Divisória', { color: '#b38728', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 })} className="h-11 flex flex-col items-center justify-center border border-slate-200 bg-white rounded-xl hover:bg-[#fdeeed] hover:border-[#b84a56] transition-all cursor-pointer shadow-2xs" title="Linha Decorativa Fina">
+                                        <Minus className="w-4 h-4 text-[#b84a56]"/>
+                                        <span className="text-[9px] font-bold text-slate-700 mt-0.5">Linha</span>
+                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setQuotesModalOpen(true)}
-                                    className="px-2 py-0.5 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] hover:text-[#7e2d38] border border-[#eedad5] rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1 shrink-0"
-                                    title="Escolher categoria ou ver todas as frases"
-                                >
-                                    <span>Temas</span>
-                                </button>
                             </div>
-                            <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-[#eedad5]/60">
-                                <button
-                                    type="button"
-                                    onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'bottom' })}
-                                    className="py-1 px-1 bg-[#b84a56] hover:bg-[#9f3d4a] text-white text-[9px] font-bold rounded-lg transition-all text-center truncate cursor-pointer shadow-2xs active:scale-95"
-                                    title="Inserir Frase Motivacional no Rodapé da Página"
-                                >
-                                    + No Rodapé
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'top' })}
-                                    className="py-1 px-1 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] border border-[#eedad5] text-[9px] font-bold rounded-lg transition-all text-center truncate cursor-pointer active:scale-95"
-                                    title="Inserir Frase Motivacional no Topo da Página"
-                                >
-                                    + No Topo
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-4 gap-2">
-                                {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
-                                    <>
-                                        <button onClick={() => addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Número do Dia"><span className="font-bold text-xs text-indigo-600">01</span></button>
-                                        <button onClick={() => addElement('date_placeholder', 'Dia da Semana', { variant: 'day_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Dia da Semana"><span className="text-[10px] font-bold text-indigo-600">DIA</span></button>
-                                        <button onClick={() => addElement('date_placeholder', 'Nome do Mês', { variant: 'month_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Nome do Mês"><span className="text-[10px] text-indigo-600">MÊS</span></button>
-                                    </>
+                        ) : (
+                            <>
+                                {editMode === 'daily' && (
+                                    <div className="mb-2.5 p-2.5 rounded-xl border border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] shadow-2xs">
+                                        <div className="flex items-center justify-between gap-1 mb-1.5">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-[#b84a56] to-[#d98b95] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                                                    <Sparkles className="w-3.5 h-3.5" />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <span className="text-[11px] font-bold text-slate-800 block truncate">Frases Motivacionais</span>
+                                                    <span className="text-[9px] text-[#9f3d4a] font-semibold block truncate">
+                                                        {QUOTE_CATEGORIES_METADATA.find(c => c.id === (config.quoteCategory || 'feminine_strength'))?.shortName || 'Força Feminina'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setQuotesModalOpen(true)}
+                                                className="px-2 py-0.5 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] hover:text-[#7e2d38] border border-[#eedad5] rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1 shrink-0"
+                                                title="Escolher categoria ou ver todas as frases"
+                                            >
+                                                <span>Temas</span>
+                                            </button>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-[#eedad5]/60">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'bottom' })}
+                                                className="py-1 px-1 bg-[#b84a56] hover:bg-[#9f3d4a] text-white text-[9px] font-bold rounded-lg transition-all text-center truncate cursor-pointer shadow-2xs active:scale-95"
+                                                title="Inserir Frase Motivacional no Rodapé da Página"
+                                            >
+                                                + No Rodapé
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'top' })}
+                                                className="py-1 px-1 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] border border-[#eedad5] text-[9px] font-bold rounded-lg transition-all text-center truncate cursor-pointer active:scale-95"
+                                                title="Inserir Frase Motivacional no Topo da Página"
+                                            >
+                                                + No Topo
+                                            </button>
+                                        </div>
+                                    </div>
                                 )}
-                                <button onClick={() => addElement('text', 'Texto')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Texto"><Type className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('box', 'Caixa')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Caixa"><Square className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('circle', 'Círculo')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Círculo"><Circle className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => { setShapeGalleryTargetId(null); setShapeGalleryOpen(true); }} className="h-10 flex items-center justify-center border rounded hover:bg-amber-50 hover:border-amber-300 transition-colors" title="Biblioteca de Elementos & Formas Geométricas"><Shapes className="w-4 h-4 text-amber-700"/></button>
-                                <button onClick={() => addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linhas Simples (Pautas)"><ListTodo className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('lines', 'Horários', { showTimes: true, startHour: 7, lineSpacing: 28, color: '#e5e7eb' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela de Horários (Linhas)"><Clock className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('table', 'Tabela')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela Customizável"><TableIcon className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('table', 'Tabela de Horários', { isScheduleTable: true })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela com Horários (Grade)"><CalendarClock className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('holiday', 'Confraternização Universal')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Informação do Feriado do Dia"><Flag className="w-4 h-4 text-indigo-600"/></button>
-                                <button 
-                                    onClick={() => {
-                                        handleInsertSpecialElement();
-                                        if (!config.specialDates || config.specialDates.length === 0) {
-                                            setIsSpecialDatesModalOpen(true);
-                                        }
-                                    }} 
-                                    className="h-10 flex items-center justify-center border border-rose-200 bg-rose-50/70 hover:bg-rose-100 hover:border-rose-300 rounded text-rose-700 transition-colors" 
-                                    title="Informações Importantes & Contagem Regressiva (Férias, Casamento, etc.)"
-                                >
-                                    <CalendarHeart className="w-4 h-4 text-rose-600"/>
-                                </button>
-                                <button onClick={() => addElement('note_grid', 'Grid', { variant: 'dots', color: '#ccc', opacity: 0.5 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Grid de Notas"><Grid3X3 className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('mini_calendar', 'Calendário')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Mini Calendário"><CalendarDays className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Fases da Lua"><Moon className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('habit_tracker', 'Hábitos')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Habit Tracker"><CheckSquare className="w-4 h-4 text-indigo-600"/></button>
-                                
-                                {/* Elemento Rodapé */}
-                                <button 
-                                    onClick={() => setFooterGalleryOpen(true)} 
-                                    className="h-10 flex items-center justify-center border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 hover:border-indigo-300 rounded text-indigo-700 transition-colors" 
-                                    title="Elemento Rodapé (Água, Clima, Humor, Sono, Refeições...)"
-                                >
-                                    <PanelBottom className="w-4 h-4 text-indigo-600"/>
-                                </button>
 
-                                <button onClick={() => addElement('image', 'Imagem')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Upload de Imagem"><Upload className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Versículo Bíblico"><BookOpen className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => setQuotesModalOpen(true)} className="h-10 flex items-center justify-center border border-[#eedad5] bg-[#fff5f5] hover:bg-[#fdeeed] hover:border-[#b84a56] rounded text-[#b84a56] transition-colors" title="Frases Motivacionais Diárias (Força Feminina, Fé, Motivação, Amor-Próprio...)"><Sparkles className="w-4 h-4 text-[#b84a56]"/></button>
-                                
-                                <button onClick={() => addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linha Divisória"><Minus className="w-4 h-4 text-indigo-600"/></button>
-                                <button onClick={() => addElement('permanent_day_header', 'Agenda Permanente', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Agenda Permanente"><List className="w-4 h-4 text-indigo-600"/></button>
-        
-                                {editMode === 'intro' && (
-                                    <>
-                                        <button onClick={() => addElement('full_calendar', 'Calendário Anual')} className="h-10 flex items-center justify-center border border-indigo-200 bg-indigo-50/60 rounded hover:bg-indigo-100 text-indigo-700 transition-colors" title="Calendário Anual (12 Meses)">
-                                            <CalendarRange className="w-4 h-4 text-indigo-600" />
+                                <div className="grid grid-cols-4 gap-2">
+                                        {editMode === 'daily' && !(config.projectType === 'notebook' || config.projectType === 'devotional') && (
+                                            <>
+                                                <button onClick={() => addElement('date_placeholder', 'Número do Dia', { variant: 'day_number' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Número do Dia"><span className="font-bold text-xs text-indigo-600">01</span></button>
+                                                <button onClick={() => addElement('date_placeholder', 'Dia da Semana', { variant: 'day_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Dia da Semana"><span className="text-[10px] font-bold text-indigo-600">DIA</span></button>
+                                                <button onClick={() => addElement('date_placeholder', 'Nome do Mês', { variant: 'month_name' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Nome do Mês"><span className="text-[10px] text-indigo-600">MÊS</span></button>
+                                            </>
+                                        )}
+                                        <button onClick={() => addElement('text', 'Texto')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Texto"><Type className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('box', 'Caixa')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Caixa"><Square className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('circle', 'Círculo')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Círculo"><Circle className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => { setShapeGalleryTargetId(null); setShapeGalleryOpen(true); }} className="h-10 flex items-center justify-center border rounded hover:bg-amber-50 hover:border-amber-300 transition-colors" title="Biblioteca de Elementos & Formas Geométricas"><Shapes className="w-4 h-4 text-amber-700"/></button>
+                                        <button onClick={() => addElement('lines', 'Pautas', { color: '#e5e7eb', lineSpacing: 24 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linhas Simples (Pautas)"><ListTodo className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('lines', 'Horários', { showTimes: true, startHour: 7, lineSpacing: 28, color: '#e5e7eb' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela de Horários (Linhas)"><Clock className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('table', 'Tabela')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela Customizável"><TableIcon className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('table', 'Tabela de Horários', { isScheduleTable: true })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Tabela com Horários (Grade)"><CalendarClock className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('holiday', 'Confraternização Universal')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Informação do Feriado do Dia"><Flag className="w-4 h-4 text-indigo-600"/></button>
+                                        <button 
+                                            onClick={() => {
+                                                handleInsertSpecialElement();
+                                                if (!config.specialDates || config.specialDates.length === 0) {
+                                                    setIsSpecialDatesModalOpen(true);
+                                                }
+                                            }} 
+                                            className="h-10 flex items-center justify-center border border-rose-200 bg-rose-50/70 hover:bg-rose-100 hover:border-rose-300 rounded text-rose-700 transition-colors" 
+                                            title="Informações Importantes & Contagem Regressiva (Férias, Casamento, etc.)"
+                                        >
+                                            <CalendarHeart className="w-4 h-4 text-rose-600"/>
                                         </button>
-                                        <button onClick={() => insertHolidayListWithCalendar(undefined, { autoLayout: true, createCalendarIfMissing: false, format: 'full_written', columns: 2 })} className="h-10 flex items-center justify-center border border-amber-200 bg-amber-50/60 rounded hover:bg-amber-100 text-amber-700 transition-colors" title="Inserir Feriados por Extenso (Redimensionando o Calendário)">
-                                            <Flag className="w-4 h-4 text-amber-600" />
+                                        <button onClick={() => addElement('note_grid', 'Grid', { variant: 'dots', color: '#ccc', opacity: 0.5 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Grid de Notas"><Grid3X3 className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('mini_calendar', 'Calendário')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Mini Calendário"><CalendarDays className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('moon', 'Lua', { variant: 'full_info', fontSize: 12, color: '#6b7280' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Fases da Lua"><Moon className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('habit_tracker', 'Hábitos')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Habit Tracker"><CheckSquare className="w-4 h-4 text-indigo-600"/></button>
+                                        
+                                        {/* Elemento Rodapé */}
+                                        <button 
+                                            onClick={() => setFooterGalleryOpen(true)} 
+                                            className="h-10 flex items-center justify-center border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 hover:border-indigo-300 rounded text-indigo-700 transition-colors" 
+                                            title="Elemento Rodapé (Água, Clima, Humor, Sono, Refeições...)"
+                                        >
+                                            <PanelBottom className="w-4 h-4 text-indigo-600"/>
                                         </button>
-                                    </>
-                                )}
-                            </div>
+
+                                        <button onClick={() => addElement('image', 'Imagem')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Upload de Imagem"><Upload className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Versículo Bíblico"><BookOpen className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => setQuotesModalOpen(true)} className="h-10 flex items-center justify-center border border-[#eedad5] bg-[#fff5f5] hover:bg-[#fdeeed] hover:border-[#b84a56] rounded text-[#b84a56] transition-colors" title="Frases Motivacionais Diárias (Força Feminina, Fé, Motivação, Amor-Próprio...)"><Sparkles className="w-4 h-4 text-[#b84a56]"/></button>
+                                        
+                                        <button onClick={() => addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linha Divisória"><Minus className="w-4 h-4 text-indigo-600"/></button>
+                                        <button onClick={() => addElement('permanent_day_header', 'Agenda Permanente', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Agenda Permanente"><List className="w-4 h-4 text-indigo-600"/></button>
+                
+                                        {editMode === 'intro' && (
+                                            <>
+                                                <button onClick={() => addElement('full_calendar', 'Calendário Anual')} className="h-10 flex items-center justify-center border border-indigo-200 bg-indigo-50/60 rounded hover:bg-indigo-100 text-indigo-700 transition-colors" title="Calendário Anual (12 Meses)">
+                                                    <CalendarRange className="w-4 h-4 text-indigo-600" />
+                                                </button>
+                                                <button onClick={() => insertHolidayListWithCalendar(undefined, { autoLayout: true, createCalendarIfMissing: false, format: 'full_written', columns: 2 })} className="h-10 flex items-center justify-center border border-amber-200 bg-amber-50/60 rounded hover:bg-amber-100 text-amber-700 transition-colors" title="Inserir Feriados por Extenso (Redimensionando o Calendário)">
+                                                    <Flag className="w-4 h-4 text-amber-600" />
+                                                </button>
+                                            </>
+                                        )}
+                                </div>
+                            </>
+                        )}
                             {editMode === 'intro' && (
                                 <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
                                     <button
@@ -13367,6 +14282,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             currentPageInEditor={currentPageInEditor}
                             onClose={() => setActiveTab('editor')}
                             generatedData={generatedData}
+                            initialSubject={editMode === 'cover' ? 'cover' : 'miolo'}
+                            renderCoverPage={renderCoverPageForMockup}
+                            onUpdateCoverConfig={(newCover) => setConfig(prev => ({ ...prev, cover: newCover }))}
                         />
                     </div>
                 )}
@@ -15090,8 +16008,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     </div>
 
                                                     <div className="flex items-center justify-between">
-                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda</label>
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda do Selo</label>
                                                         <input type="number" min="0" max="6" value={selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 1} onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseInt(e.target.value) || 0 })} className="w-16 text-xs p-1 border rounded" />
+                                                    </div>
+
+                                                    <div className="p-2 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-1.5">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-indigo-900 uppercase">Contorno das Letras</label>
+                                                            <span className="text-[10px] font-mono text-indigo-700">{(selectedElement.style.textStrokeWidth || 0).toFixed(1)}px</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="range"
+                                                                min="0"
+                                                                max="6"
+                                                                step="0.1"
+                                                                value={selectedElement.style.textStrokeWidth || 0}
+                                                                onChange={(e) => updateElementStyle(selectedElement.id, { textStrokeWidth: parseFloat(e.target.value) || 0, textStrokeColor: selectedElement.style.textStrokeColor || '#000000' })}
+                                                                className="flex-1 accent-indigo-600 cursor-pointer"
+                                                            />
+                                                            <input
+                                                                type="color"
+                                                                value={(selectedElement.style.textStrokeColor || '#000000').startsWith('#') ? (selectedElement.style.textStrokeColor || '#000000') : '#000000'}
+                                                                onChange={(e) => updateElementStyle(selectedElement.id, { textStrokeColor: e.target.value, ...(!(selectedElement.style.textStrokeWidth && selectedElement.style.textStrokeWidth > 0) ? { textStrokeWidth: 1 } : {}) })}
+                                                                className="w-7 h-6 p-0 border border-gray-200 rounded cursor-pointer"
+                                                            />
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 pt-0.5">
+                                                            <div className="flex flex-1 rounded border border-gray-200 overflow-hidden bg-white">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateElementStyle(selectedElement.id, { textStrokeJoin: 'miter' })}
+                                                                    className={`flex-1 py-0.5 text-[9.5px] font-bold cursor-pointer ${selectedElement.style.textStrokeJoin !== 'round' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                >
+                                                                    Reto
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateElementStyle(selectedElement.id, { textStrokeJoin: 'round', ...(!(selectedElement.style.textStrokeWidth && selectedElement.style.textStrokeWidth > 0) ? { textStrokeWidth: 1.2, textStrokeColor: selectedElement.style.textStrokeColor || '#000000' } : {}) })}
+                                                                    className={`flex-1 py-0.5 text-[9.5px] font-bold border-l border-gray-200 cursor-pointer ${selectedElement.style.textStrokeJoin === 'round' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                >
+                                                                    Arredondado
+                                                                </button>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateElementStyle(selectedElement.id, { textFillTransparent: !selectedElement.style.textFillTransparent, ...(!selectedElement.style.textFillTransparent && !(selectedElement.style.textStrokeWidth && selectedElement.style.textStrokeWidth > 0) ? { textStrokeWidth: 1 } : {}) })}
+                                                                className={`px-2 py-0.5 rounded text-[9.5px] font-bold border cursor-pointer shrink-0 ${selectedElement.style.textFillTransparent ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200'}`}
+                                                            >
+                                                                Vazado
+                                                            </button>
+                                                        </div>
                                                     </div>
 
                                                     <p className="text-[10px] text-gray-400 italic leading-tight">
@@ -15129,7 +16096,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center justify-between">
-                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Cor Contorno</label>
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Cor Borda da Forma</label>
                                                             <div className="flex h-6 border border-gray-200 rounded overflow-hidden">
                                                                 <input type="color" value={selectedElement.style.borderColor || selectedElement.style.color || '#f472b6'} onChange={(e) => updateElementStyle(selectedElement.id, { borderColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
                                                             </div>
@@ -15137,6 +16104,54 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Tamanho Fonte</label>
                                                             <input type="number" min="6" max="32" value={selectedElement.style.fontSize || 10} onChange={(e) => updateElementStyle(selectedElement.id, { fontSize: parseInt(e.target.value) })} className="w-16 text-xs p-1 border rounded" />
+                                                        </div>
+                                                        <div className="p-2 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-1.5">
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="text-[10px] font-bold text-indigo-900 uppercase">Contorno das Letras</label>
+                                                                <span className="text-[10px] font-mono text-indigo-700">{(selectedElement.style.textStrokeWidth || 0).toFixed(1)}px</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="range"
+                                                                    min="0"
+                                                                    max="6"
+                                                                    step="0.1"
+                                                                    value={selectedElement.style.textStrokeWidth || 0}
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { textStrokeWidth: parseFloat(e.target.value) || 0, textStrokeColor: selectedElement.style.textStrokeColor || '#000000' })}
+                                                                    className="flex-1 accent-indigo-600 cursor-pointer"
+                                                                />
+                                                                <input
+                                                                    type="color"
+                                                                    value={(selectedElement.style.textStrokeColor || '#000000').startsWith('#') ? (selectedElement.style.textStrokeColor || '#000000') : '#000000'}
+                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { textStrokeColor: e.target.value, ...(!(selectedElement.style.textStrokeWidth && selectedElement.style.textStrokeWidth > 0) ? { textStrokeWidth: 1 } : {}) })}
+                                                                    className="w-7 h-6 p-0 border border-gray-200 rounded cursor-pointer"
+                                                                />
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5 pt-0.5">
+                                                                <div className="flex flex-1 rounded border border-gray-200 overflow-hidden bg-white">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => updateElementStyle(selectedElement.id, { textStrokeJoin: 'miter' })}
+                                                                        className={`flex-1 py-0.5 text-[9.5px] font-bold cursor-pointer ${selectedElement.style.textStrokeJoin !== 'round' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        Reto
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => updateElementStyle(selectedElement.id, { textStrokeJoin: 'round', ...(!(selectedElement.style.textStrokeWidth && selectedElement.style.textStrokeWidth > 0) ? { textStrokeWidth: 1.2, textStrokeColor: selectedElement.style.textStrokeColor || '#000000' } : {}) })}
+                                                                        className={`flex-1 py-0.5 text-[9.5px] font-bold border-l border-gray-200 cursor-pointer ${selectedElement.style.textStrokeJoin === 'round' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        Arredondado
+                                                                    </button>
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateElementStyle(selectedElement.id, { textFillTransparent: !selectedElement.style.textFillTransparent, ...(!selectedElement.style.textFillTransparent && !(selectedElement.style.textStrokeWidth && selectedElement.style.textStrokeWidth > 0) ? { textStrokeWidth: 1 } : {}) })}
+                                                                    className={`px-2 py-0.5 rounded text-[9.5px] font-bold border cursor-pointer shrink-0 ${selectedElement.style.textFillTransparent ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200'}`}
+                                                                >
+                                                                    Vazado
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Tamanho Formas ({Math.round((selectedElement.style.shapeScale || 1) * 100)}%)</label>
@@ -15151,7 +16166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             />
                                                         </div>
                                                         <div className="flex items-center justify-between">
-                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Contorno</label>
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda da Forma</label>
                                                             <input 
                                                                 type="number" 
                                                                 min="0" 
@@ -15464,19 +16479,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         fontSize: selectedElement.style.plannerDayBox?.fontSize || 8,
                                                                         fontWeight: selectedElement.style.plannerDayBox?.fontWeight || 'normal',
                                                                         color: selectedElement.style.plannerDayBox?.color || '#9ca3af',
+                                                                        textStrokeWidth: selectedElement.style.plannerDayBox?.textStrokeWidth,
+                                                                        textStrokeColor: selectedElement.style.plannerDayBox?.textStrokeColor,
+                                                                        textFillTransparent: selectedElement.style.plannerDayBox?.textFillTransparent,
+                                                                        textStrokeJoin: selectedElement.style.plannerDayBox?.textStrokeJoin,
                                                                         textAlign: 'left',
                                                                         verticalAlign: 'top',
                                                                         textTransform: 'none',
                                                                         letterSpacing: 0,
                                                                         backgroundColor: 'transparent'
                                                                     } as TextStyleConfig, (updates) => {
+                                                                        const curBox = selectedElement.style.plannerDayBox!;
                                                                         updateElementStyle(selectedElement.id, {
                                                                             plannerDayBox: {
-                                                                                ...selectedElement.style.plannerDayBox,
-                                                                                fontFamily: updates.fontFamily,
-                                                                                fontSize: updates.fontSize,
-                                                                                fontWeight: updates.fontWeight,
-                                                                                color: updates.color
+                                                                                ...curBox,
+                                                                                ...(updates.fontFamily !== undefined ? { fontFamily: updates.fontFamily } : {}),
+                                                                                ...(updates.fontSize !== undefined ? { fontSize: updates.fontSize } : {}),
+                                                                                ...(updates.fontWeight !== undefined ? { fontWeight: updates.fontWeight } : {}),
+                                                                                ...(updates.color !== undefined ? { color: updates.color } : {}),
+                                                                                ...(updates.textStrokeWidth !== undefined ? { textStrokeWidth: updates.textStrokeWidth } : {}),
+                                                                                ...(updates.textStrokeColor !== undefined ? { textStrokeColor: updates.textStrokeColor } : {}),
+                                                                                ...(updates.textFillTransparent !== undefined ? { textFillTransparent: updates.textFillTransparent } : {}),
+                                                                                ...(updates.textStrokeJoin !== undefined ? { textStrokeJoin: updates.textStrokeJoin } : {}),
                                                                             }
                                                                         });
                                                                     })}
@@ -15689,22 +16713,105 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         >
                                                                             <optgroup label="Padrão">
                                                                                 {AVAILABLE_FONTS.map(font => (
-                                                                                    <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                                    <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
                                                                                 ))}
                                                                             </optgroup>
                                                                             <optgroup label={`Fontes do Computador (${allSystemFonts.length})`}>
                                                                                 {allSystemFonts.map(font => (
-                                                                                    <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                                    <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
                                                                                 ))}
                                                                             </optgroup>
                                                                             {customFonts.length > 0 && (
                                                                                 <optgroup label="Minhas Fontes">
                                                                                     {customFonts.map(font => (
-                                                                                        <option key={font} value={font} style={{ fontFamily: font }}>{font}</option>
+                                                                                        <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
                                                                                     ))}
                                                                                 </optgroup>
                                                                             )}
                                                                         </select>
+                                                                    </div>
+
+                                                                    <div className="p-2 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-1.5">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <label className="text-[10px] font-bold text-indigo-900 uppercase">Contorno Letras do Cabeçalho</label>
+                                                                            <span className="text-[10px] font-mono text-indigo-700">
+                                                                                {(selectedElement.style.plannerDayBox?.headerTextStrokeWidth || 0).toFixed(1)}px
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input
+                                                                                type="range"
+                                                                                min="0"
+                                                                                max="6"
+                                                                                step="0.1"
+                                                                                value={selectedElement.style.plannerDayBox?.headerTextStrokeWidth || 0}
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, {
+                                                                                    plannerDayBox: {
+                                                                                        ...selectedElement.style.plannerDayBox!,
+                                                                                        headerTextStrokeWidth: parseFloat(e.target.value) || 0,
+                                                                                        headerTextStrokeColor: selectedElement.style.plannerDayBox?.headerTextStrokeColor || '#000000',
+                                                                                    }
+                                                                                })}
+                                                                                className="flex-1 accent-indigo-600 cursor-pointer"
+                                                                            />
+                                                                            <input
+                                                                                type="color"
+                                                                                value={(selectedElement.style.plannerDayBox?.headerTextStrokeColor || '#000000').startsWith('#') ? (selectedElement.style.plannerDayBox?.headerTextStrokeColor || '#000000') : '#000000'}
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, {
+                                                                                    plannerDayBox: {
+                                                                                        ...selectedElement.style.plannerDayBox!,
+                                                                                        headerTextStrokeColor: e.target.value,
+                                                                                        ...(!(selectedElement.style.plannerDayBox?.headerTextStrokeWidth && selectedElement.style.plannerDayBox.headerTextStrokeWidth > 0) ? { headerTextStrokeWidth: 1 } : {}),
+                                                                                    }
+                                                                                })}
+                                                                                className="w-7 h-6 p-0 border border-gray-200 rounded cursor-pointer"
+                                                                            />
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1.5 pt-0.5">
+                                                                            <div className="flex flex-1 rounded border border-gray-200 overflow-hidden bg-white">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                        plannerDayBox: {
+                                                                                            ...selectedElement.style.plannerDayBox!,
+                                                                                            headerTextStrokeJoin: 'miter',
+                                                                                        }
+                                                                                    })}
+                                                                                    className={`flex-1 py-0.5 text-[9.5px] font-bold cursor-pointer ${selectedElement.style.plannerDayBox?.headerTextStrokeJoin !== 'round' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    Reto
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => updateElementStyle(selectedElement.id, {
+                                                                                        plannerDayBox: {
+                                                                                            ...selectedElement.style.plannerDayBox!,
+                                                                                            headerTextStrokeJoin: 'round',
+                                                                                            ...(!(selectedElement.style.plannerDayBox?.headerTextStrokeWidth && selectedElement.style.plannerDayBox.headerTextStrokeWidth > 0) ? { headerTextStrokeWidth: 1.2, headerTextStrokeColor: selectedElement.style.plannerDayBox?.headerTextStrokeColor || '#000000' } : {}),
+                                                                                        }
+                                                                                    })}
+                                                                                    className={`flex-1 py-0.5 text-[9.5px] font-bold border-l border-gray-200 cursor-pointer ${selectedElement.style.plannerDayBox?.headerTextStrokeJoin === 'round' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    Arredondado
+                                                                                </button>
+                                                                            </div>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    const nextHollow = !selectedElement.style.plannerDayBox?.headerTextFillTransparent;
+                                                                                    updateElementStyle(selectedElement.id, {
+                                                                                        plannerDayBox: {
+                                                                                            ...selectedElement.style.plannerDayBox!,
+                                                                                            headerTextFillTransparent: nextHollow,
+                                                                                            ...(nextHollow && !(selectedElement.style.plannerDayBox?.headerTextStrokeWidth && selectedElement.style.plannerDayBox.headerTextStrokeWidth > 0) ? { headerTextStrokeWidth: 1 } : {}),
+                                                                                        }
+                                                                                    });
+                                                                                }}
+                                                                                className={`px-2 py-0.5 rounded text-[9.5px] font-bold border cursor-pointer shrink-0 ${selectedElement.style.plannerDayBox?.headerTextFillTransparent ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200'}`}
+                                                                            >
+                                                                                Vazado
+                                                                            </button>
+                                                                        </div>
                                                                     </div>
 
                                                                     <div className="pt-2 border-t border-gray-50 space-y-2">
@@ -15857,7 +16964,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         fontFamily: selectedElement.style.fontFamily || 'Inter',
                                                                         fontSize: selectedElement.style.fontSize || 12,
                                                                         fontWeight: (selectedElement.style.fontWeight as any) || 'bold',
+                                                                        fontStyle: selectedElement.style.fontStyle,
                                                                         color: selectedElement.style.color || '#374151',
+                                                                        textStrokeWidth: selectedElement.style.textStrokeWidth,
+                                                                        textStrokeColor: selectedElement.style.textStrokeColor,
+                                                                        textFillTransparent: selectedElement.style.textFillTransparent,
+                                                                        textStrokeJoin: selectedElement.style.textStrokeJoin,
                                                                         textAlign: (selectedElement.style.textAlign as any) || 'left',
                                                                         verticalAlign: (selectedElement.style.verticalAlign as any) || 'top',
                                                                         textTransform: (selectedElement.style.textTransform as any) || 'none',
@@ -18604,7 +19716,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         fontFamily: selectedElement.style.fontFamily || 'Inter',
                                                         fontSize: selectedElement.style.fontSize || 12,
                                                         fontWeight: selectedElement.style.fontWeight || 'normal',
+                                                        fontStyle: selectedElement.style.fontStyle,
                                                         color: selectedElement.style.color || '#000000',
+                                                        textStrokeWidth: selectedElement.style.textStrokeWidth,
+                                                        textStrokeColor: selectedElement.style.textStrokeColor,
+                                                        textFillTransparent: selectedElement.style.textFillTransparent,
+                                                        textStrokeJoin: selectedElement.style.textStrokeJoin,
                                                         textAlign: selectedElement.style.textAlign || 'left',
                                                         verticalAlign: selectedElement.style.verticalAlign || 'top',
                                                         textTransform: selectedElement.style.textTransform || 'none', 
@@ -18983,7 +20100,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     fontFamily: selectedElement.style.fontFamily || 'monospace',
                                                                     fontSize: selectedElement.style.fontSize || 10,
                                                                     fontWeight: selectedElement.style.fontWeight || 'normal',
+                                                                    fontStyle: selectedElement.style.fontStyle,
                                                                     color: selectedElement.style.color || '#6b7280',
+                                                                    textStrokeWidth: selectedElement.style.textStrokeWidth,
+                                                                    textStrokeColor: selectedElement.style.textStrokeColor,
+                                                                    textFillTransparent: selectedElement.style.textFillTransparent,
+                                                                    textStrokeJoin: selectedElement.style.textStrokeJoin,
                                                                     textAlign: selectedElement.style.textAlign || 'left',
                                                                     verticalAlign: selectedElement.style.verticalAlign || 'top',
                                                                     textTransform: selectedElement.style.textTransform || 'none', 

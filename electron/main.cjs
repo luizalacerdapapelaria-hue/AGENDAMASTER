@@ -209,13 +209,13 @@ ipcMain.handle('pick-system-font-file', async () => {
   }
 });
 
-// IPC para limpar cache e recarregar a versão mais recente em tempo real
+// IPC para limpar cache de rede e recarregar a versão mais recente preservando projetos, fontes e login da aluna
 ipcMain.handle('clear-cache-and-reload', async () => {
   try {
     const ses = session.defaultSession;
     await ses.clearCache();
     await ses.clearStorageData({
-      storages: ['appcache', 'cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+      storages: ['appcache', 'shadercache', 'serviceworkers', 'cachestorage']
     });
     const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (win) {

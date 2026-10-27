@@ -2,6 +2,7 @@
 import React from 'react';
 import { BaseElementProps } from './types';
 import { getVectorShapeById, getSvgPathBounds } from './vectorShapesData';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, style, pageHeight, pageWidth }) => {
     
@@ -148,6 +149,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                                     fontFamily: style.fontFamily || 'Montserrat, monospace',
                                     fontSize: timeFontSizeVal,
                                     fontWeight: timeFontWeightVal,
+                                    fontStyle: style.fontStyle || 'normal',
                                     color: timeColorVal,
                                     letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
                                     textTransform: (style.textTransform as any) || 'none',
@@ -156,7 +158,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                                     lineHeight: 1,
                                     display: 'block',
                                     width: '100%',
-                                    visibility: rawTimeText ? 'visible' : 'hidden'
+                                    visibility: rawTimeText ? 'visible' : 'hidden',
+                                    ...getTextStrokeCss({ ...style, color: timeColorVal }, timeColorVal),
                                 }}
                             >
                                 {displayTime}

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { localStorage } from '../../services/safeStorage';
 import { User } from '../../types';
-import { Lock, Mail, ArrowRight, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings, Key } from 'lucide-react';
-import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from '../../services/supabase';
+import { Lock, Mail, ArrowRight, ArrowLeft, Star, CheckCircle, Database, AlertCircle, Sparkles, ShieldCheck, Code, Copy, Check, Monitor, Smartphone, Zap, X, Info, HelpCircle, RefreshCw, Download, Settings, Key, Eye, EyeOff } from 'lucide-react';
+import { supabase, supabasePublic, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from '../../services/supabase';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -10,7 +10,64 @@ interface LoginProps {
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    try {
+      return localStorage.getItem('agendamaster_saved_email') || '';
+    } catch (_) {
+      return '';
+    }
+  });
+  const clearBrokenAuthTokensOnly = () => {
+    try {
+      if (!localStorage) return;
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (
+          key &&
+          (key.startsWith('sb-') ||
+            key.includes('supabase.auth') ||
+            key.includes('supabase-js') ||
+            key === 'agendamaster_verified_profile')
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => {
+        try {
+          localStorage.removeItem(k);
+        } catch (_) {}
+      });
+    } catch (_) {}
+  };
+
+  // Auto-limpeza 100% automática ao abrir a tela de Login (faz sozinho o que o antigo botão "Limpar Cache" fazia!)
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // 1. Limpa silenciosamente caches antigos de arquivos estáticos sem recarregar e sem apagar projetos
+    if ((window as any).clearAppCache) {
+      Promise.resolve((window as any).clearAppCache(false, false)).catch(() => {});
+    }
+
+    // 2. Se não estiver em recuperação de senha, verifica se sobrou algum token expirado/inválido e já limpa sozinho
+    if (
+      isSupabaseConfigured &&
+      !(window as any).__isPasswordRecoveryFlow &&
+      !(window as any).__isLinkRecovery
+    ) {
+      supabase.auth
+        .getSession()
+        .then(({ data, error }) => {
+          if (error || !data?.session?.user) {
+            clearBrokenAuthTokensOnly();
+          }
+        })
+        .catch(() => {
+          clearBrokenAuthTokensOnly();
+        });
+    }
+  }, []);
   
   // PWA (Progressive Web Application) Installation States
   const [canInstall, setCanInstall] = useState(false);
@@ -86,12 +143,58 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [step, setStep] = useState<'email' | 'password' | 'create_password'>('email');
+  const [otpCode, setOtpCode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [step, setStep] = useState<'email' | 'password' | 'create_password' | 'forgot_request' | 'verify_recovery_code' | 'reset_new_password'>('email');
   const [allowedUserData, setAllowedUserData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [showForgotHelp, setShowForgotHelp] = useState(false);
+
+  React.useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const activateLinkRecovery = async (recoveryEmail?: string) => {
+      let resolvedEmail = recoveryEmail || (window as any).__recoveryEmail || '';
+      if (!resolvedEmail && isSupabaseConfigured) {
+        const { data } = await supabase.auth.getSession();
+        resolvedEmail = data.session?.user?.email || '';
+      }
+      if (resolvedEmail) {
+        setEmail(resolvedEmail);
+      }
+      setPassword('');
+      setConfirmPassword('');
+      setError('');
+      setSuccessMessage('Identificamos sua recuperação de acesso! Escolha sua nova senha abaixo.');
+      setStep('reset_new_password');
+    };
+
+    if ((window as any).__isLinkRecovery) {
+      activateLinkRecovery();
+    }
+
+    const handleRecoveryEvent = (ev: Event) => {
+      const customEv = ev as CustomEvent<{ email?: string }>;
+      activateLinkRecovery(customEv.detail?.email);
+    };
+
+    window.addEventListener('agendamaster-password-recovery', handleRecoveryEvent);
+    return () => {
+      window.removeEventListener('agendamaster-password-recovery', handleRecoveryEvent);
+    };
+  }, []);
 
   const [registeredEmails, setRegisteredEmails] = useState<{ email: string; active: boolean }[]>([]);
   const [loadingEmails, setLoadingEmails] = useState(false);
@@ -101,7 +204,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
       const fetchData = async () => {
         setLoadingEmails(true);
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabasePublic
             .from('allowed_users')
             .select('email, active');
           
@@ -135,72 +238,66 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
         const enteredEmail = email.trim().toLowerCase();
         console.log('[Login] Verificando acesso para o e-mail:', enteredEmail);
 
-        const fetchPromise = (async () => {
-          // 1. Tentar busca exata por e-mail no banco
-          let { data: allowedData, error: allowedError } = await supabase
+        const lookupWithClient = async (dbClient: typeof supabase) => {
+          let { data: exactData, error: allowedError } = await dbClient
             .from('allowed_users')
             .select('*')
             .eq('email', enteredEmail)
             .maybeSingle();
 
+          let found = exactData;
           if (allowedError) {
-            console.warn('[Login] Erro na busca exata por e-mail:', allowedError);
             const msg = (allowedError.message || '').toLowerCase();
             if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
               throw allowedError;
             }
-          } else if (allowedData) {
-            console.log('[Login] Sucesso: Registro encontrado no exato:', allowedData);
           }
 
-          // 2. Se não achar, tentar busca case-insensitive exata por e-mail no banco (ilike)
-          if (!allowedData) {
-            console.log('[Login] Tentando busca case-insensitive exata...');
-            const { data: fuzzyData, error: fuzzyError } = await supabase
+          if (!found) {
+            const { data: fuzzyData, error: fuzzyError } = await dbClient
               .from('allowed_users')
               .select('*')
               .ilike('email', enteredEmail)
               .maybeSingle();
 
             if (fuzzyError) {
-              console.warn('[Login] Erro na busca case-insensitive:', fuzzyError);
               const msg = (fuzzyError.message || '').toLowerCase();
               if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
                 throw fuzzyError;
               }
             } else if (fuzzyData) {
-              allowedData = fuzzyData;
-              console.log('[Login] Sucesso: Registro encontrado no case-insensitive:', allowedData);
+              found = fuzzyData;
             }
           }
 
-          // 3. Se ainda não achar, buscar similaridade com wildcard para contornar espaços em branco adicionais salvos no banco
-          if (!allowedData) {
-            console.log('[Login] Tentando busca de similaridade com wildcard...');
-            const { data: searchData, error: searchError } = await supabase
+          if (!found) {
+            const { data: searchData, error: searchError } = await dbClient
               .from('allowed_users')
               .select('*')
               .ilike('email', `%${enteredEmail}%`)
               .limit(10);
 
             if (searchError) {
-              console.warn('[Login] Erro na busca de similaridade:', searchError);
               const msg = (searchError.message || '').toLowerCase();
               if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
                 throw searchError;
               }
             } else if (searchData && searchData.length > 0) {
-              const trimmedMatch = searchData.find(u => {
-                const dbEmail = (u.email || '').trim().toLowerCase();
-                return dbEmail === enteredEmail;
-              });
+              const trimmedMatch = searchData.find(u => (u.email || '').trim().toLowerCase() === enteredEmail);
               if (trimmedMatch) {
-                allowedData = trimmedMatch;
-                console.log('[Login] Sucesso: Registro encontrado com wildcard + trim:', allowedData);
+                found = trimmedMatch;
               }
             }
           }
-          return allowedData;
+
+          return found;
+        };
+
+        const fetchPromise = (async () => {
+          // Consulta primeiro via cliente público sem estado (imune a tokens antigos expirados no navegador!)
+          const publicMatch = await lookupWithClient(supabasePublic);
+          if (publicMatch) return publicMatch;
+          return await lookupWithClient(supabase);
         })();
 
         let allowedData: any = null;
@@ -238,6 +335,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
         }
 
         setAllowedUserData(allowedData);
+        try {
+          localStorage.setItem('agendamaster_saved_email', enteredEmail);
+        } catch (_) {}
 
         // Se for e-mail de tutor/administrador, sempre pula para a digitação de senha verdadeira (pois já possuem contas no Auth)
         if (isTutorOrAllowedEmail(enteredEmail)) {
@@ -274,39 +374,62 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
     }
 
     if (isSupabaseConfigured) {
+      const normalizedEmail = email.trim().toLowerCase();
       try {
         let sessionData = null;
         try {
-          const { data, error: signInError } = await supabase.auth.signInWithPassword({
-            email: email.trim().toLowerCase(),
+          let { data, error: signInError } = await supabase.auth.signInWithPassword({
+            email: normalizedEmail,
             password
           });
 
+          // Se houver resquício de token antigo no navegador, limpa de forma transparente e tenta entrar na mesma hora
           if (signInError) {
-            // Check if user exists in the allowed_users table with this correct password, but is not in Auth yet
+            const firstErrLower = (signInError.message || '').toLowerCase();
+            if (
+              firstErrLower.includes('refresh_token') ||
+              firstErrLower.includes('refresh token') ||
+              firstErrLower.includes('session_not_found')
+            ) {
+              clearBrokenAuthTokensOnly();
+              const retryAfterClean = await supabase.auth.signInWithPassword({
+                email: normalizedEmail,
+                password
+              });
+              data = retryAfterClean.data;
+              signInError = retryAfterClean.error;
+            }
+          }
+
+          if (signInError) {
+            // Caso a aluna exista na tabela allowed_users com esta exata senha, mas ainda não tenha sido sincronizada no Auth
             if (allowedUserData && allowedUserData.password && allowedUserData.password === password) {
-              console.log('[Login] Usuário na tabela de permitidos com senha correta, mas não no Auth. Criando no Auth...');
-              const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-                email: email.trim().toLowerCase(),
+              console.log('[Login] Usuário na tabela de permitidos com senha correta, sincronizando no Auth...');
+              const { error: signUpError } = await supabase.auth.signUp({
+                email: normalizedEmail,
                 password,
                 options: {
                   data: {
-                    name: allowedUserData.name || email.split('@')[0]
+                    name: allowedUserData.name || normalizedEmail.split('@')[0]
                   }
                 }
               });
 
               if (!signUpError) {
                 const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
-                  email: email.trim().toLowerCase(),
+                  email: normalizedEmail,
                   password
                 });
                 if (!retryError && retryData.user) {
                   sessionData = retryData;
                 } else {
-                  throw retryError || new Error("Erro de re-autenticação após sincronização.");
+                  throw retryError || new Error('Erro de autenticação após sincronizar sua conta.');
                 }
               } else {
+                const signUpLower = (signUpError.message || '').toLowerCase();
+                if (signUpLower.includes('already') || signUpLower.includes('registered') || signUpError.status === 422) {
+                  throw new Error('Sua senha foi redefinida anteriormente. Digite sua senha mais recente ou clique em "Esqueceu sua senha?" abaixo para receber um código no e-mail.');
+                }
                 throw signUpError;
               }
             } else {
@@ -317,45 +440,50 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
           }
         } catch (signInErr: any) {
           const errMsg = signInErr?.message || String(signInErr);
-          if (errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network') || errMsg.toLowerCase().includes('failed')) {
-            throw new Error(`Não foi possível conectar ao banco de dados (${errMsg}). Por favor, confira sua conexão com a internet e tente novamente.`);
+          const lower = errMsg.toLowerCase();
+          if (lower.includes('fetch') || lower.includes('network') || lower.includes('failed to fetch')) {
+            throw new Error('Não foi possível conectar ao servidor no momento. Confira sua conexão com a internet e tente novamente.');
           }
           throw signInErr;
         }
 
         if (sessionData && sessionData.user) {
+          try {
+            localStorage.setItem('agendamaster_saved_email', normalizedEmail);
+          } catch (_) {}
           onLogin({
-            email: sessionData.user.email || email,
-            name: sessionData.user.user_metadata?.name || allowedUserData?.plano || email.split('@')[0],
+            email: sessionData.user.email || normalizedEmail,
+            name: sessionData.user.user_metadata?.name || allowedUserData?.plano || normalizedEmail.split('@')[0],
             plan: allowedUserData?.plan_tier || 'pro'
           });
         }
       } catch (err: any) {
         console.error('[Login] Erro durante o login:', err);
-        const errMsg = err.message || '';
+        const errMsg = err?.message || '';
+        const lowerMsg = errMsg.toLowerCase();
+
         if (
-          errMsg.toLowerCase().includes('refresh_token') || 
-          errMsg.toLowerCase().includes('refresh token') || 
-          errMsg.toLowerCase().includes('not found') || 
-          errMsg.toLowerCase().includes('invalid')
+          lowerMsg.includes('invalid login credentials') ||
+          lowerMsg.includes('invalid_credentials') ||
+          lowerMsg.includes('invalid credentials')
         ) {
-          // Clear stale localstorage keys of Supabase
-          if (localStorage) {
-            const keysToRemove: string[] = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i);
-              if (key && (key.startsWith('sb-') || key.includes('supabase.auth') || key.includes('supabase-js'))) {
-                keysToRemove.push(key);
-              }
-            }
-            keysToRemove.forEach(k => localStorage.removeItem(k));
-          }
+          setError('Senha incorreta. Confira se digitou corretamente (clique no ícone de olho para visualizar) ou clique em "Esqueceu sua senha?" logo abaixo para criar uma nova.');
+        } else if (lowerMsg.includes('email not confirmed')) {
+          setError('Seu acesso precisa de validação de senha. Clique em "Esqueceu sua senha?" abaixo para receber um código rápido no seu e-mail.');
+        } else if (lowerMsg.includes('too many requests') || lowerMsg.includes('rate limit') || err?.status === 429) {
+          setError('Muitas tentativas seguidas. Aguarde cerca de 1 minuto e tente novamente.');
+        } else if (
+          lowerMsg.includes('refresh_token') ||
+          lowerMsg.includes('refresh token') ||
+          lowerMsg.includes('session_not_found')
+        ) {
+          clearBrokenAuthTokensOnly();
           try {
-            await supabase.auth.signOut();
+            await supabase.auth.signOut({ scope: 'local' });
           } catch (_) {}
-          setError('Sua sessão anterior ficou inválida. O sistema já limpou o histórico problemático, por favor tente digitar sua senha e entrar de novo.');
+          setError('Atualizamos sua conexão de acesso automaticamente. Por favor, clique em Entrar mais uma vez.');
         } else {
-          setError(errMsg || 'Senha incorreta ou erro de autenticação.');
+          setError(errMsg || 'Senha incorreta. Confira os dados digitados ou clique em "Esqueceu sua senha?".');
         }
       } finally {
         setIsLoading(false);
@@ -406,13 +534,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
         if (signUpError) {
           // Se o usuário por algum motivo já estiver registrado em Auth
           if (signUpError.message.includes('already') || signUpError.message.includes('registered') || signUpError.status === 422) {
-            // Tenta login para ver se a senha do primeiro acesso já funciona
+            // Tenta login para ver se a senha digitada já é a cadastrada no Auth
             const { error: signInError } = await supabase.auth.signInWithPassword({
               email: email.trim().toLowerCase(),
               password
             });
             if (signInError) {
-              throw new Error("Este e-mail já possui login registrado em nossa base de autenticação. Por favor, contate o suporte.");
+              setPassword('');
+              setConfirmPassword('');
+              setStep('password');
+              throw new Error('Este e-mail já possui uma senha cadastrada anteriormente. Digite sua senha atual ou clique em "Esqueceu sua senha?" para receber um código no seu e-mail.');
             }
           } else {
             throw signUpError;
@@ -461,10 +592,239 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
     }
   };
 
-  const handleResetStep = () => {
-    setStep('email');
+  const handleSendRecoveryCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (resendCooldown > 0) return;
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setError('Por favor, informe seu e-mail antes de recuperar a senha.');
+      setStep('email');
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      setError('Erro: Conexão com o banco de dados pendente.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const redirectUrl =
+        typeof window !== 'undefined' && window.location.origin.startsWith('http')
+          ? `${window.location.origin}/acesso`
+          : 'https://agendamaster2027.netlify.app/acesso';
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: redirectUrl,
+      });
+
+      if (resetError) {
+        const lowerMsg = (resetError.message || '').toLowerCase();
+        if (
+          lowerMsg.includes('rate limit') ||
+          lowerMsg.includes('security purposes') ||
+          lowerMsg.includes('only request this after') ||
+          resetError.status === 429
+        ) {
+          throw new Error(
+            'Um código já foi enviado recentemente. Aguarde cerca de 60 segundos antes de pedir outro e confira sua Caixa de Entrada e a pasta de Spam.'
+          );
+        }
+        throw resetError;
+      }
+
+      setOtpCode('');
+      setResendCooldown(60);
+      setShowForgotHelp(false);
+      setSuccessMessage('Código enviado! Confira sua Caixa de Entrada e também a pasta de Spam/Promoções.');
+      setStep('verify_recovery_code');
+    } catch (err: any) {
+      console.error('[Recovery] Erro ao enviar código de recuperação:', err);
+      setError(err?.message || 'Não foi possível enviar o código de recuperação. Tente novamente em instantes.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyRecoveryCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = otpCode.replace(/\s|-/g, '').trim();
+
+    if (!cleanCode || cleanCode.length < 6) {
+      setError('Por favor, digite o código completo recebido no seu e-mail.');
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      setError('Erro: Conexão com o banco de dados pendente.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (typeof window !== 'undefined') {
+        (window as any).__isPasswordRecoveryFlow = true;
+      }
+
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token: cleanCode,
+        type: 'recovery',
+      });
+
+      if (verifyError || !data?.session) {
+        if (typeof window !== 'undefined') {
+          (window as any).__isPasswordRecoveryFlow = false;
+        }
+        const lowerMsg = (verifyError?.message || '').toLowerCase();
+        if (lowerMsg.includes('expired') || lowerMsg.includes('invalid') || lowerMsg.includes('token')) {
+          throw new Error('Código inválido ou expirado. Confira os números no e-mail mais recente ou clique em Reenviar código.');
+        }
+        throw verifyError || new Error('Não foi possível validar o código informado.');
+      }
+
+      setPassword('');
+      setConfirmPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setSuccessMessage('Código validado com sucesso! Agora escolha sua nova senha.');
+      setStep('reset_new_password');
+    } catch (err: any) {
+      console.error('[Recovery] Erro ao validar código OTP:', err);
+      setError(err?.message || 'Código inválido ou expirado. Tente novamente.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+
+    if (!password || !confirmPassword) {
+      setError('Por favor, preencha a nova senha e a confirmação.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Sua nova senha deve ter no mínimo 6 caracteres.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('As senhas digitadas não coincidem.');
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      setError('Erro: Conexão com o banco de dados pendente.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const normalizedEmail = email.trim().toLowerCase();
+      const { error: updateAuthError } = await supabase.auth.updateUser({
+        password,
+      });
+
+      if (updateAuthError) {
+        const lowerMsg = (updateAuthError.message || '').toLowerCase();
+        const isSamePassword =
+          lowerMsg.includes('different from the old password') ||
+          lowerMsg.includes('same_password');
+
+        if (!isSamePassword) {
+          if (lowerMsg.includes('session') || lowerMsg.includes('missing')) {
+            throw new Error('Sua sessão de verificação expirou. Por favor, solicite um novo código.');
+          }
+          throw updateAuthError;
+        }
+      }
+
+      // Sincroniza a nova senha na tabela allowed_users
+      const targetDbEmail = allowedUserData?.email || normalizedEmail;
+      const { error: dbUpdateError } = await supabase
+        .from('allowed_users')
+        .update({
+          password,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('email', targetDbEmail);
+
+      if (dbUpdateError) {
+        console.warn('[Recovery] Senha atualizada no Auth, aviso ao sincronizar allowed_users:', dbUpdateError);
+      }
+
+      if (typeof window !== 'undefined') {
+        (window as any).__isPasswordRecoveryFlow = false;
+        (window as any).__isLinkRecovery = false;
+        (window as any).__recoveryEmail = '';
+      }
+
+      const { data: userData } = await supabase.auth.getUser();
+      const activeUser = userData?.user;
+      const finalEmail = activeUser?.email || normalizedEmail;
+
+      setSuccessMessage('Nova senha cadastrada com sucesso! Acessando o painel...');
+
+      onLogin({
+        email: finalEmail,
+        name: activeUser?.user_metadata?.name || allowedUserData?.name || allowedUserData?.plano || finalEmail.split('@')[0],
+        plan: allowedUserData?.plan_tier || 'pro',
+      });
+    } catch (err: any) {
+      console.error('[Recovery] Erro ao salvar nova senha:', err);
+      setError(err?.message || 'Ocorreu um erro ao salvar sua nova senha. Tente novamente.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelRecovery = async () => {
+    if (typeof window !== 'undefined' && (window as any).__isPasswordRecoveryFlow) {
+      (window as any).__isPasswordRecoveryFlow = false;
+      (window as any).__isLinkRecovery = false;
+      (window as any).__recoveryEmail = '';
+      if (isSupabaseConfigured) {
+        try {
+          await supabase.auth.signOut();
+        } catch (_) {}
+      }
+    }
+    setOtpCode('');
     setPassword('');
     setConfirmPassword('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setShowForgotHelp(false);
+    setError('');
+    setSuccessMessage('');
+    setStep(email ? 'password' : 'email');
+  };
+
+  const handleResetStep = () => {
+    if (typeof window !== 'undefined') {
+      (window as any).__isPasswordRecoveryFlow = false;
+      (window as any).__isLinkRecovery = false;
+    }
+    setStep('email');
+    setOtpCode('');
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setShowForgotHelp(false);
     setError('');
     setSuccessMessage('');
   };
@@ -606,14 +966,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                       <Lock className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       required
                       minLength={6}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
+                      className="pl-10 pr-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
                       placeholder="No mínimo 6 caracteres"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-[#b84a56] transition-colors cursor-pointer"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -624,14 +992,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                       <Lock className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
-                      type="password"
+                      type={showConfirmPassword ? 'text' : 'password'}
                       required
                       minLength={6}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
+                      className="pl-10 pr-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
                       placeholder="Repita a senha escolhida"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-[#b84a56] transition-colors cursor-pointer"
+                      tabIndex={-1}
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -707,53 +1083,38 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
                       <Lock className="h-4 w-4 text-[#b84a56]" />
                     </div>
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400"
+                      className="pl-10 pr-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400"
                       placeholder="Insira sua senha de acesso"
                       autoFocus
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-[#b84a56] transition-colors cursor-pointer"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                   
                   <div className="flex justify-end mt-1.5">
                     <button
                       type="button"
-                      onClick={() => setShowForgotHelp(!showForgotHelp)}
+                      onClick={() => {
+                        setError('');
+                        setSuccessMessage('');
+                        setShowForgotHelp(false);
+                        setStep('forgot_request');
+                      }}
                       className="text-xs text-[#b84a56] hover:text-[#9f3d4a] hover:underline font-semibold focus:outline-none cursor-pointer"
                     >
                       Esqueceu sua senha?
                     </button>
                   </div>
-
-                  {showForgotHelp && (
-                    <div className="p-4 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl text-xs text-slate-700 leading-relaxed shadow-xs mt-3 flex flex-col gap-2 animate-fade-in text-left">
-                      <div className="flex gap-2 font-bold text-slate-900 items-center">
-                        <ShieldCheck className="w-4 h-4 text-[#b84a56] flex-shrink-0" />
-                        <span>Recuperação de Acesso do Aluno</span>
-                      </div>
-                      <p>
-                        Para sua segurança e privacidade, a alteração ou reset de senha deve ser validada manualmente. 
-                      </p>
-                      <p>
-                        Envie uma mensagem para o suporte com o e-mail de compra para que possamos resetar sua senha no banco:
-                        <a 
-                          href="mailto:luizalacerdaatelie@gmail.com?subject=Recuperar Senha AgendaMaster" 
-                          className="font-bold text-[#b84a56] hover:underline block mt-1"
-                        >
-                          luizalacerdaatelie@gmail.com
-                        </a>
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setShowForgotHelp(false)}
-                        className="text-[10px] uppercase font-bold text-[#b84a56] hover:text-[#9f3d4a] self-end mt-1 border border-[#f5ded9] px-2.5 py-1 rounded-lg bg-white shadow-2xs cursor-pointer"
-                      >
-                        Entendi
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {error && (
@@ -782,43 +1143,302 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToLanding }) => {
             </>
           )}
 
+          {step === 'forgot_request' && (
+            <>
+              <div className="text-center mb-6">
+                <div className="bg-[#fdeeed] border border-[#f5ded9] w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs text-[#b84a56]">
+                  <Mail className="w-6 h-6 text-[#b84a56]" />
+                </div>
+                <h1 className="text-2xl font-black font-sans text-slate-900 tracking-tight">
+                  Recuperar Senha
+                </h1>
+                <p className="text-slate-500 mt-2 text-xs font-normal max-w-sm mx-auto leading-relaxed">
+                  Enviaremos automaticamente um <strong>código numérico</strong> para o seu e-mail para você cadastrar uma nova senha na hora.
+                </p>
+                <div className="mt-3 inline-block bg-[#faf5f3] border border-[#eedad5] px-3 py-1 rounded-full text-[11px] text-slate-600 font-mono">
+                  Enviar para: <span className="font-semibold text-[#b84a56]">{email}</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSendRecoveryCode} className="space-y-4">
+                {error && (
+                  <div className="text-red-700 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLoading || resendCooldown > 0}
+                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-rose-900/15 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b84a56] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
+                >
+                  {isLoading ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  ) : resendCooldown > 0 ? (
+                    <span>Aguarde {resendCooldown}s para reenviar</span>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span>Enviar Código por E-mail</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+                </button>
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCancelRecovery}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Voltar para senha</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setSuccessMessage('');
+                      setStep('verify_recovery_code');
+                    }}
+                    className="text-xs font-bold text-[#b84a56] hover:text-[#9f3d4a] hover:underline transition-colors cursor-pointer"
+                  >
+                    Já recebi um código
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+
+          {step === 'verify_recovery_code' && (
+            <>
+              <div className="text-center mb-5">
+                <div className="bg-[#fdeeed] border border-[#f5ded9] w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs text-[#b84a56]">
+                  <ShieldCheck className="w-7 h-7 text-[#b84a56]" />
+                </div>
+                <h1 className="text-2xl font-black font-sans text-slate-900 tracking-tight">
+                  Digite o Código
+                </h1>
+                <p className="text-slate-500 mt-2 text-xs font-normal max-w-sm mx-auto leading-relaxed">
+                  Insira abaixo o código numérico enviado para o seu e-mail. Confira também as abas <strong>Spam</strong> ou <strong>Promoções</strong>.
+                </p>
+                <div className="mt-3 inline-block bg-[#faf5f3] border border-[#eedad5] px-3 py-1 rounded-full text-[11px] text-slate-600 font-mono">
+                  E-mail: <span className="font-semibold text-[#b84a56]">{email}</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleVerifyRecoveryCode} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 text-center">
+                    Código de Verificação
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    required
+                    maxLength={8}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                    className="block w-full bg-[#faf5f3] border-[#eedad5] rounded-2xl border py-3.5 px-4 text-center text-xl font-black tracking-[0.35em] text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder:text-slate-300 placeholder:tracking-normal placeholder:text-sm placeholder:font-normal font-mono"
+                    placeholder="000000"
+                    autoFocus
+                  />
+                </div>
+
+                {successMessage && (
+                  <div className="text-emerald-800 text-xs bg-emerald-50 p-3 rounded-xl border border-emerald-200 flex gap-2 items-start leading-relaxed">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="text-red-700 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLoading || otpCode.length < 6}
+                  className="w-full flex justify-center items-center py-3.5 px-4 rounded-2xl shadow-lg shadow-rose-900/15 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b84a56] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
+                >
+                  {isLoading ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span>Validar Código</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+                </button>
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCancelRecovery}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Voltar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isLoading || resendCooldown > 0}
+                    onClick={() => handleSendRecoveryCode()}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-[#b84a56] hover:text-[#9f3d4a] disabled:text-slate-400 disabled:no-underline hover:underline transition-colors cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>
+                      {resendCooldown > 0 ? `Reenviar em ${resendCooldown}s` : 'Reenviar código'}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="pt-2 border-t border-[#f5e6e2] text-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotHelp(!showForgotHelp)}
+                    className="text-[11px] text-slate-400 hover:text-[#b84a56] font-semibold transition-colors cursor-pointer"
+                  >
+                    Não tem mais acesso a este e-mail? Falar com suporte
+                  </button>
+                  {showForgotHelp && (
+                    <div className="mt-2 p-3 bg-[#fdeeed] border border-[#f5ded9] rounded-xl text-[11px] text-slate-600 leading-relaxed text-left">
+                      Caso você tenha digitado outro e-mail na compra ou perdido acesso à caixa de entrada, envie uma mensagem para{' '}
+                      <a
+                        href="mailto:luizalacerdaatelie@gmail.com?subject=Recuperar Acesso AgendaMaster"
+                        className="font-bold text-[#b84a56] hover:underline"
+                      >
+                        luizalacerdaatelie@gmail.com
+                      </a>
+                      .
+                    </div>
+                  )}
+                </div>
+              </form>
+            </>
+          )}
+
+          {step === 'reset_new_password' && (
+            <>
+              <div className="text-center mb-6">
+                <div className="bg-[#fdeeed] border border-[#f5ded9] w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs text-[#b84a56]">
+                  <Key className="w-7 h-7 text-[#b84a56]" />
+                </div>
+                <h1 className="text-2xl font-black font-sans text-slate-900 tracking-tight">
+                  Criar Nova Senha
+                </h1>
+                <p className="text-slate-500 mt-2 text-xs font-normal max-w-sm mx-auto leading-relaxed">
+                  Escolha sua nova senha de acesso abaixo. Ela passará a valer imediatamente.
+                </p>
+                {email && (
+                  <div className="mt-3 inline-block bg-[#faf5f3] border border-[#eedad5] px-3 py-1 rounded-full text-[11px] text-slate-600 font-mono">
+                    Conta: <span className="font-semibold text-[#b84a56]">{email}</span>
+                  </div>
+                )}
+              </div>
+
+              <form onSubmit={handleSaveNewPassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Nova Senha</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                      <Lock className="h-4 w-4 text-[#b84a56]" />
+                    </div>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-10 pr-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
+                      placeholder="No mínimo 6 caracteres"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-[#b84a56] transition-colors cursor-pointer"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Confirmar Nova Senha</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                      <Lock className="h-4 w-4 text-[#b84a56]" />
+                    </div>
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="pl-10 pr-10 block w-full bg-[#faf5f3] border-[#eedad5] rounded-xl border p-3.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#b84a56] focus:border-[#b84a56] transition-all placeholder-slate-400 font-mono"
+                      placeholder="Repita a nova senha"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-[#b84a56] transition-colors cursor-pointer"
+                      tabIndex={-1}
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {successMessage && (
+                  <div className="text-emerald-800 text-xs bg-emerald-50 p-3 rounded-xl border border-emerald-200 flex gap-2 items-start leading-relaxed">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="text-red-700 text-xs bg-red-50 p-3 rounded-xl border border-red-200 flex gap-2 items-start leading-relaxed animate-shake">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCancelRecovery}
+                    className="flex-1 py-3.5 px-4 border border-[#eedad5] rounded-xl text-xs font-bold uppercase tracking-wider text-slate-700 bg-white hover:bg-slate-50 transition-all text-center cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="flex-[2] flex justify-center items-center py-3.5 px-4 rounded-xl shadow-lg shadow-rose-900/15 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-[#c45663] to-[#b84a56] hover:from-[#b84a56] hover:to-[#9f3d4a] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b84a56] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                  >
+                    {isLoading ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    ) : (
+                      <span>Salvar Senha e Entrar</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+
           {/* Secure transaction notice */}
           <div className="mt-6 flex justify-center items-center gap-1.5 text-slate-400 text-[10px] font-semibold uppercase tracking-wider">
             <ShieldCheck className="w-3.5 h-3.5 text-[#b84a56]" />
             <span>Portal do Aluno Protegido e Criptografado</span>
-          </div>
-
-          {/* Self-healing Cache purger option */}
-          <div className="mt-6 pt-4 border-t border-[#f2deda] flex flex-col items-center gap-2">
-            <button
-              type="button"
-              onClick={async () => {
-                const confirm = window.confirm("Deseja limpar todo o cache e carregar a versão mais recente? Isso atualizará o sistema para a versão mais nova e resolverá travamentos.");
-                if (!confirm) return;
-
-                // Se estiver dentro do aplicativo Desktop (.EXE)
-                if (typeof window !== 'undefined' && (window as any).electronAPI?.clearCacheAndReload) {
-                  try {
-                    await (window as any).electronAPI.clearCacheAndReload();
-                    return;
-                  } catch (e) {
-                    console.warn('[Electron] Falha ao invocar clearCacheAndReload:', e);
-                  }
-                }
-
-                // Navegador web / PWA
-                if (typeof window !== 'undefined' && (window as any).clearAppCache) {
-                  await (window as any).clearAppCache(true);
-                } else {
-                  localStorage.clear();
-                  sessionStorage.clear();
-                  window.location.reload();
-                }
-              }}
-              className="text-[10px] text-slate-500 hover:text-[#b84a56] hover:underline font-bold uppercase tracking-wider flex items-center justify-center gap-1 bg-[#faf5f3] hover:bg-[#fae1dc] px-3.5 py-2 rounded-xl transition-all border border-[#eedad5] w-full cursor-pointer"
-            >
-              🧹 Travamentos ou problemas para carregar? Limpar Cache
-            </button>
           </div>
         </div>
         

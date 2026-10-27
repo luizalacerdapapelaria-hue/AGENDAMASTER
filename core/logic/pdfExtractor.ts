@@ -15,38 +15,39 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { LayoutElement, ElementType } from '../../types';
 import { getMonthName } from '../backend/calendar';
 
-let blobWorkerUrl: string | null = null;
-
-// Inicialização segura do Worker do PDF.js
+// Inicialização segura do Worker do PDF.js priorizando arquivo local no servidor
 export const setupPdfWorker = () => {
   if (typeof window === 'undefined') return;
-  if (blobWorkerUrl) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = blobWorkerUrl;
-    return;
-  }
-
   try {
-    if (pdfWorkerUrl) {
-      const targetUrl = pdfWorkerUrl.startsWith('http')
-        ? pdfWorkerUrl
-        : (pdfWorkerUrl.startsWith('/')
-            ? `${window.location.origin}${pdfWorkerUrl}`
-            : `${window.location.origin}/${pdfWorkerUrl.replace(/^\.\//, '')}`);
-
-      try {
-        const blob = new Blob([`importScripts(${JSON.stringify(targetUrl)});`], { type: 'application/javascript' });
-        blobWorkerUrl = URL.createObjectURL(blob);
-        pdfjsLib.GlobalWorkerOptions.workerSrc = blobWorkerUrl;
-      } catch {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = targetUrl;
-      }
+    // 1. Tenta o worker local já presente na pasta /public
+    if (typeof window !== 'undefined' && window.location) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+    } else if (pdfWorkerUrl) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
     } else {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.js`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
   } catch (err) {
     console.warn('[setupPdfWorker] Erro ao inicializar worker do PDF:', err);
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl || '/pdf.worker.min.js';
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+    } catch {}
   }
+};
+
+export const getSafePdfData = async (fileOrBuffer: File | Blob | ArrayBuffer | ArrayBufferView | string): Promise<ArrayBuffer | string> => {
+  if (typeof fileOrBuffer === 'string') return fileOrBuffer;
+  if (fileOrBuffer instanceof File || fileOrBuffer instanceof Blob) {
+    return await fileOrBuffer.arrayBuffer();
+  }
+  if (fileOrBuffer instanceof ArrayBuffer) {
+    return fileOrBuffer.slice(0);
+  }
+  if (ArrayBuffer.isView(fileOrBuffer)) {
+    const uint8 = new Uint8Array(fileOrBuffer.buffer, fileOrBuffer.byteOffset, fileOrBuffer.byteLength);
+    return uint8.buffer.slice(uint8.byteOffset, uint8.byteOffset + uint8.byteLength);
+  }
+  return fileOrBuffer as any;
 };
 
 setupPdfWorker();
@@ -1875,12 +1876,7 @@ export async function extractPdfObjects(
     autoDetectDynamicVariables = true,
   } = options;
 
-  let data: ArrayBuffer | string;
-  if (fileOrBuffer instanceof File) {
-    data = await fileOrBuffer.arrayBuffer();
-  } else {
-    data = fileOrBuffer;
-  }
+  const data = await getSafePdfData(fileOrBuffer);
 
   const loadingTask = pdfjsLib.getDocument({
     data,
@@ -2326,13 +2322,19 @@ export async function extractPdfObjects(
 
           if (typeof imgKey === 'string') {
             imageObj = await new Promise((resolve) => {
+              const timer = setTimeout(() => resolve(null), 1200);
               try {
                 if (page.objs.has(imgKey)) {
+                  clearTimeout(timer);
                   resolve(page.objs.get(imgKey));
                 } else {
-                  page.objs.get(imgKey, (obj: any) => resolve(obj));
+                  page.objs.get(imgKey, (obj: any) => {
+                    clearTimeout(timer);
+                    resolve(obj);
+                  });
                 }
               } catch {
+                clearTimeout(timer);
                 resolve(null);
               }
             });
@@ -2683,12 +2685,7 @@ export async function extractPdfObjects(
  */
 export async function getPdfPageCount(fileOrBuffer: File | ArrayBuffer | string): Promise<number> {
   setupPdfWorker();
-  let data: ArrayBuffer | string;
-  if (fileOrBuffer instanceof File) {
-    data = await fileOrBuffer.arrayBuffer();
-  } else {
-    data = fileOrBuffer;
-  }
+  const data = await getSafePdfData(fileOrBuffer);
 
   const loadingTask = pdfjsLib.getDocument({
     data,
@@ -2738,12 +2735,7 @@ export async function analyzeAgendaPdfStructure(
   onProgress?: (current: number, total: number) => void
 ): Promise<AgendaPdfStructureSummary> {
   setupPdfWorker();
-  let data: ArrayBuffer | string;
-  if (fileOrBuffer instanceof File) {
-    data = await fileOrBuffer.arrayBuffer();
-  } else {
-    data = fileOrBuffer;
-  }
+  const data = await getSafePdfData(fileOrBuffer);
 
   const loadingTask = pdfjsLib.getDocument({
     data,

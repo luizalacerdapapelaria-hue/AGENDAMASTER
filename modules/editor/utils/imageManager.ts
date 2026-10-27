@@ -176,16 +176,22 @@ export const ImageManager = {
   async preloadConfigImages(config: any): Promise<void> {
     const idsToLoad = new Set<string>();
 
-    const scan = (obj: any) => {
-      if (!obj || typeof obj !== 'object') return;
-      if (typeof obj.imageUrl === 'string' && obj.imageUrl.startsWith('image-id:')) {
-        idsToLoad.add(obj.imageUrl.substring('image-id:'.length));
+    const scan = (val: any) => {
+      if (!val) return;
+      if (typeof val === 'string') {
+        if (val.startsWith('image-id:')) {
+          idsToLoad.add(val.substring('image-id:'.length));
+        }
+        return;
       }
-      if (typeof obj.url === 'string' && obj.url.startsWith('image-id:')) {
-        idsToLoad.add(obj.url.substring('image-id:'.length));
+      if (Array.isArray(val)) {
+        for (let i = 0; i < val.length; i++) scan(val[i]);
+        return;
       }
-      for (const k of Object.keys(obj)) {
-        scan(obj[k]);
+      if (typeof val === 'object') {
+        for (const k of Object.keys(val)) {
+          scan(val[k]);
+        }
       }
     };
 
@@ -202,25 +208,35 @@ export const ImageManager = {
    * Extremely powerful for cleaning existing massive states on load.
    */
   async migrateConfigImages(config: any, onMigrated?: () => void): Promise<any> {
+    if (!config || typeof config !== 'object') return config;
     let migratedCount = 0;
-    const clone = JSON.parse(JSON.stringify(config));
+    const clone = typeof structuredClone === 'function'
+      ? structuredClone(config)
+      : JSON.parse(JSON.stringify(config));
 
     const scanAndReplace = async (obj: any) => {
       if (!obj || typeof obj !== 'object') return;
-      
-      if (typeof obj.imageUrl === 'string' && obj.imageUrl.startsWith('data:image/')) {
-        const idStr = await this.registerImage(obj.imageUrl);
-        obj.imageUrl = idStr;
-        migratedCount++;
-      }
-      if (typeof obj.url === 'string' && obj.url.startsWith('data:image/')) {
-        const idStr = await this.registerImage(obj.url);
-        obj.url = idStr;
-        migratedCount++;
+
+      if (Array.isArray(obj)) {
+        for (let i = 0; i < obj.length; i++) {
+          if (typeof obj[i] === 'string' && obj[i].startsWith('data:image/')) {
+            obj[i] = await this.registerImage(obj[i]);
+            migratedCount++;
+          } else if (obj[i] && typeof obj[i] === 'object') {
+            await scanAndReplace(obj[i]);
+          }
+        }
+        return;
       }
 
       for (const k of Object.keys(obj)) {
-        await scanAndReplace(obj[k]);
+        const val = obj[k];
+        if (typeof val === 'string' && val.startsWith('data:image/')) {
+          obj[k] = await this.registerImage(val);
+          migratedCount++;
+        } else if (val && typeof val === 'object') {
+          await scanAndReplace(val);
+        }
       }
     };
 
@@ -236,24 +252,36 @@ export const ImageManager = {
    * as raw base64 data in the exported JSON file so the project remains 100% portable.
    */
   async prepareConfigForExport(config: any): Promise<any> {
-    const clone = JSON.parse(JSON.stringify(config));
+    if (!config || typeof config !== 'object') return config;
+    const clone = typeof structuredClone === 'function'
+      ? structuredClone(config)
+      : JSON.parse(JSON.stringify(config));
 
     const restoreBase64 = async (obj: any) => {
       if (!obj || typeof obj !== 'object') return;
 
-      if (typeof obj.imageUrl === 'string' && obj.imageUrl.startsWith('image-id:')) {
-        const id = obj.imageUrl.substring('image-id:'.length);
-        const base64 = await this.getBase64(id);
-        if (base64) obj.imageUrl = base64;
-      }
-      if (typeof obj.url === 'string' && obj.url.startsWith('image-id:')) {
-        const id = obj.url.substring('image-id:'.length);
-        const base64 = await this.getBase64(id);
-        if (base64) obj.url = base64;
+      if (Array.isArray(obj)) {
+        for (let i = 0; i < obj.length; i++) {
+          if (typeof obj[i] === 'string' && obj[i].startsWith('image-id:')) {
+            const id = obj[i].substring('image-id:'.length);
+            const base64 = await this.getBase64(id);
+            if (base64) obj[i] = base64;
+          } else if (obj[i] && typeof obj[i] === 'object') {
+            await restoreBase64(obj[i]);
+          }
+        }
+        return;
       }
 
       for (const k of Object.keys(obj)) {
-        await restoreBase64(obj[k]);
+        const val = obj[k];
+        if (typeof val === 'string' && val.startsWith('image-id:')) {
+          const id = val.substring('image-id:'.length);
+          const base64 = await this.getBase64(id);
+          if (base64) obj[k] = base64;
+        } else if (val && typeof val === 'object') {
+          await restoreBase64(val);
+        }
       }
     };
 

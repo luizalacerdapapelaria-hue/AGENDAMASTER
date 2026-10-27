@@ -6,6 +6,77 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
+    <script>
+      (function () {
+        try {
+          // 1. Limpa silenciosamente caches antigos de arquivos estáticos sem tocar nos projetos ou login válido
+          if ('caches' in window) {
+            caches.keys().then(function (names) {
+              for (var i = 0; i < names.length; i++) {
+                caches.delete(names[i]);
+              }
+            }).catch(function () {});
+          }
+
+          // 2. Remove automaticamente tokens corrompidos ou irrecuperáveis antes da aplicação iniciar
+          try {
+            var nowSec = Math.floor(Date.now() / 1000);
+            var toDelete = [];
+            for (var j = 0; j < window.localStorage.length; j++) {
+              var k = window.localStorage.key(j);
+              if (k && k.indexOf('sb-') === 0 && k.indexOf('-auth-token') !== -1) {
+                var raw = window.localStorage.getItem(k);
+                if (!raw) {
+                  toDelete.push(k);
+                } else {
+                  try {
+                    var parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object' || (!parsed.refresh_token && parsed.expires_at && parsed.expires_at < nowSec)) {
+                      toDelete.push(k);
+                    }
+                  } catch (_parseErr) {
+                    toDelete.push(k);
+                  }
+                }
+              }
+            }
+            for (var d = 0; d < toDelete.length; d++) {
+              window.localStorage.removeItem(toDelete[d]);
+              window.localStorage.removeItem('agendamaster_verified_profile');
+            }
+          } catch (_lsErr) {}
+
+          // 3. Auto-recuperação imediata caso um pacote JS/CSS antigo tenha sido substituído num novo deploy
+          window.addEventListener('error', function (ev) {
+            var target = ev && ev.target;
+            if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+              var src = target.src || target.href || '';
+              if (src.indexOf(window.location.origin) === 0 || src.indexOf('/assets/') !== -1) {
+                try {
+                  var lastTs = parseInt(window.sessionStorage.getItem('agendamaster_asset_heal_ts') || '0', 10);
+                  if (Date.now() - lastTs < 20000) return;
+                  window.sessionStorage.setItem('agendamaster_asset_heal_ts', String(Date.now()));
+                } catch (_ssErr) {}
+
+                var reloadFresh = function () {
+                  var u = new URL(window.location.href);
+                  u.searchParams.set('_r', Date.now().toString(36));
+                  window.location.replace(u.toString());
+                };
+
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(function (regs) {
+                    return Promise.all(regs.map(function (r) { return r.unregister(); }));
+                  }).finally(reloadFresh);
+                } else {
+                  reloadFresh();
+                }
+              }
+            }
+          }, true);
+        } catch (_e) {}
+      })();
+    </script>
     <title>AgendaMaster</title>
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#b84a56" />

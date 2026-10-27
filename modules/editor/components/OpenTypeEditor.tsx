@@ -6,7 +6,7 @@ import {
   ChevronDown, ZoomIn, ZoomOut, AlertCircle, Loader2, Wand2
 } from 'lucide-react';
 import { saveFontToDB, getAllFontsFromDB, deleteFontFromDB, StoredFont } from '../../../core/logic/fontStorage';
-import { detectInstalledFonts, getCachedInstalledFonts, CANDIDATE_SYSTEM_FONTS } from '../../../core/logic/fontDetector';
+import { detectInstalledFonts, getCachedInstalledFonts, CANDIDATE_SYSTEM_FONTS, registerLocalFontHandle, ensureFontLoaded, getSafeFontFamily, injectLocalFontFaceStyles } from '../../../core/logic/fontDetector';
 import { SYSTEM_FONTS, AVAILABLE_FONTS } from '../../../core/constants/elements';
 
 export interface SelectedTextInfo {
@@ -727,6 +727,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
             fontDataList.forEach((fd: any) => {
               if (fd && fd.family) {
                 families.push(fd.family);
+                registerLocalFontHandle(fd);
                 const key = fd.family.toLowerCase();
                 // Prefer Regular style when multiple weights exist for the same family
                 const existing = localFontDataMapRef.current.get(key);
@@ -735,7 +736,9 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
                 }
               }
             });
-            setExtraPcFonts(Array.from(new Set(families)));
+            const uniqueFamilies: string[] = Array.from(new Set(families));
+            injectLocalFontFaceStyles(uniqueFamilies);
+            setExtraPcFonts(uniqueFamilies);
             const totalUnique = new Set([...allAvailablePcFonts, ...families]).size;
             showToast(`✨ ${totalUnique} fontes do computador carregadas (de A a Z)!`);
             setScanningPcFonts(false);
@@ -819,6 +822,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
 
       setSelectedGlyph(null);
       if (onRegisterFont) onRegisterFont(familyName);
+      await ensureFontLoaded(familyName);
       showToast(`Fonte "${familyName}" selecionada! (${parsedItem.font.glyphs.length} glifos)`);
     } catch (e) {
       const sysItem = createSystemFontItem(familyName);
@@ -829,6 +833,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
       });
       setSelectedGlyph(null);
       if (onRegisterFont) onRegisterFont(familyName);
+      await ensureFontLoaded(familyName);
     } finally {
       setLoadingFont(false);
     }

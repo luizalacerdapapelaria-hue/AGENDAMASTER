@@ -68,7 +68,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onChooseBrowser, exeUrl, onNav
                   Agenda <span className="text-[#b84a56]">Master</span>
                 </h1>
                 <span className="bg-[#fcedea] text-[#9f3d4a] border border-[#f8d4ce] text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  v2.0.1
+                  v2.0.3
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 font-medium">Sistema Profissional de Personalização de Agendas e Planners</p>

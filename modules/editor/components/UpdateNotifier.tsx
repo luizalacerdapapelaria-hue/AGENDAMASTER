@@ -1,19 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Sparkles, X, ChevronRight, Laptop } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { localStorage } from '../../../services/safeStorage';
+import { localStorage, sessionStorage } from '../../../services/safeStorage';
 
-const CURRENT_VERSION = "2.0.1"; // Versão fixa do build atual
+const CURRENT_VERSION = "2.0.3"; // Versão fixa do build atual
 
-export const UpdateNotifier: React.FC = () => {
+interface UpdateNotifierProps {
+  autoApply?: boolean;
+}
+
+export const UpdateNotifier: React.FC<UpdateNotifierProps> = ({ autoApply = false }) => {
   const [hasUpdate, setHasUpdate] = useState(false);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [releaseNotes, setReleaseNotes] = useState<string>('');
   const [isDismissed, setIsDismissed] = useState(false);
   const [isElectron, setIsElectron] = useState(false);
+  const autoApplyRef = useRef(autoApply);
 
   useEffect(() => {
-    // Detecta se a aplicação está rodando dentro do wrapper do Electron
+    autoApplyRef.current = autoApply;
+  }, [autoApply]);
+
+  const handleUpdate = () => {
+    if (typeof window !== 'undefined') {
+      if ((window as any).electronAPI?.clearCacheAndReload) {
+        (window as any).electronAPI.clearCacheAndReload();
+        return;
+      }
+      if ((window as any).clearAppCache) {
+        (window as any).clearAppCache(true, false);
+        return;
+      }
+      window.location.reload();
+    }
+  };
+
+  useEffect(() => {
     const isElectronEnv = typeof window !== 'undefined' && (
       window.navigator.userAgent.toLowerCase().includes('electron') ||
       (window as any).ipcRenderer ||
@@ -21,21 +43,28 @@ export const UpdateNotifier: React.FC = () => {
     );
     setIsElectron(isElectronEnv);
 
-    // Executa a primeira checagem de versão ao carregar o app
     checkVersion();
 
-    // Define uma checagem periódica a cada 5 minutos
     const interval = setInterval(() => {
       checkVersion();
     }, 5 * 60 * 1000);
 
-    return () => clearInterval(interval);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkVersion();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   const checkVersion = async () => {
-    // Se o usuário dispensou a atualização nesta sessão (snooze), não checa novamente
     const snoozeTime = localStorage.getItem('agenda_master_update_snooze');
-    if (snoozeTime) {
+    if (snoozeTime && !autoApplyRef.current) {
       const parsed = parseInt(snoozeTime, 10);
       const twoHours = 2 * 60 * 60 * 1000;
       if (Date.now() - parsed < twoHours) {
@@ -46,12 +75,20 @@ export const UpdateNotifier: React.FC = () => {
     }
 
     try {
-      // Adiciona o timestamp na query string para evitar cache agressivo de navegadores
-      const response = await fetch(`/version.json?t=${Date.now()}`);
+      const response = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('Erro ao buscar arquivo de versão.');
       const data = await response.json();
       
       if (data && data.version && data.version !== CURRENT_VERSION) {
+        // Se a aluna NÃO está no meio da edição de páginas, aplica a atualização 100% sozinho sem pedir clique!
+        if (autoApplyRef.current) {
+          const guardKey = `agendamaster_auto_updated_${data.version}`;
+          if (!sessionStorage.getItem(guardKey)) {
+            sessionStorage.setItem(guardKey, '1');
+            handleUpdate();
+            return;
+          }
+        }
         setLatestVersion(data.version);
         setReleaseNotes(data.notes || '');
         setHasUpdate(true);
@@ -61,16 +98,8 @@ export const UpdateNotifier: React.FC = () => {
     }
   };
 
-  const handleUpdate = () => {
-    if (typeof window !== 'undefined') {
-      // Força a recarga total limpando cache do navegador se suportado
-      window.location.reload();
-    }
-  };
-
   const handleDismiss = () => {
     setIsDismissed(true);
-    // Adiciona soneca (snooze) de 2 horas para não perturbar o usuário no editor
     localStorage.setItem('agenda_master_update_snooze', Date.now().toString());
   };
 

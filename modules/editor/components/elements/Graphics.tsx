@@ -2,6 +2,7 @@
 import React from 'react';
 import { Moon, Circle } from 'lucide-react';
 import { BaseElementProps } from './types';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, style, isEditor, pageHeight, pageWidth, week }) => {
     
@@ -57,7 +58,15 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
                     <div className="shrink-0 aspect-square" style={{ width: style.fontSize, height: style.fontSize }}>
                         {renderMoonIcon(phase, color)}
                     </div>
-                    <span className="whitespace-nowrap truncate" style={{ fontSize: style.fontSize, fontFamily: style.fontFamily, color: style.color }}>
+                    <span
+                        className="whitespace-nowrap truncate"
+                        style={{
+                            fontSize: style.fontSize,
+                            fontFamily: style.fontFamily,
+                            color: style.color,
+                            ...getTextStrokeCss(style, style.color || '#000000'),
+                        }}
+                    >
                         {phase}
                     </span>
                 </div>
@@ -126,10 +135,12 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
                             fontSize: style.fontSize || 10, 
                             fontFamily: style.fontFamily,
                             fontWeight: style.fontWeight || 'bold',
+                            fontStyle: style.fontStyle || 'normal',
                             color: style.color || '#6b7280',
                             textAlign: (style.textAlign as any) || 'left',
                             textTransform: (style.textTransform as any) || 'uppercase',
-                            letterSpacing: `${style.letterSpacing || 0}px`
+                            letterSpacing: `${style.letterSpacing || 0}px`,
+                            ...getTextStrokeCss(style, style.color || '#6b7280'),
                         }} 
                         className="mb-1"
                     >

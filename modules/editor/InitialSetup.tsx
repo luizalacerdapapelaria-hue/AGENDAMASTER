@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType } from '../../types';
-import { FileText, BookOpen, ArrowRight, ArrowLeft, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap, Sparkles, DollarSign, Clock, Wallet, Heart, CheckSquare, Grid3X3, ListTodo, Square, Check } from 'lucide-react';
-import { importProject } from '../../core/logic/fileSystem';
+import { localStorage } from '../../services/safeStorage';
+import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType, CustomTemplateItem, IntroPage } from '../../types';
+import { FileText, BookOpen, BookMarked, ArrowRight, ArrowLeft, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap, Sparkles, DollarSign, Clock, Wallet, Heart, CheckSquare, Grid3X3, ListTodo, Square, Check, RotateCcw, Star } from 'lucide-react';
+import { importProjectOrTemplates, normalizeImportedProjectConfig } from '../../core/logic/fileSystem';
+import { ImageManager } from './utils/imageManager';
 import { isProjectYearRestricted, generateHolidayListFullText, HolidayDateFormat } from '../../core/backend/calendar';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
-import { DAILY_CLASSIC, DAILY_FINANCIAL, DAILY_APPOINTMENT_PRO, DAILY_PLANNER_COMMON, APPOINTMENT_2DPP_TOP, APPOINTMENT_2DPP_BOTTOM } from './templates/dailyTemplates';
+import { DAILY_CLASSIC, DAILY_FINANCIAL, DAILY_APPOINTMENT_PRO, DAILY_PLANNER_COMMON, DAILY_PERMANENT, APPOINTMENT_2DPP_TOP, APPOINTMENT_2DPP_BOTTOM, PERMANENT_2DPP_TOP, PERMANENT_2DPP_BOTTOM } from './templates/dailyTemplates';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
 import { buildStandardAgendaConfig } from './templates/standardAgendaTemplate';
@@ -86,7 +88,7 @@ export const AGENDA_OBJECTIVE_OPTIONS: ObjectiveModelOption[] = [
     subtitle: 'Sem datas pré-fixadas no miolo, ideal para começar e usar em qualquer época do ano.',
     tag: 'Não Datada',
     iconName: 'sparkles',
-    libraryItemId: 'agenda-padrao-completa',
+    libraryItemId: 'agenda-permanente',
     defaultLayout: '1_per_page',
     defaultName: 'Minha Agenda Permanente'
   }
@@ -244,9 +246,11 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   const [startMonth, setStartMonth] = useState<number>(defaultValues?.startMonth ?? 0);
   const [durationMonths, setDurationMonths] = useState<number>(defaultValues?.durationMonths ?? 12);
 
-  const [startMonthOnRightPage, setStartMonthOnRightPage] = useState<boolean>(defaultValues?.startMonthOnRightPage ?? true);
-  const [includeMonthlyDividers, setIncludeMonthlyDividers] = useState<boolean>(defaultValues?.includeMonthlyDividers ?? true);
-  const [includeMonthlyIntroPages, setIncludeMonthlyIntroPages] = useState<boolean>(defaultValues?.includeMonthlyIntroPages ?? true);
+  const [isPermanent, setIsPermanent] = useState<boolean>(defaultValues?.isPermanent ?? false);
+  const [permanentPageCount, setPermanentPageCount] = useState<number>(defaultValues?.pageCount || 365);
+  const [startMonthOnRightPage, setStartMonthOnRightPage] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.startMonthOnRightPage ?? false) : (defaultValues?.startMonthOnRightPage ?? true));
+  const [includeMonthlyDividers, setIncludeMonthlyDividers] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.includeMonthlyDividers ?? false) : (defaultValues?.includeMonthlyDividers ?? true));
+  const [includeMonthlyIntroPages, setIncludeMonthlyIntroPages] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.includeMonthlyIntroPages ?? false) : (defaultValues?.includeMonthlyIntroPages ?? true));
   const [fillerPageContent, setFillerPageContent] = useState<string>(defaultValues?.fillerPageContent ?? 'blank');
   const [monthlyDividerVersoContent, setMonthlyDividerVersoContent] = useState<string>(defaultValues?.monthlyDividerVersoContent ?? 'blank');
 
@@ -254,6 +258,15 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       if (defaultValues) {
           if (defaultValues.name) setProjectName(defaultValues.name);
           if (defaultValues.year) setYear(defaultValues.year);
+          if (defaultValues.isPermanent !== undefined) {
+              setIsPermanent(defaultValues.isPermanent);
+              if (defaultValues.isPermanent) {
+                  setSelectedLibraryItemId('agenda-permanente');
+              }
+          }
+          if (defaultValues.pageCount !== undefined && defaultValues.pageCount > 0) {
+              setPermanentPageCount(defaultValues.pageCount);
+          }
           if (defaultValues.startMonth !== undefined) setStartMonth(defaultValues.startMonth);
           if (defaultValues.durationMonths !== undefined) setDurationMonths(defaultValues.durationMonths);
           if (defaultValues.pageSize) setPageSize(defaultValues.pageSize);
@@ -291,10 +304,12 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   }, [defaultValues]);
 
   const handleProjectTypeSelect = (type: ProjectType) => {
+      setImportedTemplatesPack(null);
       setProjectType(type);
       setIsSelectionExplicit(true);
       setSelectedTemplateElements(null);
       setSelectedIntroTemplate(null);
+      setIsPermanent(false);
       if (type === 'agenda') {
           setLayoutType('1_per_page');
           setSelectedLibraryItemId('agenda-padrao-completa');
@@ -319,10 +334,12 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const handleStartBlankProject = (targetType: 'agenda' | 'planner' = 'agenda') => {
+      setImportedTemplatesPack(null);
       setProjectType(targetType);
       setIsSelectionExplicit(true);
       setSelectedTemplateElements([]);
       setSelectedIntroTemplate(null);
+      setIsPermanent(false);
       if (targetType === 'planner') {
           setSelectedLibraryItemId('planner-em-branco');
           setLayoutType('weekly_vertical');
@@ -339,10 +356,13 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const handleSelectObjectiveModel = (option: ObjectiveModelOption) => {
+      setImportedTemplatesPack(null);
       setIsSelectionExplicit(true);
       setSelectedIntroTemplate(null);
 
       const isBlank = option.isPureBlank || option.libraryItemId === 'layout-em-branco' || option.libraryItemId === 'planner-em-branco' || (option.notebookElements && option.notebookElements.length === 0);
+      const isPerm = option.id === 'agenda_permanente' || option.libraryItemId === 'agenda-permanente';
+      setIsPermanent(isPerm);
 
       if (option.libraryItemId) {
           setSelectedLibraryItemId(option.libraryItemId);
@@ -351,9 +371,15 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               setIncludeMonthlyDividers(false);
               setIncludeMonthlyIntroPages(false);
               setSelectedTemplateElements([]);
+          } else if (isPerm) {
+              setIncludeMonthlyDividers(false);
+              setIncludeMonthlyIntroPages(false);
+              setStartMonthOnRightPage(false);
+              setPermanentPageCount(option.defaultLayout === '2_per_page' ? 366 : 365);
           } else {
               setIncludeMonthlyDividers(true);
               setIncludeMonthlyIntroPages(true);
+              setStartMonthOnRightPage(true);
           }
       } else {
           setUseStandardAgendaModel(false);
@@ -373,6 +399,11 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const getSelectedModelName = (): string => {
+      if (importedTemplatesPack && importedTemplatesPack.length > 0) {
+          const activeMiolo = importedTemplatesPack.find(t => t.id === selectedImportedMioloId);
+          if (activeMiolo) return `⭐ ${activeMiolo.name}`;
+          return `⭐ ${importedTemplatesPack.length} Modelo(s) Importado(s)`;
+      }
       if (projectType === 'notebook') {
           if (selectedTemplateElements && selectedTemplateElements.length === 0) return 'Caderno Liso (Em Branco)';
           if (selectedTemplateElements?.some(el => el.type === 'note_grid' && (el.style as any)?.variant === 'dots')) return 'Caderno Pontilhado • Bullet Journal';
@@ -380,8 +411,12 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           if (selectedTemplateElements?.some(el => el.id.startsWith('cor-'))) return 'Caderno Método Cornell';
           return 'Caderno Pautado Clássico';
       }
+      if (isPermanent || selectedLibraryItemId === 'agenda-permanente') {
+          return 'Agenda Permanente (Não Datada)';
+      }
       const item = LAYOUT_LIBRARY.find(i => i.id === selectedLibraryItemId);
       if (item) {
+          if (item.id === 'agenda-permanente') return 'Agenda Permanente (Não Datada)';
           if (item.id === 'planner-financeiro') return 'Agenda Financeira';
           if (item.id === 'agenda-padrao-completa') return 'Agenda Diária';
           if (item.id === 'agenda-agendamento-profissional') return 'Agendamento & Clientes';
@@ -398,15 +433,25 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const handleSelectPastelVariation = (item: LayoutLibraryItem) => {
+      const isPerm = Boolean(item.modelOptions.isPermanent || item.id === 'agenda-permanente');
       setSelectedLibraryItemId(item.id);
+      setIsPermanent(isPerm);
       setUseStandardAgendaModel(true);
       setProjectType(item.projectGroup);
       setLayoutType(item.modelOptions.layoutType || '1_per_page');
       if (item.modelOptions.pageSize) {
           setPageSize(item.modelOptions.pageSize);
       }
-      setIncludeMonthlyDividers(true);
-      setIncludeMonthlyIntroPages(true);
+      if (isPerm) {
+          setPermanentPageCount(item.modelOptions.pageCount || (item.modelOptions.layoutType === '2_per_page' ? 366 : 365));
+          setIncludeMonthlyDividers(false);
+          setIncludeMonthlyIntroPages(false);
+          setStartMonthOnRightPage(false);
+      } else {
+          setIncludeMonthlyDividers(true);
+          setIncludeMonthlyIntroPages(true);
+          setStartMonthOnRightPage(true);
+      }
       setIsSelectionExplicit(true);
       setStep('config');
   };
@@ -443,44 +488,252 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   };
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [importedTemplatesPack, setImportedTemplatesPack] = useState<CustomTemplateItem[] | null>(null);
+  const [selectedImportedMioloId, setSelectedImportedMioloId] = useState<string>('');
+  const [includeImportedPagesAsIntro, setIncludeImportedPagesAsIntro] = useState<boolean>(true);
+  const [importErrorBanner, setImportErrorBanner] = useState<string | null>(null);
+
+  const [autoSavedDraft, setAutoSavedDraft] = useState<{ name: string; config: AgendaConfig } | null>(() => {
+    try {
+      const raw = localStorage.getItem('agendamaster_current_project');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const normalized = normalizeImportedProjectConfig(parsed);
+      return { name: normalized.name || 'Último Projeto', config: normalized };
+    } catch (_) {
+      return null;
+    }
+  });
+
+  const handleRestoreAutoSave = async () => {
+    if (!autoSavedDraft) return;
+    try {
+      await ImageManager.preloadConfigImages(autoSavedDraft.config);
+      const migrated = await ImageManager.migrateConfigImages(autoSavedDraft.config);
+      onComplete(migrated);
+    } catch (_) {
+      onComplete(autoSavedDraft.config);
+    }
+  };
 
   const handleImportClick = () => {
+    setImportErrorBanner(null);
     fileInputRef.current?.click();
+  };
+
+  const applyImportedMioloSelection = (miolo: CustomTemplateItem | undefined) => {
+    if (!miolo) {
+      setSelectedImportedMioloId('');
+      return;
+    }
+    setSelectedImportedMioloId(miolo.id);
+    const inferredLayout: PageLayoutType =
+      miolo.layoutType ||
+      (miolo.elementsWeeklyLeft?.length || miolo.elementsWeeklyRight?.length ? 'weekly_vertical' : '1_per_page');
+    const inferredProjectType: ProjectType =
+      miolo.projectType ||
+      (inferredLayout.startsWith('weekly')
+        ? 'planner'
+        : inferredLayout === 'notebook'
+        ? 'notebook'
+        : inferredLayout === 'devotional'
+        ? 'devotional'
+        : 'agenda');
+    setProjectType(inferredProjectType);
+    setLayoutType(inferredLayout);
+    setProjectName(miolo.name || 'Meu Projeto Personalizado');
+    if (miolo.elementsVerso?.length || miolo.elementsWeeklyVersoLeft?.length || miolo.elementsWeeklyVersoRight?.length) {
+      setCustomVerso(true);
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImportErrorBanner(null);
 
     try {
-      const importedConfig = await importProject(file);
+      const result = await importProjectOrTemplates(file);
+
+      if (result.kind === 'templates') {
+        const migratedTemplates: CustomTemplateItem[] = await ImageManager.migrateConfigImages(result.templates);
+
+        // Salva automaticamente todos os modelos na galeria "Meus Modelos ⭐"
+        try {
+          const existingRaw = localStorage.getItem('agendamaster_custom_page_templates');
+          const existingList: CustomTemplateItem[] = existingRaw ? JSON.parse(existingRaw) : [];
+          const merged = [...existingList];
+
+          for (const tmpl of migratedTemplates) {
+            const alreadyIdentical = merged.some(
+              t =>
+                t.id === tmpl.id ||
+                (t.name === tmpl.name &&
+                  t.templateType === tmpl.templateType &&
+                  (t.elements?.length || 0) === (tmpl.elements?.length || 0))
+            );
+            if (!alreadyIdentical) {
+              merged.push(tmpl);
+            }
+          }
+          localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(merged));
+        } catch (storageErr) {
+          console.warn('Aviso ao persistir modelos importados:', storageErr);
+        }
+
+        const mioloModels = migratedTemplates.filter(
+          t => t.templateType === 'miolo' || String(t.id || '').startsWith('miolo-')
+        );
+        const pageModels = migratedTemplates.filter(
+          t => !(t.templateType === 'miolo' || String(t.id || '').startsWith('miolo-'))
+        );
+
+        setImportedTemplatesPack(migratedTemplates);
+        setIncludeImportedPagesAsIntro(pageModels.length > 0);
+        setIsSelectionExplicit(true);
+
+        if (mioloModels.length > 0) {
+          applyImportedMioloSelection(mioloModels[0]);
+        } else {
+          setSelectedImportedMioloId('');
+          setProjectType(prev => prev || 'agenda');
+          setLayoutType(prev => prev || '1_per_page');
+          if (pageModels.length === 1 && pageModels[0].name) {
+            setProjectName(pageModels[0].name);
+          } else {
+            setProjectName('Minha Agenda com Modelos Importados');
+          }
+        }
+
+        setStep('config');
+        return;
+      }
+
+      const importedConfig = result.config;
       const isImportedYearRestricted = isProjectYearRestricted(
         importedConfig.projectType, 
         importedConfig.year || 2027, 
         importedConfig.startMonth || 0, 
         importedConfig.durationMonths || 12, 
-        userPlan
+        userPlan,
+        Boolean(importedConfig.isPermanent)
       );
 
       if (isImportedYearRestricted) {
-          alert(`As configurações do projeto importado (ano ${importedConfig.year}, ${importedConfig.durationMonths || 12} meses) excedem o limite permitido do seu plano de assinatura (no máximo 1 mês de 2028). Reajustando para 2027 para permitir o uso.`);
           importedConfig.year = 2027;
           importedConfig.startMonth = 0;
           importedConfig.durationMonths = 12;
       }
-      onComplete(importedConfig);
+      const migratedConfig = await ImageManager.migrateConfigImages(importedConfig);
+      onComplete(migratedConfig);
     } catch (err) {
-      alert('Erro ao importar projeto: ' + (err instanceof Error ? err.message : 'Arquivo inválido'));
+      setImportErrorBanner(err instanceof Error ? err.message : 'Arquivo inválido ou corrompido.');
     } finally {
       e.target.value = '';
     }
   };
 
   const handleSubmit = () => {
-      const isYearRestricted = isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan);
+      const isYearRestricted = isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan, isPermanent);
 
       if (isYearRestricted) {
           alert(`As configurações selecionadas (ano ${year}, mês inicial ${['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][startMonth]}, duração ${durationMonths} meses) englobam mais de 1 mês de 2028, o que está bloqueado na sua assinatura anual. Para agendas de 2027, é permitido no máximo até Janeiro/2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028, é necessária a renovação da sua assinatura.`);
+          return;
+      }
+
+      // Fluxo especial: aluna importou um pacote de "Meus Modelos" (.json) pelas telas iniciais
+      if (importedTemplatesPack && importedTemplatesPack.length > 0) {
+          const activeMiolo = importedTemplatesPack.find(t => t.id === selectedImportedMioloId);
+          const importedIntroList: IntroPage[] = includeImportedPagesAsIntro
+              ? importedTemplatesPack
+                    .filter(t => !(t.templateType === 'miolo' || String(t.id || '').startsWith('miolo-')) && t.templateType !== 'monthly_intro')
+                    .map(t => ({
+                        id: Math.random().toString(36).substring(2, 11),
+                        name: t.name,
+                        elements: (t.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substring(2, 11) })),
+                        background: t.background,
+                    }))
+              : [];
+          const importedMonthlyList: IntroPage[] = includeImportedPagesAsIntro
+              ? importedTemplatesPack
+                    .filter(t => t.templateType === 'monthly_intro')
+                    .map(t => ({
+                        id: Math.random().toString(36).substring(2, 11),
+                        name: t.name,
+                        elements: (t.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substring(2, 11) })),
+                        background: t.background,
+                    }))
+              : [];
+
+          const stdBase = buildStandardAgendaConfig(year);
+          const finalProjectType: ProjectType = projectType || (layoutType.startsWith('weekly') ? 'planner' : 'agenda');
+          const cloneEls = (arr?: LayoutElement[]) =>
+              arr ? arr.map(el => ({ ...el, id: Math.random().toString(36).substring(2, 11) })) : undefined;
+
+          const baseElements = activeMiolo
+              ? cloneEls(activeMiolo.elements) || []
+              : stdBase.elements || [];
+          const baseWeeklyLeft = activeMiolo?.elementsWeeklyLeft
+              ? cloneEls(activeMiolo.elementsWeeklyLeft)
+              : layoutType.startsWith('weekly')
+              ? mapTemplateElements(layoutType === 'weekly_horizontal' ? WEEKLY_HORIZONTAL_LEFT : WEEKLY_VERTICAL_LEFT, plannerStyle)
+              : undefined;
+          const baseWeeklyRight = activeMiolo?.elementsWeeklyRight
+              ? cloneEls(activeMiolo.elementsWeeklyRight)
+              : layoutType.startsWith('weekly')
+              ? mapTemplateElements(layoutType === 'weekly_horizontal' ? WEEKLY_HORIZONTAL_RIGHT : WEEKLY_VERTICAL_RIGHT, plannerStyle)
+              : undefined;
+
+          onComplete({
+              name: projectName,
+              projectType: finalProjectType,
+              year,
+              pageCount: finalProjectType === 'notebook' || finalProjectType === 'devotional' ? 100 : undefined,
+              startMonth,
+              durationMonths,
+              pageSize,
+              customPageSize: pageSize === 'Custom' ? { width: Math.max(20, customWidth || 148), height: Math.max(20, customHeight || 210) } : undefined,
+              orientation,
+              margins,
+              initialMargins: margins,
+              bindingMargins: margins,
+              mirrorEvenPages,
+              mirrorContentOnVerso,
+              customVerso: Boolean(customVerso || activeMiolo?.elementsVerso?.length || activeMiolo?.elementsWeeklyVersoLeft?.length),
+              versoAdvancesSequence,
+              elements: baseElements,
+              elementsVerso: activeMiolo?.elementsVerso
+                  ? cloneEls(activeMiolo.elementsVerso)
+                  : customVerso
+                  ? baseElements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
+                  : undefined,
+              elementsWeeklyLeft: baseWeeklyLeft,
+              elementsWeeklyRight: baseWeeklyRight,
+              elementsWeeklyVersoLeft: activeMiolo?.elementsWeeklyVersoLeft
+                  ? cloneEls(activeMiolo.elementsWeeklyVersoLeft)
+                  : undefined,
+              elementsWeeklyVersoRight: activeMiolo?.elementsWeeklyVersoRight
+                  ? cloneEls(activeMiolo.elementsWeeklyVersoRight)
+                  : undefined,
+              layoutType,
+              weeklyStartMode: 'full_week',
+              showPaddingDaysNumbers: true,
+              includeHolidays: true,
+              includeMoonPhases: true,
+              includeQuotes: true,
+              quoteCategory: 'feminine_strength',
+              includeVerses: true,
+              municipalHolidays,
+              startMonthOnRightPage,
+              includeMonthlyDividers: finalProjectType === 'notebook' ? false : includeMonthlyDividers,
+              includeMonthlyIntroPages: finalProjectType === 'notebook' ? false : includeMonthlyIntroPages,
+              fillerPageContent,
+              monthlyDividerVersoContent: monthlyDividerVersoContent as any,
+              monthlyDividerStyle: stdBase.monthlyDividerStyle,
+              introPages: [...importedIntroList, ...(stdBase.introPages || [])],
+              monthlyIntroPages: [...importedMonthlyList, ...(stdBase.monthlyIntroPages || [])],
+              background: activeMiolo?.background || defaultValues?.background,
+          });
           return;
       }
       
@@ -580,10 +833,16 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       // Se for agenda ou planner com Modelo Pastel Artístico Completo ativado
       if (!(projectType === 'notebook' || projectType === 'devotional') && useStandardAgendaModel) {
           const isPureBlankSelected = selectedLibraryItemId === 'layout-em-branco' || selectedLibraryItemId === 'planner-em-branco';
-          const stdConfig = resolveLayoutLibraryConfig(selectedLibraryItemId, year) || buildStandardAgendaConfig(year);
+          const isPermanentAgenda = !isPureBlankSelected && (isPermanent || selectedLibraryItemId === 'agenda-permanente');
+          const effectiveLibraryId = isPermanentAgenda ? 'agenda-permanente' : selectedLibraryItemId;
+          const stdConfig = resolveLayoutLibraryConfig(effectiveLibraryId, year) || buildStandardAgendaConfig(year);
           let finalElements = isPureBlankSelected ? [] : (stdConfig.elements ? [...stdConfig.elements] : []);
           let finalWeeklyLeft = isPureBlankSelected ? (layoutType.startsWith('weekly') ? [] : undefined) : stdConfig.elementsWeeklyLeft;
           let finalWeeklyRight = isPureBlankSelected ? (layoutType.startsWith('weekly') ? [] : undefined) : stdConfig.elementsWeeklyRight;
+
+          if (isPermanentAgenda && layoutType === '2_per_page') {
+              finalElements = PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+          }
 
           // Se for Planner e o layout selecionado na tela de configuração for ajustado pelo usuário:
           if (projectType === 'planner' && !isPureBlankSelected) {
@@ -614,7 +873,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           onComplete({
               name: projectName,
               projectType: finalProjectType,
+              isPermanent: isPermanentAgenda,
               year,
+              pageCount: isPermanentAgenda ? Math.max(10, permanentPageCount || (layoutType === '2_per_page' ? 366 : 365)) : undefined,
               startMonth,
               durationMonths,
               pageSize,
@@ -630,27 +891,27 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               elementsVerso: customVerso
                 ? (finalElements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) })))
                 : undefined,
-              layoutType,
+              layoutType: isPermanentAgenda && layoutType === '1_per_page_weekend_shared' ? '1_per_page' : layoutType,
               weeklyStartMode: defaultValues?.weeklyStartMode ?? 'full_week',
               showPaddingDaysNumbers: defaultValues?.showPaddingDaysNumbers ?? true,
-              includeHolidays: true,
-              includeMoonPhases: defaultValues?.includeMoonPhases ?? true,
+              includeHolidays: isPermanentAgenda ? false : true,
+              includeMoonPhases: isPermanentAgenda ? false : (defaultValues?.includeMoonPhases ?? true),
               includeQuotes: true,
               quoteCategory: defaultValues?.quoteCategory || 'feminine_strength',
               includeVerses: true,
-              municipalHolidays,
+              municipalHolidays: isPermanentAgenda ? [] : municipalHolidays,
               elements: finalElements,
-              elementsSaturday: isPureBlankSelected ? [] : stdConfig.elementsSaturday,
-              elementsSunday: isPureBlankSelected ? [] : stdConfig.elementsSunday,
+              elementsSaturday: isPureBlankSelected || isPermanentAgenda ? [] : stdConfig.elementsSaturday,
+              elementsSunday: isPureBlankSelected || isPermanentAgenda ? [] : stdConfig.elementsSunday,
               elementsTop: isPureBlankSelected ? [] : stdConfig.elementsTop,
               elementsBottom: isPureBlankSelected ? [] : stdConfig.elementsBottom,
               elementsWeeklyLeft: finalWeeklyLeft,
               elementsWeeklyRight: finalWeeklyRight,
               elementsWeeklyVersoLeft: customVerso ? (finalWeeklyLeft?.map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
               elementsWeeklyVersoRight: customVerso ? (finalWeeklyRight?.map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
-              startMonthOnRightPage,
-              includeMonthlyDividers: isPureBlankSelected ? false : true,
-              includeMonthlyIntroPages: isPureBlankSelected ? false : true,
+              startMonthOnRightPage: isPermanentAgenda ? startMonthOnRightPage : startMonthOnRightPage,
+              includeMonthlyDividers: isPureBlankSelected ? false : includeMonthlyDividers,
+              includeMonthlyIntroPages: isPureBlankSelected ? false : includeMonthlyIntroPages,
               fillerPageContent,
               monthlyDividerVersoContent: monthlyDividerVersoContent as any,
               monthlyDividerStyle: isPureBlankSelected ? undefined : stdConfig.monthlyDividerStyle,
@@ -663,13 +924,24 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           return;
       }
 
+      if (isPermanent && layoutTypeChanged) {
+          if (layoutType === '2_per_page') {
+              elements = PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+          } else if (layoutType === '1_per_page') {
+              elements = DAILY_PERMANENT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+          }
+      }
+
       onComplete({
           name: projectName,
           projectType: projectType || 'agenda',
+          isPermanent,
           year,
           startMonth,
           durationMonths,
-          pageCount: (projectType === 'notebook' || projectType === 'devotional') ? 100 : undefined,
+          pageCount: (projectType === 'notebook' || projectType === 'devotional')
+              ? (defaultValues?.pageCount || 100)
+              : (isPermanent ? Math.max(10, permanentPageCount || (layoutType === '2_per_page' ? 366 : 365)) : undefined),
           pageSize,
           customPageSize: pageSize === 'Custom' ? { width: Math.max(20, customWidth || 148), height: Math.max(20, customHeight || 210) } : undefined,
           orientation,
@@ -681,20 +953,30 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           customVerso,
           versoAdvancesSequence,
           elementsVerso: customVerso
-            ? ((defaultValues?.elementsVerso && defaultValues.elementsVerso.length > 0)
+            ? ((defaultValues?.elementsVerso && defaultValues.elementsVerso.length > 0 && !layoutTypeChanged)
                 ? defaultValues.elementsVerso
                 : elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) })))
             : undefined,
-          layoutType,
+          layoutType: isPermanent && layoutType === '1_per_page_weekend_shared' ? '1_per_page' : layoutType,
           weeklyStartMode: defaultValues?.weeklyStartMode ?? 'full_week',
           showPaddingDaysNumbers: defaultValues?.showPaddingDaysNumbers ?? true,
-          includeHolidays: defaultValues?.includeHolidays ?? true,
-          includeMoonPhases: defaultValues?.includeMoonPhases ?? true,
+          includeHolidays: isPermanent ? false : (defaultValues?.includeHolidays ?? true),
+          includeMoonPhases: isPermanent ? false : (defaultValues?.includeMoonPhases ?? true),
           includeQuotes: defaultValues?.includeQuotes ?? true,
           quoteCategory: defaultValues?.quoteCategory || 'feminine_strength',
           includeVerses: defaultValues?.includeVerses ?? true,
-          municipalHolidays,
+          municipalHolidays: isPermanent ? [] : municipalHolidays,
           elements,
+          elementsTop: isPermanent
+              ? (defaultValues?.elementsTop && defaultValues.elementsTop.length > 0
+                  ? defaultValues.elementsTop
+                  : PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })))
+              : defaultValues?.elementsTop,
+          elementsBottom: isPermanent
+              ? (defaultValues?.elementsBottom && defaultValues.elementsBottom.length > 0
+                  ? defaultValues.elementsBottom
+                  : PERMANENT_2DPP_BOTTOM.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })))
+              : defaultValues?.elementsBottom,
           elementsWeeklyLeft,
           elementsWeeklyRight,
           elementsWeeklyVersoLeft: customVerso ? (elementsWeeklyLeft?.map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
@@ -762,22 +1044,22 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {/* Agenda */}
             <button 
               onClick={() => handleProjectTypeSelect('agenda')}
-              className="group bg-white p-7 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-white p-6 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-4 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-14 h-14 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
-                <Calendar className="w-7 h-7 transition-colors" />
+              <div className="w-13 h-13 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
+                <Calendar className="w-6 h-6 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1.5">
+                <h3 className="text-base font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1">
                   Agenda
                 </h3>
-                <p className="text-xs text-slate-500 leading-relaxed font-normal">Layouts diários. 1 ou 2 dias por página com horários ou pautado.</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed font-normal">Layouts diários. 1 ou 2 dias por página com horários ou pautado.</p>
               </div>
-              <div className="mt-auto px-5 py-2 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[11px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
+              <div className="mt-auto px-4 py-1.5 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[10px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
                 Criar Agenda
               </div>
             </button>
@@ -785,18 +1067,18 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             {/* Planner */}
             <button 
               onClick={() => handleProjectTypeSelect('planner')}
-              className="group bg-white p-7 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-white p-6 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-4 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-14 h-14 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
-                <BookOpen className="w-7 h-7 transition-colors" />
+              <div className="w-13 h-13 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
+                <BookOpen className="w-6 h-6 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1.5">
+                <h3 className="text-base font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1">
                   Planner
                 </h3>
-                <p className="text-xs text-slate-500 leading-relaxed font-normal">Visão semanal em duas páginas. Metas, hábitos e finanças.</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed font-normal">Visão semanal em duas páginas. Metas, hábitos e finanças.</p>
               </div>
-              <div className="mt-auto px-5 py-2 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[11px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
+              <div className="mt-auto px-4 py-1.5 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[10px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
                 Criar Planner
               </div>
             </button>
@@ -804,38 +1086,92 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             {/* Caderno */}
             <button 
               onClick={() => handleProjectTypeSelect('notebook')}
-              className="group bg-white p-7 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-5 relative overflow-hidden cursor-pointer active:scale-98"
+              className="group bg-white p-6 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-4 relative overflow-hidden cursor-pointer active:scale-98"
             >
-              <div className="w-14 h-14 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
-                <PenTool className="w-7 h-7 transition-colors" />
+              <div className="w-13 h-13 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
+                <PenTool className="w-6 h-6 transition-colors" />
               </div>
               <div>
-                <h3 className="text-lg font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1.5">
+                <h3 className="text-base font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1">
                   Caderno
                 </h3>
-                <p className="text-xs text-slate-500 leading-relaxed font-normal">Pautados, quadriculados, pontilhados ou em branco.</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed font-normal">Pautados, quadriculados, pontilhados ou em branco.</p>
               </div>
-              <div className="mt-auto px-5 py-2 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[11px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
+              <div className="mt-auto px-4 py-1.5 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[10px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
                 Criar Caderno
+              </div>
+            </button>
+
+            {/* Capas & Cartonagem */}
+            <button 
+              onClick={() => {
+                onComplete({
+                  projectType: 'cover',
+                  name: 'Minha Capa Personalizada',
+                  year: new Date().getFullYear(),
+                  layoutType: '1_per_page',
+                  pageSize: 'A5',
+                  orientation: 'portrait',
+                  margins: { top: 15, bottom: 15, inside: 15, outside: 15 },
+                  includeHolidays: false,
+                  includeMoonPhases: false,
+                  includeQuotes: false,
+                  includeVerses: false,
+                  mirrorEvenPages: false,
+                  elements: [],
+                  introPages: []
+                });
+              }}
+              className="group bg-white p-6 rounded-3xl shadow-xs hover:shadow-xl border-2 border-[#eedad5] hover:border-[#b84a56] transition-all flex flex-col items-center text-center gap-4 relative overflow-hidden cursor-pointer active:scale-98"
+            >
+              <div className="w-13 h-13 bg-[#fdeeed] border border-[#f5ded9] rounded-2xl flex items-center justify-center text-[#b84a56] group-hover:scale-110 group-hover:bg-[#b84a56] group-hover:text-white transition-all shadow-xs">
+                <BookMarked className="w-6 h-6 transition-colors" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 group-hover:text-[#b84a56] transition-colors mb-1 flex items-center justify-center gap-1.5">
+                  <span>Capas</span>
+                  <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.2 rounded-full uppercase">Novo</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 leading-relaxed font-normal">Gabaritos de cartonagem, vira, wire-o, elástico e lombada.</p>
+              </div>
+              <div className="mt-auto px-4 py-1.5 bg-[#fdeeed] border border-[#f5ded9] rounded-full text-[10px] font-bold text-[#b84a56] group-hover:bg-[#b84a56] group-hover:text-white transition-all uppercase tracking-wide">
+                Criar Capa
               </div>
             </button>
           </div>
 
-          <div className="flex justify-center mt-2">
-            <button 
-              onClick={handleImportClick}
-              className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
-            >
-              <Upload className="w-4 h-4 text-[#b84a56]" />
-              <span>OU IMPORTAR PROJETO EXISTENTE (.JSON)</span>
-            </button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileChange} 
-              accept=".json" 
-              className="hidden" 
-            />
+          <div className="flex flex-col items-center gap-3 mt-2">
+            <div className="flex flex-wrap justify-center items-center gap-3">
+              <button 
+                onClick={handleImportClick}
+                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
+              >
+                <Upload className="w-4 h-4 text-[#b84a56]" />
+                <span>IMPORTAR PROJETO OU MODELOS (.JSON)</span>
+              </button>
+              {autoSavedDraft && (
+                <button
+                  onClick={handleRestoreAutoSave}
+                  className="flex items-center gap-2 px-5 py-3 bg-[#fdeeed] hover:bg-[#fae1dc] rounded-2xl text-xs font-bold text-[#9f3d4a] transition-all border border-[#f5ded9] shadow-xs cursor-pointer"
+                  title={`Restaurar rascunho salvo automaticamente neste navegador: ${autoSavedDraft.name}`}
+                >
+                  <RotateCcw className="w-4 h-4 text-[#b84a56]" />
+                  <span>CONTINUAR ÚLTIMO RASCUNHO ({autoSavedDraft.name})</span>
+                </button>
+              )}
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                accept=".json" 
+                className="hidden" 
+              />
+            </div>
+            {importErrorBanner && (
+              <div className="max-w-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold px-4 py-2.5 rounded-xl text-center">
+                {importErrorBanner}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -948,10 +1284,30 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             })}
           </div>
 
-          <div className="text-center pt-2">
+          <div className="text-center pt-2 flex flex-col items-center gap-3">
             <p className="text-xs text-slate-500 font-medium">
               Na próxima página de configuração você definirá layout (1 ou 2 dias por página, semanal), tamanho do papel, datas e margens.
             </p>
+            <button
+              type="button"
+              onClick={handleImportClick}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#b84a56]" />
+              <span>Importar Projeto ou Modelos (.json)</span>
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept=".json"
+              className="hidden"
+            />
+            {importErrorBanner && (
+              <div className="max-w-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold px-4 py-2.5 rounded-xl text-center">
+                {importErrorBanner}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -987,9 +1343,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 {!defaultValues && (
                   <button 
                     onClick={handleImportClick}
-                    className="mt-6 flex items-center gap-2 px-4 py-2.5 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-bold transition-colors border border-white/30 text-white shadow-sm"
+                    className="mt-6 flex items-center gap-2 px-4 py-2.5 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-bold transition-colors border border-white/30 text-white shadow-sm cursor-pointer"
                   >
-                    <Upload className="w-4 h-4 text-white" /> Importar Projeto (.json)
+                    <Upload className="w-4 h-4 text-white" /> Importar Projeto ou Modelos (.json)
                   </button>
                 )}
                 <input 
@@ -1047,6 +1403,83 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
         {/* Right Side: Form */}
         <div className="w-full md:w-2/3 p-8 md:p-10 overflow-y-auto max-h-[90vh] custom-scrollbar bg-white">
             <div className="space-y-8">
+                {importErrorBanner && (
+                  <div className="bg-red-50 border border-red-200 text-red-800 text-xs font-semibold px-4 py-3 rounded-xl">
+                    {importErrorBanner}
+                  </div>
+                )}
+
+                {importedTemplatesPack && importedTemplatesPack.length > 0 && (() => {
+                  const mioloModels = importedTemplatesPack.filter(
+                    t => t.templateType === 'miolo' || String(t.id || '').startsWith('miolo-')
+                  );
+                  const pageModels = importedTemplatesPack.filter(
+                    t => !(t.templateType === 'miolo' || String(t.id || '').startsWith('miolo-'))
+                  );
+                  return (
+                    <div className="bg-emerald-50/80 border-2 border-emerald-200 p-5 rounded-2xl space-y-3.5 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center shrink-0 text-emerald-700">
+                            <Star className="w-5 h-5 fill-amber-400 text-amber-500" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-black text-emerald-950">
+                              {importedTemplatesPack.length} modelo(s) salvo(s) em "Meus Modelos ⭐"!
+                            </h3>
+                            <p className="text-xs text-emerald-800 mt-0.5 leading-relaxed">
+                              Reconhecemos seu arquivo de modelos automaticamente. Escolha o ano/papel abaixo ou abra direto no editor agora.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSubmit}
+                          className="px-4 py-2.5 bg-[#b84a56] hover:bg-[#9f3d4a] text-white text-xs font-black rounded-xl transition-all shadow-xs cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
+                        >
+                          <span>Abrir Direto no Editor</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {mioloModels.length > 1 && (
+                        <div className="pt-2 border-t border-emerald-200/70">
+                          <label className="block text-[11px] font-black text-emerald-900 uppercase mb-1.5">
+                            Qual modelo de Miolo deste pacote usar agora?
+                          </label>
+                          <select
+                            value={selectedImportedMioloId}
+                            onChange={(e) => {
+                              const chosen = mioloModels.find(m => m.id === e.target.value);
+                              applyImportedMioloSelection(chosen);
+                            }}
+                            className="w-full p-2.5 bg-white border border-emerald-300 rounded-xl text-xs font-bold text-slate-900 outline-none"
+                          >
+                            {mioloModels.map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {pageModels.length > 0 && (
+                        <label className="flex items-center gap-2 pt-1 text-xs font-bold text-emerald-950 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={includeImportedPagesAsIntro}
+                            onChange={(e) => setIncludeImportedPagesAsIntro(e.target.checked)}
+                            className="rounded border-emerald-400 text-[#b84a56] focus:ring-[#b84a56]"
+                          />
+                          <span>
+                            Inserir também as {pageModels.length} página(s) avulsa(s) do pacote nas Páginas Iniciais deste projeto
+                          </span>
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
                 
                 {/* Nome do Projeto */}
                 <div className="bg-[#fdeeed] p-6 rounded-2xl border-2 border-[#f5ded9] mb-2 shadow-2xs">
@@ -1069,12 +1502,15 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                         <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
                             <Grid className="w-4 h-4 text-[#b84a56]" /> Layout do Miolo
                         </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className={`grid grid-cols-1 ${projectType === 'agenda' && isPermanent ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-3`}>
                             {projectType === 'agenda' ? (
                                 <>
                                     <button 
                                         type="button"
-                                        onClick={() => setLayoutType('1_per_page')}
+                                        onClick={() => {
+                                            setLayoutType('1_per_page');
+                                            if (isPermanent && permanentPageCount === 366) setPermanentPageCount(365);
+                                        }}
                                         className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
                                         <div className={`w-8 h-10 border-2 rounded bg-white flex items-center justify-center ${layoutType === '1_per_page' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
@@ -1084,7 +1520,10 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     </button>
                                     <button 
                                         type="button"
-                                        onClick={() => setLayoutType('2_per_page')}
+                                        onClick={() => {
+                                            setLayoutType('2_per_page');
+                                            if (isPermanent && permanentPageCount === 365) setPermanentPageCount(366);
+                                        }}
                                         className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '2_per_page' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
                                     >
                                         <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '2_per_page' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
@@ -1094,20 +1533,22 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                         </div>
                                         <span className={`text-xs font-black text-center ${layoutType === '2_per_page' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>2 Dias / Pág</span>
                                     </button>
-                                    <button 
-                                        type="button"
-                                        onClick={() => setLayoutType('1_per_page_weekend_shared')}
-                                        className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
-                                    >
-                                        <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '1_per_page_weekend_shared' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
-                                            <div className={`flex-[2] rounded-xs border border-dashed ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]/60 border-[#b84a56]' : 'bg-gray-400 border-gray-500'}`}></div>
-                                            <div className="flex-1 flex gap-0.5">
-                                                <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]' : 'bg-gray-600'}`}></div>
-                                                <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]' : 'bg-gray-600'}`}></div>
+                                    {!isPermanent && (
+                                        <button 
+                                            type="button"
+                                            onClick={() => setLayoutType('1_per_page_weekend_shared')}
+                                            className={`p-3.5 border-2 rounded-xl flex flex-col items-center gap-2.5 transition-all cursor-pointer ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#fdeeed] border-[#b84a56] ring-2 ring-[#b84a56]/20 shadow-xs' : 'border-gray-200 hover:border-[#b84a56]/50 bg-white hover:bg-[#faf5f3]'}`}
+                                        >
+                                            <div className={`w-8 h-10 border-2 rounded bg-white flex flex-col p-0.5 gap-0.5 ${layoutType === '1_per_page_weekend_shared' ? 'border-[#b84a56]' : 'border-gray-400'}`}>
+                                                <div className={`flex-[2] rounded-xs border border-dashed ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]/60 border-[#b84a56]' : 'bg-gray-400 border-gray-500'}`}></div>
+                                                <div className="flex-1 flex gap-0.5">
+                                                    <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]' : 'bg-gray-600'}`}></div>
+                                                    <div className={`flex-1 rounded-xs ${layoutType === '1_per_page_weekend_shared' ? 'bg-[#b84a56]' : 'bg-gray-600'}`}></div>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <span className={`text-xs font-black text-center ${layoutType === '1_per_page_weekend_shared' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Fim de Semana Dividido</span>
-                                    </button>
+                                            <span className={`text-xs font-black text-center ${layoutType === '1_per_page_weekend_shared' ? 'text-[#9f3d4a]' : 'text-slate-800'}`}>Fim de Semana Dividido</span>
+                                        </button>
+                                    )}
                                 </>
                             ) : (
                                 <>
@@ -1181,13 +1622,15 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     <div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[10px] font-black uppercase tracking-wider text-[#9f3d4a]">Modelo Selecionado</span>
-                                            <span className="px-2 py-0.5 bg-[#b84a56] text-white text-[9px] font-black uppercase rounded-full">Ativo</span>
+                                            <span className="px-2 py-0.5 bg-[#b84a56] text-white text-[9px] font-black uppercase rounded-full">{isPermanent ? 'Não Datada' : 'Ativo'}</span>
                                         </div>
                                         <h4 className="text-sm font-black text-slate-900 mt-0.5">
                                             {getSelectedModelName()}
                                         </h4>
                                         <p className="text-[11px] text-slate-500 font-medium">
-                                            Páginas iniciais, divisórias mensais e páginas mensais já inclusas.
+                                            {isPermanent
+                                                ? 'Miolo não datado com campo livre (DATA ___/___/___) e seletor S T Q Q S S D para usar em qualquer época.'
+                                                : 'Páginas iniciais, divisórias mensais e páginas mensais já inclusas.'}
                                         </p>
                                     </div>
                                 </div>
@@ -1205,119 +1648,181 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
                 <div className="h-px bg-gray-300"></div>
 
-                {/* Ano - Esconder se for notebook ou devotional */}
+                {/* Ano ou Configuração Permanente - Esconder se for notebook ou devotional */}
                 {!(projectType === 'notebook' || projectType === 'devotional') && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-4">
+                    isPermanent ? (
+                        <div className="bg-[#faf6f4] p-5 rounded-2xl border-2 border-[#eedad5] space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                    <label className="flex items-center text-sm font-black text-slate-800 uppercase gap-2">
+                                        <Sparkles className="w-4 h-4 text-[#b84a56]" /> Configuração da Agenda Permanente (Sem Datas Fixas)
+                                    </label>
+                                    <p className="text-xs text-slate-600 mt-1 font-medium">
+                                        Não possui calendário fixo nem feriados pré-datados — sua cliente preenche a data e marca o dia da semana livremente.
+                                    </p>
+                                </div>
+                                <span className="px-3 py-1.5 rounded-xl bg-white border-2 border-[#eedad5] text-xs font-black text-[#9f3d4a] shrink-0">
+                                    {layoutType === '2_per_page'
+                                        ? `${Math.ceil(Math.max(10, permanentPageCount) / 2)} págs de miolo (${permanentPageCount} dias)`
+                                        : `${Math.max(10, permanentPageCount)} págs de miolo`}
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                                <div>
+                                    <label className="block text-xs font-black text-slate-700 uppercase mb-2">
+                                        Quantidade Total de Dias no Miolo
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min={10}
+                                        max={732}
+                                        value={permanentPageCount}
+                                        onChange={(e) => setPermanentPageCount(Math.max(10, Math.min(732, parseInt(e.target.value) || 365)))}
+                                        className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-lg font-black text-slate-900 bg-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-black text-slate-700 uppercase mb-2">
+                                        Atalhos de Quantidade
+                                    </label>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                        {[
+                                            { label: '180 dias', val: 180 },
+                                            { label: '200 dias', val: 200 },
+                                            { label: '365 dias', val: 365 },
+                                            { label: '366 dias', val: 366 },
+                                        ].map((preset) => (
+                                            <button
+                                                key={preset.val}
+                                                type="button"
+                                                onClick={() => setPermanentPageCount(preset.val)}
+                                                className={`py-2.5 px-2 rounded-xl border-2 text-xs font-black transition-all cursor-pointer ${
+                                                    permanentPageCount === preset.val
+                                                        ? 'bg-[#b84a56] text-white border-[#b84a56] shadow-2xs'
+                                                        : 'bg-white text-slate-700 border-[#eedad5] hover:border-[#b84a56]/60'
+                                                }`}
+                                            >
+                                                {preset.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                        <Settings className="w-4 h-4 text-[#b84a56]" /> Ano de Referência
+                                    </label>
+                                    <input 
+                                        type="number" 
+                                        value={year} 
+                                        onChange={(e) => setYear(parseInt(e.target.value) || 2027)} 
+                                        className={`w-full p-3 border-2 rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 outline-none text-lg font-black bg-white ${
+                                          isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan, isPermanent)
+                                             ? 'border-amber-400 bg-amber-50/40 text-amber-950' 
+                                             : 'border-[#eedad5] text-slate-900 focus:border-[#b84a56]'
+                                        }`}
+                                    />
+                                    <p className="text-xs text-slate-600 mt-1.5 font-medium">Define os feriados nacionais automaticamente.</p>
+
+                                    {isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan, isPermanent) && (
+                                        <div className="mt-3 p-4 bg-amber-50 border-2 border-amber-300 rounded-xl text-xs text-amber-950 leading-relaxed shadow-sm">
+                                            <p className="font-black flex items-center gap-1.5 mb-1.5 text-amber-950 text-sm">
+                                                <Zap className="w-4 h-4 text-amber-600 fill-amber-500 animate-pulse" /> Assinatura Requerida para {year}
+                                            </p>
+                                            <p className="font-medium text-amber-950">Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
+                                            <p className="mt-1.5 font-bold text-amber-950">Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura anual!</p>
+                                            <div className="mt-3 flex gap-2">
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(12); }} 
+                                                    className="bg-[#b84a56] hover:bg-[#9f3d4a] text-white font-black py-1.5 px-3 rounded-lg text-xs transition-colors shadow-sm cursor-pointer"
+                                                >
+                                                    Ajustar para 2027 (12 meses)
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(13); }} 
+                                                    className="bg-white hover:bg-slate-50 text-slate-800 font-black py-1.5 px-3 rounded-lg text-xs border-2 border-[#eedad5] transition-colors shadow-xs cursor-pointer"
+                                                >
+                                                    Jan/27 a Jan/28 (13 meses)
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                        <Calendar className="w-4 h-4 text-[#b84a56]" /> Mês Inicial da Agenda
+                                    </label>
+                                    <select
+                                        value={startMonth}
+                                        onChange={(e) => setStartMonth(parseInt(e.target.value))}
+                                        className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-sm font-black text-slate-900 bg-white shadow-xs cursor-pointer"
+                                    >
+                                        {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((mName, idx) => (
+                                            <option key={idx} value={idx} className="text-slate-900 font-bold bg-white">{mName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
+                                        <Settings className="w-4 h-4 text-[#b84a56]" /> Duração da Agenda
+                                    </label>
+                                    <select
+                                        value={durationMonths}
+                                        onChange={(e) => setDurationMonths(parseInt(e.target.value))}
+                                        className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-sm font-black text-slate-900 bg-white shadow-xs cursor-pointer"
+                                    >
+                                        {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
+                                            <option key={m} value={m} className="text-slate-900 font-bold bg-white">{m} {m === 1 ? 'mês' : 'meses'}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
                             <div>
                                 <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
-                                    <Settings className="w-4 h-4 text-[#b84a56]" /> Ano de Referência
+                                    <Calendar className="w-4 h-4 text-[#b84a56]" /> Feriados Municipais
                                 </label>
-                                <input 
-                                    type="number" 
-                                    value={year} 
-                                    onChange={(e) => setYear(parseInt(e.target.value) || 2027)} 
-                                    className={`w-full p-3 border-2 rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 outline-none text-lg font-black bg-white ${
-                                      isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan)
-                                         ? 'border-amber-400 bg-amber-50/40 text-amber-950' 
-                                         : 'border-[#eedad5] text-slate-900 focus:border-[#b84a56]'
-                                    }`}
-                                />
-                                <p className="text-xs text-slate-600 mt-1.5 font-medium">Define os feriados nacionais automaticamente.</p>
-
-                                {isProjectYearRestricted(projectType || 'agenda', year, startMonth, durationMonths, userPlan) && (
-                                    <div className="mt-3 p-4 bg-amber-50 border-2 border-amber-300 rounded-xl text-xs text-amber-950 leading-relaxed shadow-sm">
-                                        <p className="font-black flex items-center gap-1.5 mb-1.5 text-amber-950 text-sm">
-                                            <Zap className="w-4 h-4 text-amber-600 fill-amber-500 animate-pulse" /> Assinatura Requerida para {year}
-                                        </p>
-                                        <p className="font-medium text-amber-950">Seu plano atual cobre os anos de <strong>2026 e 2027</strong> e permite no máximo <strong>1 mês de 2028</strong> (ex: agenda de 13 meses de Jan/2027 a Jan/2028).</p>
-                                        <p className="mt-1.5 font-bold text-amber-950">Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura anual!</p>
-                                        <div className="mt-3 flex gap-2">
-                                            <button 
-                                                type="button"
-                                                onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(12); }} 
-                                                className="bg-[#b84a56] hover:bg-[#9f3d4a] text-white font-black py-1.5 px-3 rounded-lg text-xs transition-colors shadow-sm cursor-pointer"
-                                            >
-                                                Ajustar para 2027 (12 meses)
-                                            </button>
-                                            <button 
-                                                type="button"
-                                                onClick={() => { setYear(2027); setStartMonth(0); setDurationMonths(13); }} 
-                                                className="bg-white hover:bg-slate-50 text-slate-800 font-black py-1.5 px-3 rounded-lg text-xs border-2 border-[#eedad5] transition-colors shadow-xs cursor-pointer"
-                                            >
-                                                Jan/27 a Jan/28 (13 meses)
+                                <div className="space-y-2">
+                                    {municipalHolidays.map((holiday, index) => (
+                                        <div key={index} className="flex gap-2 items-center bg-[#faf6f4] p-2.5 rounded-xl border-2 border-[#eedad5]">
+                                            <input 
+                                                type="date" 
+                                                value={holiday.date} 
+                                                onChange={(e) => updateHoliday(index, 'date', e.target.value)}
+                                                className="text-xs p-2 border-2 border-[#eedad5] rounded-lg focus:ring-1 focus:ring-[#b84a56] outline-none text-slate-900 font-black bg-white"
+                                            />
+                                            <input 
+                                                type="text" 
+                                                placeholder="Nome do Feriado"
+                                                value={holiday.name} 
+                                                onChange={(e) => updateHoliday(index, 'name', e.target.value)}
+                                                className="flex-1 text-xs p-2 border-2 border-[#eedad5] rounded-lg focus:ring-1 focus:ring-[#b84a56] outline-none text-slate-900 font-bold bg-white placeholder-slate-400"
+                                            />
+                                            <button onClick={() => removeHoliday(index)} className="text-[#b84a56] hover:text-[#9f3d4a] p-1.5 cursor-pointer">
+                                                <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div>
-                                <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
-                                    <Calendar className="w-4 h-4 text-[#b84a56]" /> Mês Inicial da Agenda
-                                </label>
-                                <select
-                                    value={startMonth}
-                                    onChange={(e) => setStartMonth(parseInt(e.target.value))}
-                                    className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-sm font-black text-slate-900 bg-white shadow-xs cursor-pointer"
-                                >
-                                    {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((mName, idx) => (
-                                        <option key={idx} value={idx} className="text-slate-900 font-bold bg-white">{mName}</option>
                                     ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
-                                    <Settings className="w-4 h-4 text-[#b84a56]" /> Duração da Agenda
-                                </label>
-                                <select
-                                    value={durationMonths}
-                                    onChange={(e) => setDurationMonths(parseInt(e.target.value))}
-                                    className="w-full p-3 border-2 border-[#eedad5] rounded-xl focus:ring-2 focus:ring-[#b84a56]/20 focus:border-[#b84a56] outline-none text-sm font-black text-slate-900 bg-white shadow-xs cursor-pointer"
-                                >
-                                    {Array.from({ length: 13 }, (_, i) => i + 1).map(m => (
-                                        <option key={m} value={m} className="text-slate-900 font-bold bg-white">{m} {m === 1 ? 'mês' : 'meses'}</option>
-                                    ))}
-                                </select>
+                                    <button 
+                                        type="button"
+                                        onClick={addHoliday}
+                                        className="w-full py-2.5 border-2 border-dashed border-[#eedad5] hover:border-[#b84a56] rounded-xl text-xs font-black text-slate-700 hover:text-[#b84a56] transition-all flex items-center justify-center gap-1.5 bg-white hover:bg-[#fdeeed] cursor-pointer shadow-xs"
+                                    >
+                                        <Plus className="w-4 h-4 text-[#b84a56]" /> Adicionar Feriado Municipal
+                                    </button>
+                                </div>
                             </div>
                         </div>
-
-                        <div>
-                            <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-3 gap-2">
-                                <Calendar className="w-4 h-4 text-[#b84a56]" /> Feriados Municipais
-                            </label>
-                            <div className="space-y-2">
-                                {municipalHolidays.map((holiday, index) => (
-                                    <div key={index} className="flex gap-2 items-center bg-[#faf6f4] p-2.5 rounded-xl border-2 border-[#eedad5]">
-                                        <input 
-                                            type="date" 
-                                            value={holiday.date} 
-                                            onChange={(e) => updateHoliday(index, 'date', e.target.value)}
-                                            className="text-xs p-2 border-2 border-[#eedad5] rounded-lg focus:ring-1 focus:ring-[#b84a56] outline-none text-slate-900 font-black bg-white"
-                                        />
-                                        <input 
-                                            type="text" 
-                                            placeholder="Nome do Feriado"
-                                            value={holiday.name} 
-                                            onChange={(e) => updateHoliday(index, 'name', e.target.value)}
-                                            className="flex-1 text-xs p-2 border-2 border-[#eedad5] rounded-lg focus:ring-1 focus:ring-[#b84a56] outline-none text-slate-900 font-bold bg-white placeholder-slate-400"
-                                        />
-                                        <button onClick={() => removeHoliday(index)} className="text-[#b84a56] hover:text-[#9f3d4a] p-1.5 cursor-pointer">
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                ))}
-                                <button 
-                                    type="button"
-                                    onClick={addHoliday}
-                                    className="w-full py-2.5 border-2 border-dashed border-[#eedad5] hover:border-[#b84a56] rounded-xl text-xs font-black text-slate-700 hover:text-[#b84a56] transition-all flex items-center justify-center gap-1.5 bg-white hover:bg-[#fdeeed] cursor-pointer shadow-xs"
-                                >
-                                    <Plus className="w-4 h-4 text-[#b84a56]" /> Adicionar Feriado Municipal
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                    )
                 )}
 
                 {/* Tamanho e Orientação */}
@@ -1513,7 +2018,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 {!(projectType === 'notebook' || projectType === 'devotional') && (
                     <div className="space-y-4 pt-4 border-t-2 border-[#eedad5]">
                         <label className="flex items-center text-sm font-black text-slate-800 uppercase mb-1 gap-2">
-                            <BookOpen className="w-4 h-4 text-[#b84a56]" /> Transição de Meses & Alinhamento
+                            <BookOpen className="w-4 h-4 text-[#b84a56]" /> {isPermanent ? 'Divisórias & Ciclos Mensais (Opcional)' : 'Transição de Meses & Alinhamento'}
                         </label>
                         <div className="bg-[#faf6f4] p-5 rounded-2xl border-2 border-[#eedad5] space-y-3.5">
                             <label className="flex items-center gap-3 cursor-pointer">
@@ -1523,7 +2028,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     onChange={(e) => setIncludeMonthlyDividers(e.target.checked)} 
                                     className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
                                 />
-                                <span className="text-xs font-black text-slate-800">Incluir Divisórias de Meses (Capas)</span>
+                                <span className="text-xs font-black text-slate-800">
+                                    {isPermanent ? 'Dividir miolo em ciclos com Divisórias Permanentes (Sem nome de mês)' : 'Incluir Divisórias de Meses (Capas)'}
+                                </span>
                             </label>
 
                             <label className="flex items-center gap-3 cursor-pointer">
@@ -1533,23 +2040,31 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                     onChange={(e) => setIncludeMonthlyIntroPages(e.target.checked)} 
                                     className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
                                 />
-                                <span className="text-xs font-black text-slate-800">Incluir Páginas Mensais (Notas/Planejamentos)</span>
+                                <span className="text-xs font-black text-slate-800">
+                                    {isPermanent ? 'Incluir Planejamento Mensal Permanente & Financeiro a cada ciclo' : 'Incluir Páginas Mensais (Notas/Planejamentos)'}
+                                </span>
                             </label>
 
-                            <div className="pt-3 border-t-2 border-[#eedad5]">
-                                <label className="flex items-center gap-3 cursor-pointer">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={startMonthOnRightPage} 
-                                        onChange={(e) => setStartMonthOnRightPage(e.target.checked)} 
-                                        className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
-                                    />
-                                    <span className="text-xs font-black text-slate-800">Sempre iniciar o primeiro dia do mês na página direita</span>
-                                </label>
-                                <p className="text-xs text-slate-600 ml-7 mt-1 font-medium leading-relaxed">
-                                    Garante que o dia 1 de cada mês comece sempre em página ímpar (direita), inserindo página complementar ao final do período anterior quando necessário.
-                                </p>
-                            </div>
+                            {(!isPermanent || includeMonthlyDividers || includeMonthlyIntroPages) && (
+                                <div className="pt-3 border-t-2 border-[#eedad5]">
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={startMonthOnRightPage} 
+                                            onChange={(e) => setStartMonthOnRightPage(e.target.checked)} 
+                                            className="rounded text-[#b84a56] focus:ring-[#b84a56] h-4 w-4 border-2 border-[#eedad5]" 
+                                        />
+                                        <span className="text-xs font-black text-slate-800">
+                                            {isPermanent ? 'Sempre iniciar cada ciclo na página direita (ímpar)' : 'Sempre iniciar o primeiro dia do mês na página direita'}
+                                        </span>
+                                    </label>
+                                    <p className="text-xs text-slate-600 ml-7 mt-1 font-medium leading-relaxed">
+                                        {isPermanent
+                                            ? 'Garante que o início de cada ciclo comece sempre em página ímpar (direita).'
+                                            : 'Garante que o dia 1 de cada mês comece sempre em página ímpar (direita), inserindo página complementar ao final do período anterior quando necessário.'}
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

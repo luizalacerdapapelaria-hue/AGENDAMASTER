@@ -3,6 +3,7 @@ import React from 'react';
 import { Moon, Circle } from 'lucide-react';
 import { LayoutElement, DayData } from '../../../../types';
 import { getMonthName, getDayName } from '../../../../core/backend/calendar';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 interface PlannerDayBoxProps {
     element: LayoutElement;
@@ -187,7 +188,17 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                                     color: plannerDayBox.color || '#6b7280',
                                     lineHeight: 1,
                                     marginBottom: '2px',
-                                    visibility: timesList[i] ? 'visible' : 'hidden'
+                                    visibility: timesList[i] ? 'visible' : 'hidden',
+                                    ...getTextStrokeCss(
+                                        {
+                                            textStrokeWidth: plannerDayBox.textStrokeWidth ?? element.style.textStrokeWidth,
+                                            textStrokeColor: plannerDayBox.textStrokeColor || element.style.textStrokeColor,
+                                            textFillTransparent: plannerDayBox.textFillTransparent ?? element.style.textFillTransparent,
+                                            textStrokeJoin: plannerDayBox.textStrokeJoin || element.style.textStrokeJoin,
+                                            color: plannerDayBox.color || '#6b7280',
+                                        },
+                                        plannerDayBox.color || '#6b7280'
+                                    ),
                                 }}
                             >
                                 {timesList[i] || '\u00A0'}
@@ -230,13 +241,47 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                         borderBottom: showHeaderBorder ? `${headerBorderWidth}px ${headerBorderStyle} ${headerBorderColor}` : 'none'
                     }}
                 >
-                    {showDayNumber && d.dayOfMonth > 0 && (
-                        <span className="font-bold text-lg" style={{ color: headerTextColor, fontSize: `${Math.max(6, 18 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
-                            {String(d.dayOfMonth).padStart(2, '0')}
+                    {showDayNumber && (d.dayOfMonth > 0 || isEditor) && (
+                        <span
+                            className="font-bold text-lg"
+                            style={{
+                                color: headerTextColor,
+                                fontSize: `${Math.max(6, 18 * scaleFactor)}px`,
+                                fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
+                                ...getTextStrokeCss(
+                                    {
+                                        textStrokeWidth: plannerDayBox.headerTextStrokeWidth ?? element.style.textStrokeWidth,
+                                        textStrokeColor: plannerDayBox.headerTextStrokeColor || element.style.textStrokeColor,
+                                        textFillTransparent: plannerDayBox.headerTextFillTransparent ?? element.style.textFillTransparent,
+                                        textStrokeJoin: plannerDayBox.headerTextStrokeJoin || element.style.textStrokeJoin,
+                                        color: headerTextColor,
+                                    },
+                                    headerTextColor
+                                ),
+                            }}
+                        >
+                            {String(d.dayOfMonth > 0 ? d.dayOfMonth : (d.dayOfWeek === 0 ? 7 : (d.dayOfWeek || 1))).padStart(2, '0')}
                         </span>
                     )}
                     {showDayName && (d.dayOfWeek !== undefined) && (
-                        <span className="font-medium opacity-70" style={{ color: headerTextColor, fontSize: `${Math.max(5, 10 * scaleFactor)}px`, fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit' }}>
+                        <span
+                            className="font-medium opacity-70"
+                            style={{
+                                color: headerTextColor,
+                                fontSize: `${Math.max(5, 10 * scaleFactor)}px`,
+                                fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
+                                ...getTextStrokeCss(
+                                    {
+                                        textStrokeWidth: plannerDayBox.headerTextStrokeWidth ?? element.style.textStrokeWidth,
+                                        textStrokeColor: plannerDayBox.headerTextStrokeColor || element.style.textStrokeColor,
+                                        textFillTransparent: plannerDayBox.headerTextFillTransparent ?? element.style.textFillTransparent,
+                                        textStrokeJoin: plannerDayBox.headerTextStrokeJoin || element.style.textStrokeJoin,
+                                        color: headerTextColor,
+                                    },
+                                    headerTextColor
+                                ),
+                            }}
+                        >
                             {dayName}
                         </span>
                     )}

@@ -1,14 +1,22 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BaseElementProps } from './types';
 import { getDayName } from '../../../../core/backend/calendar';
+import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style, pageHeight, pageWidth }) => {
     const variant = style.variant || 'circles_outline';
     const color = style.color || '#f472b6'; 
     const bgColor = style.backgroundColor || '#fdf2f8';
     const fontSize = style.fontSize || 10;
-    const fontFamily = style.fontFamily || 'Inter';
+    const fontFamily = getSafeFontFamily(style.fontFamily);
+
+    useEffect(() => {
+        if (style?.fontFamily) {
+            ensureFontLoaded(style.fontFamily);
+        }
+    }, [style?.fontFamily]);
     
     // Order: Seg, Ter, Qua, Qui, Sex, Sáb, Dom
     const dayIndices = [1, 2, 3, 4, 5, 6, 0];
@@ -58,12 +66,23 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
             boxSizing: 'border-box',
         };
 
+        const circleFillTextColor = isFilled ? '#ffffff' : color;
+        const circleLetterStroke = getTextStrokeCss(
+            { ...style, color: circleFillTextColor },
+            circleFillTextColor
+        );
+        const belowLetterStroke = getTextStrokeCss(
+            { ...style, color },
+            color
+        );
+
         const textStyle: React.CSSProperties = {
             fontSize: fontSize,
             color: color,
             fontWeight: '600',
             fontFamily: fontFamily,
             marginTop: '2px',
+            ...belowLetterStroke,
         };
 
         return (
@@ -71,7 +90,7 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
                 {days.map((day, i) => (
                     <div key={i} style={dayWrapperStyle}>
                         <div style={dayCircleStyle}>
-                            {!isTextBelow && day}
+                            {!isTextBelow && <span style={circleLetterStroke}>{day}</span>}
                         </div>
                         {isTextBelow && <span style={textStyle}>{day}</span>}
                     </div>

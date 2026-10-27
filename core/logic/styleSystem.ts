@@ -296,6 +296,10 @@ export function applyCharacterStyleToElement(
   if (charStyle.fontStyle !== undefined) newStyle.fontStyle = charStyle.fontStyle;
   if (charStyle.letterSpacing !== undefined) newStyle.letterSpacing = charStyle.letterSpacing;
   if (charStyle.textTransform !== undefined) newStyle.textTransform = charStyle.textTransform;
+  if (charStyle.textStrokeWidth !== undefined) newStyle.textStrokeWidth = charStyle.textStrokeWidth;
+  if (charStyle.textStrokeColor !== undefined) newStyle.textStrokeColor = charStyle.textStrokeColor;
+  if (charStyle.textFillTransparent !== undefined) newStyle.textFillTransparent = charStyle.textFillTransparent;
+  if (charStyle.textStrokeJoin !== undefined) newStyle.textStrokeJoin = charStyle.textStrokeJoin;
 
   // Resolve color if linked or direct
   let resolvedColor: string | undefined = charStyle.color;
@@ -320,6 +324,10 @@ export function applyCharacterStyleToElement(
       ...(charStyle.fontStyle !== undefined ? { fontStyle: charStyle.fontStyle } : {}),
       ...(charStyle.letterSpacing !== undefined ? { letterSpacing: charStyle.letterSpacing } : {}),
       ...(charStyle.textTransform !== undefined ? { textTransform: charStyle.textTransform } : {}),
+      ...(charStyle.textStrokeWidth !== undefined ? { textStrokeWidth: charStyle.textStrokeWidth } : {}),
+      ...(charStyle.textStrokeColor !== undefined ? { textStrokeColor: charStyle.textStrokeColor } : {}),
+      ...(charStyle.textFillTransparent !== undefined ? { textFillTransparent: charStyle.textFillTransparent } : {}),
+      ...(charStyle.textStrokeJoin !== undefined ? { textStrokeJoin: charStyle.textStrokeJoin } : {}),
       ...(resolvedColor ? { color: resolvedColor } : {}),
     };
     newStyle.table = {
@@ -336,15 +344,27 @@ export function applyCharacterStyleToElement(
         ...(charStyle.fontFamily ? { fontFamily: charStyle.fontFamily } : {}),
         ...(charStyle.fontWeight ? { fontWeight: charStyle.fontWeight } : {}),
         ...(charStyle.textTransform ? { textTransform: charStyle.textTransform } : {}),
+        ...(charStyle.textStrokeWidth !== undefined ? { textStrokeWidth: charStyle.textStrokeWidth } : {}),
+        ...(charStyle.textStrokeColor !== undefined ? { textStrokeColor: charStyle.textStrokeColor } : {}),
+        ...(charStyle.textFillTransparent !== undefined ? { textFillTransparent: charStyle.textFillTransparent } : {}),
+        ...(charStyle.textStrokeJoin !== undefined ? { textStrokeJoin: charStyle.textStrokeJoin } : {}),
         ...(resolvedColor ? { color: resolvedColor } : {}),
       },
       weekDays: {
         ...(newStyle.fullCalendar.weekDays || {}),
         ...(charStyle.fontFamily ? { fontFamily: charStyle.fontFamily } : {}),
+        ...(charStyle.textStrokeWidth !== undefined ? { textStrokeWidth: charStyle.textStrokeWidth } : {}),
+        ...(charStyle.textStrokeColor !== undefined ? { textStrokeColor: charStyle.textStrokeColor } : {}),
+        ...(charStyle.textFillTransparent !== undefined ? { textFillTransparent: charStyle.textFillTransparent } : {}),
+        ...(charStyle.textStrokeJoin !== undefined ? { textStrokeJoin: charStyle.textStrokeJoin } : {}),
       },
       days: {
         ...(newStyle.fullCalendar.days || {}),
         ...(charStyle.fontFamily ? { fontFamily: charStyle.fontFamily } : {}),
+        ...(charStyle.textStrokeWidth !== undefined ? { textStrokeWidth: charStyle.textStrokeWidth } : {}),
+        ...(charStyle.textStrokeColor !== undefined ? { textStrokeColor: charStyle.textStrokeColor } : {}),
+        ...(charStyle.textFillTransparent !== undefined ? { textFillTransparent: charStyle.textFillTransparent } : {}),
+        ...(charStyle.textStrokeJoin !== undefined ? { textStrokeJoin: charStyle.textStrokeJoin } : {}),
       },
     };
   }
@@ -355,6 +375,10 @@ export function applyCharacterStyleToElement(
       ...(charStyle.fontFamily ? { fontFamily: charStyle.fontFamily, headerFontFamily: charStyle.fontFamily } : {}),
       ...(charStyle.fontSize ? { fontSize: charStyle.fontSize } : {}),
       ...(charStyle.fontWeight ? { fontWeight: charStyle.fontWeight } : {}),
+      ...(charStyle.textStrokeWidth !== undefined ? { textStrokeWidth: charStyle.textStrokeWidth, headerTextStrokeWidth: charStyle.textStrokeWidth } : {}),
+      ...(charStyle.textStrokeColor !== undefined ? { textStrokeColor: charStyle.textStrokeColor, headerTextStrokeColor: charStyle.textStrokeColor } : {}),
+      ...(charStyle.textFillTransparent !== undefined ? { textFillTransparent: charStyle.textFillTransparent, headerTextFillTransparent: charStyle.textFillTransparent } : {}),
+      ...(charStyle.textStrokeJoin !== undefined ? { textStrokeJoin: charStyle.textStrokeJoin, headerTextStrokeJoin: charStyle.textStrokeJoin } : {}),
       ...(resolvedColor ? { color: resolvedColor, headerTextColor: resolvedColor } : {}),
     };
   }

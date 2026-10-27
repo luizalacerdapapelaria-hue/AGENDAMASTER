@@ -1,5 +1,6 @@
 import React, { useRef, useLayoutEffect, useEffect, useState, useCallback, memo } from 'react';
 import { TableElementProps } from './types';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 const applyTextTransform = (text: string, transform?: string) => {
     if (!text) return text;
@@ -25,7 +26,7 @@ const filterDefined = (obj: any) => {
     return res;
 };
 
-const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementId, onTableCellChange, onTableCellFocus, isActive, isCompactSingleLine }: any) => {
+const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, textStrokeStyle, elementId, onTableCellChange, onTableCellFocus, isActive, isCompactSingleLine }: any) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
@@ -154,7 +155,8 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                         padding: 0,
                         margin: 0,
                         boxSizing: 'border-box',
-                        ...wrapInlineStyles
+                        ...wrapInlineStyles,
+                        ...(textStrokeStyle || {}),
                     }} 
                 />
             ) : (
@@ -171,7 +173,8 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, elementI
                         padding: 0,
                         margin: 0,
                         boxSizing: 'border-box',
-                        ...wrapInlineStyles
+                        ...wrapInlineStyles,
+                        ...(textStrokeStyle || {}),
                     }}
                 >
                     {transformedContent || '\u00A0'}
@@ -220,7 +223,11 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
         backgroundColor: style.table?.textStyle?.backgroundColor || style.backgroundColor || 'transparent',
         textWrap: style.table?.textStyle?.textWrap || 'wrap',
         textOrientation: style.table?.textStyle?.textOrientation || 'horizontal',
-        cellPadding: style.table?.textStyle?.cellPadding !== undefined ? style.table?.textStyle?.cellPadding : 4
+        cellPadding: style.table?.textStyle?.cellPadding !== undefined ? style.table?.textStyle?.cellPadding : 4,
+        textStrokeWidth: style.table?.textStyle?.textStrokeWidth !== undefined ? style.table.textStyle.textStrokeWidth : (style.textStrokeWidth || 0),
+        textStrokeColor: style.table?.textStyle?.textStrokeColor || style.textStrokeColor || '#000000',
+        textFillTransparent: style.table?.textStyle?.textFillTransparent !== undefined ? style.table.textStyle.textFillTransparent : Boolean(style.textFillTransparent),
+        textStrokeJoin: style.table?.textStyle?.textStrokeJoin || style.textStrokeJoin || 'miter',
     };
 
     const rowStyles = style.table?.rowStyles || {};
@@ -409,6 +416,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 overflow: 'hidden'
                             };
 
+                            const cellTextStrokeCss = getTextStrokeCss(tStyle, tStyle.color || '#666666');
                             const isActive = activeTableCell?.elementId === element.id && activeTableCell?.r === r && activeTableCell?.c === c;
                             const isCompactSingleLine = isCompactRow && rowHeightPx < effectiveFontSize * 2.1 && !String(content).includes('\n');
 
@@ -421,7 +429,8 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                     content={content} 
                                     isEditor={isEditor} 
                                     isHeaderCell={isHeaderCell} 
-                                    style={cellStyle} 
+                                    style={cellStyle}
+                                    textStrokeStyle={cellTextStrokeCss}
                                     isActive={isActive} 
                                     isCompactSingleLine={isCompactSingleLine}
                                     onTableCellChange={onTableCellChange} 

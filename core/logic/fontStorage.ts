@@ -48,6 +48,21 @@ export async function saveFontToDB(name: string, buffer: ArrayBuffer): Promise<v
   });
 }
 
+export async function getFontFromDB(name: string): Promise<StoredFont | null> {
+  try {
+    const db = await initFontsDB();
+    return new Promise((resolve) => {
+      const transaction = db.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(name);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function getAllFontsFromDB(): Promise<StoredFont[]> {
   try {
     const db = await initFontsDB();

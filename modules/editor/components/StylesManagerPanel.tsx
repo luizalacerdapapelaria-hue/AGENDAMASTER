@@ -23,6 +23,7 @@ import {
   Italic,
   Columns,
 } from 'lucide-react';
+import { getTextStrokeCss } from '../../../core/logic/textStroke';
 import {
   AgendaConfig,
   CharacterStylePreset,
@@ -40,6 +41,7 @@ import {
   linkElementsByMatchingHexInConfig,
   propagateStylesAcrossConfig,
 } from '../../../core/logic/styleSystem';
+import { getSafeFontFamily, ensureFontLoaded } from '../../../core/logic/fontDetector';
 
 export type StyleTabType = 'color' | 'character' | 'paragraph';
 
@@ -238,6 +240,10 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
       textTransform: s.textTransform || tStyle.textTransform || 'none',
       colorStyleId: s.colorStyleId,
       color: s.colorStyleId ? undefined : (s.color || tStyle.color || '#1f2937'),
+      textStrokeWidth: s.textStrokeWidth ?? tStyle.textStrokeWidth ?? 0,
+      textStrokeColor: s.textStrokeColor || tStyle.textStrokeColor || '#000000',
+      textFillTransparent: s.textFillTransparent ?? tStyle.textFillTransparent ?? false,
+      textStrokeJoin: s.textStrokeJoin || tStyle.textStrokeJoin || 'miter',
     };
 
     const nextStyles: ProjectStylesConfig = {
@@ -272,6 +278,10 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
       textTransform: s.textTransform || tStyle.textTransform || charStyle.textTransform,
       colorStyleId: s.colorStyleId,
       color: s.colorStyleId ? undefined : (s.color || tStyle.color || charStyle.color),
+      textStrokeWidth: s.textStrokeWidth ?? tStyle.textStrokeWidth ?? charStyle.textStrokeWidth ?? 0,
+      textStrokeColor: s.textStrokeColor || tStyle.textStrokeColor || charStyle.textStrokeColor || '#000000',
+      textFillTransparent: s.textFillTransparent ?? tStyle.textFillTransparent ?? charStyle.textFillTransparent ?? false,
+      textStrokeJoin: s.textStrokeJoin || tStyle.textStrokeJoin || charStyle.textStrokeJoin || 'miter',
     });
     onToast?.(`Estilo "${charStyle.name}" atualizado com a formatação da seleção!`);
   };
@@ -708,6 +718,16 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                               fontStyle: chStyle.fontStyle || 'normal',
                               textTransform: (chStyle.textTransform as any) || 'none',
                               color: previewColor,
+                              ...getTextStrokeCss(
+                                {
+                                  textStrokeWidth: chStyle.textStrokeWidth,
+                                  textStrokeColor: chStyle.textStrokeColor,
+                                  textFillTransparent: chStyle.textFillTransparent,
+                                  textStrokeJoin: chStyle.textStrokeJoin,
+                                  color: previewColor,
+                                },
+                                previewColor
+                              ),
                             }}
                           >
                             {chStyle.name}
@@ -732,6 +752,9 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                             ? 'Black'
                             : 'Regular'}
                           {chStyle.fontStyle === 'italic' ? ' • Itálico' : ''}
+                          {chStyle.textStrokeWidth && chStyle.textStrokeWidth > 0
+                            ? ` • Contorno ${chStyle.textStrokeWidth}px${chStyle.textStrokeJoin === 'round' ? ' (Arredondado)' : ''}`
+                            : ''}
                           {linkedColorObj ? ` • 🎨 ${linkedColorObj.name}` : ''}
                         </div>
                       </div>
@@ -786,14 +809,16 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                           </label>
                           <select
                             value={chStyle.fontFamily || 'Inter'}
-                            onChange={e =>
-                              handleUpdateCharacterStyle(chStyle.id, { fontFamily: e.target.value })
-                            }
+                            onChange={async (e) => {
+                              const newFont = e.target.value;
+                              handleUpdateCharacterStyle(chStyle.id, { fontFamily: newFont });
+                              await ensureFontLoaded(newFont);
+                            }}
                             className="w-full text-xs p-1.5 bg-white border border-gray-200 rounded-lg"
                           >
                             <optgroup label="Fontes Padrão">
                               {availableFonts.map(f => (
-                                <option key={f} value={f} style={{ fontFamily: f }}>
+                                <option key={f} value={f} style={{ fontFamily: getSafeFontFamily(f) }}>
                                   {f}
                                 </option>
                               ))}
@@ -801,7 +826,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                             {systemFonts.length > 0 && (
                               <optgroup label="Fontes do Computador">
                                 {systemFonts.map(f => (
-                                  <option key={f} value={f} style={{ fontFamily: f }}>
+                                  <option key={f} value={f} style={{ fontFamily: getSafeFontFamily(f) }}>
                                     {f}
                                   </option>
                                 ))}
@@ -810,7 +835,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                             {customFonts.length > 0 && (
                               <optgroup label="Minhas Fontes">
                                 {customFonts.map(f => (
-                                  <option key={f} value={f} style={{ fontFamily: f }}>
+                                  <option key={f} value={f} style={{ fontFamily: getSafeFontFamily(f) }}>
                                     {f}
                                   </option>
                                 ))}
@@ -969,6 +994,128 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                                 className="w-8 h-8 p-0.5 bg-white border border-gray-200 rounded-lg cursor-pointer shrink-0"
                               />
                             )}
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-gray-200/70 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-gray-600 uppercase">
+                              Contorno das Letras
+                            </span>
+                            {(chStyle.textStrokeWidth || 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateCharacterStyle(chStyle.id, {
+                                    textStrokeWidth: 0,
+                                    textFillTransparent: false,
+                                    textStrokeJoin: 'miter',
+                                  })
+                                }
+                                className="text-[9.5px] font-bold text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Remover
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="0"
+                              max="8"
+                              step="0.1"
+                              value={chStyle.textStrokeWidth || 0}
+                              onChange={e =>
+                                handleUpdateCharacterStyle(chStyle.id, {
+                                  textStrokeWidth: parseFloat(e.target.value) || 0,
+                                  textStrokeColor: chStyle.textStrokeColor || '#000000',
+                                })
+                              }
+                              className="flex-1 accent-purple-600 cursor-pointer"
+                            />
+                            <span className="text-[10px] font-mono text-gray-600 w-9 text-right">
+                              {(chStyle.textStrokeWidth || 0).toFixed(1)}px
+                            </span>
+                            <input
+                              type="color"
+                              value={
+                                (chStyle.textStrokeColor || '#000000').startsWith('#')
+                                  ? chStyle.textStrokeColor || '#000000'
+                                  : '#000000'
+                              }
+                              onChange={e =>
+                                handleUpdateCharacterStyle(chStyle.id, {
+                                  textStrokeColor: e.target.value,
+                                  textStrokeWidth:
+                                    (chStyle.textStrokeWidth || 0) > 0
+                                      ? chStyle.textStrokeWidth
+                                      : 1,
+                                })
+                              }
+                              title="Cor do contorno das letras"
+                              className="w-7 h-7 p-0.5 bg-white border border-gray-200 rounded-lg cursor-pointer shrink-0"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1.5 pt-0.5">
+                            <div className="flex flex-1 rounded-lg border border-gray-200 overflow-hidden bg-white">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateCharacterStyle(chStyle.id, {
+                                    textStrokeJoin: 'miter',
+                                  })
+                                }
+                                className={`flex-1 py-1 text-[9.5px] font-bold cursor-pointer transition-colors ${
+                                  chStyle.textStrokeJoin !== 'round'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                                title="Contorno com cantos retos"
+                              >
+                                Reto
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateCharacterStyle(chStyle.id, {
+                                    textStrokeJoin: 'round',
+                                    textStrokeWidth:
+                                      (chStyle.textStrokeWidth || 0) > 0
+                                        ? chStyle.textStrokeWidth
+                                        : 1.2,
+                                    textStrokeColor: chStyle.textStrokeColor || '#000000',
+                                  })
+                                }
+                                className={`flex-1 py-1 text-[9.5px] font-bold border-l border-gray-200 cursor-pointer transition-colors ${
+                                  chStyle.textStrokeJoin === 'round'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                                title="Arredondar os cantos e pontas do contorno das letras"
+                              >
+                                Arredondado
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateCharacterStyle(chStyle.id, {
+                                  textFillTransparent: !chStyle.textFillTransparent,
+                                  textStrokeWidth:
+                                    !chStyle.textFillTransparent && !(chStyle.textStrokeWidth && chStyle.textStrokeWidth > 0)
+                                      ? 1
+                                      : chStyle.textStrokeWidth,
+                                })
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-[9.5px] font-bold border cursor-pointer transition-colors shrink-0 ${
+                                chStyle.textFillTransparent
+                                  ? 'bg-purple-600 text-white border-purple-600'
+                                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                              }`}
+                              title="Deixar o interior das letras vazado (apenas contorno)"
+                            >
+                              Vazado
+                            </button>
                           </div>
                         </div>
 

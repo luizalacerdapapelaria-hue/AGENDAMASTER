@@ -1,78 +1,32 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
-  X, Upload, FileText, Sparkles, Check, 
-  ChevronLeft, ChevronRight, Layers, Eye, RefreshCw, 
-  Trash2, AlertCircle, CheckSquare, Square, ZoomIn, ZoomOut, Type, Minus,
-  Palette, Sliders, CheckCircle2, Layout, Maximize2, BookOpen, Calendar, ArrowRightLeft, BookmarkPlus,
-  Star, Zap
+  X, Upload, FileText, Sparkles, Check,
+  ChevronLeft, ChevronRight, Layers, Eye, RefreshCw,
+  AlertCircle, ZoomIn, ZoomOut, RotateCcw,
+  BookOpen, Calendar, ArrowRightLeft, Palette,
+  BookMarked, ShieldCheck, Copy, Plus, ArrowRight,
+  ListFilter, CheckSquare, Wand2, Hash, BookCopy
 } from 'lucide-react';
 import { LayoutElement, ElementType, PdfImportDestination, PdfImportBatchItem } from '../../../types';
 export type { PdfImportDestination, PdfImportBatchItem };
 import {
   extractPdfObjects,
   getPdfPageCount,
-  analyzeAgendaPdfStructure,
-  AgendaPdfStructureSummary,
-  AgendaPageClassificationType,
   PdfPageExtractionResult,
   PdfExtractionOptions,
-  convertElementBetweenStaticAndDynamic,
   reapplyDynamicDetectionToElements,
 } from '../../../core/logic/pdfExtractor';
-
-const DYNAMIC_VARIABLE_TYPES: ElementType[] = [
-  'day_number',
-  'day_name',
-  'month_name',
-  'month_number',
-  'year',
-  'date_placeholder',
-];
-
-const isDynamicVariableElement = (type: string): boolean =>
-  DYNAMIC_VARIABLE_TYPES.includes(type as ElementType);
-
-const getDynamicBadgeLabel = (el: LayoutElement): string => {
-  switch (el.type) {
-    case 'day_number':
-      return el.style?.dayIndex && el.style.dayIndex > 0 ? `⚡ Dia +${el.style.dayIndex}` : '⚡ Dia';
-    case 'day_name':
-      return el.style?.dayIndex && el.style.dayIndex > 0 ? `⚡ Semana +${el.style.dayIndex}` : '⚡ Semana';
-    case 'month_name':
-      return '⚡ Mês';
-    case 'month_number':
-      return '⚡ Nº Mês';
-    case 'year':
-      return '⚡ Ano';
-    case 'date_placeholder':
-      return '⚡ Data Completa';
-    default:
-      return '';
-  }
-};
-
-export interface PdfPageBatchConfig {
-  pageNumber: number;
-  selected: boolean;
-  customName: string;
-  dividerRole: 'front' | 'verso';
-  mioloRole: 'front' | 'verso';
-  detectedType?: AgendaPageClassificationType;
-  isMaster?: boolean;
-  badgeLabel?: string;
-  confidence?: number;
-}
 
 export interface PdfImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (
-    elements: LayoutElement[], 
+    elements: LayoutElement[],
     destination: PdfImportDestination,
-    metadata: { 
-      pageName?: string; 
-      widthMm?: number; 
-      heightMm?: number; 
+    metadata: {
+      pageName?: string;
+      widthMm?: number;
+      heightMm?: number;
       backgroundImage?: string;
       clearExistingElements?: boolean;
       clearBackground?: boolean;
@@ -98,6 +52,13 @@ export interface PdfImportModalProps {
   };
 }
 
+interface PageMappingEntry {
+  pageNumber: number;
+  destination: PdfImportDestination | 'ignore';
+  customName?: string;
+  isBackgroundOnly?: boolean;
+}
+
 export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   isOpen,
   onClose,
@@ -105,76 +66,55 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   currentPageTitle = 'Página Atual',
   initialFile = null,
   initialDestination = 'miolo_default',
-  currentPageDimensions,
-  currentMargins,
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>('');
   const [totalPages, setTotalPages] = useState<number>(1);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Destino da importação
-  const [destination, setDestination] = useState<PdfImportDestination>(initialDestination || 'miolo_default');
-  const [destinationCategory, setDestinationCategory] = useState<'full_agenda' | 'miolo' | 'divider' | 'pages' | 'current' | 'library'>(initialDestination === 'full_agenda' ? 'full_agenda' : 'miolo');
-  const [customPageName, setCustomPageName] = useState<string>('Layout de Miolo Diário (PDF)');
+  // Modo de Importação: Página Específica vs Mapeamento em Lote de Múltiplas Páginas
+  const [importMode, setImportMode] = useState<'single' | 'batch'>('single');
 
-  // Análise Inteligente da Estrutura de Agenda PDF (Páginas Iniciais, Divisórias, Mensais, Miolo)
-  const [structureSummary, setStructureSummary] = useState<AgendaPdfStructureSummary | null>(null);
-  const [isAnalyzingStructure, setIsAnalyzingStructure] = useState<boolean>(false);
-  const [structureScanProgress, setStructureScanProgress] = useState<{ current: number; total: number } | null>(null);
-  const [filterCategory, setFilterCategory] = useState<'all' | 'master' | 'miolo' | 'divider' | 'monthly_intro' | 'intro'>('master');
-  const [pageRangeInput, setPageRangeInput] = useState<string>('');
+  // Destino da importação da página atual
+  const [chosenDestination, setChosenDestination] = useState<PdfImportDestination>(initialDestination || 'miolo_default');
+  const [customPageName, setCustomPageName] = useState<string>('Layout Importado');
 
-  // Configurações de importação em lote de páginas do PDF
-  const [pageConfigs, setPageConfigs] = useState<PdfPageBatchConfig[]>([]);
-  const [batchProcessing, setBatchProcessing] = useState<{ current: number; total: number; message: string } | null>(null);
+  // Mapeamento de Múltiplas Páginas do PDF
+  const [pageMappings, setPageMappings] = useState<PageMappingEntry[]>([]);
 
-  // Ajustes de Proporção e Margens
+  // Ajustes essenciais
   const [matchPageDimensions, setMatchPageDimensions] = useState<boolean>(true);
-  const [zeroMargins, setZeroMargins] = useState<boolean>(true);
   const [autoDetectDynamic, setAutoDetectDynamic] = useState<boolean>(true);
 
-  // Resultado da extração
+  // Resultado da extração da página em prévia
   const [extractionResult, setExtractionResult] = useState<PdfPageExtractionResult | null>(null);
   const [elements, setElements] = useState<LayoutElement[]>([]);
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBackgroundOnly, setIsBackgroundOnly] = useState<boolean>(false);
 
-  // Modo de Aplicação:
-  // pure_vector: Fundo limpo, caixas e textos nativos (recomendado para Miolo e Páginas 100% editáveis)
-  // art_whiteout: Mantém a arte decorativa de fundo do PDF e aplica máscara de whiteout nos textos editáveis
-  // bg_only: Converte em apenas imagem de plano de fundo sem extrair elementos
-  const [importMode, setImportMode] = useState<'pure_vector' | 'art_whiteout' | 'bg_only'>('pure_vector');
+  // Zoom da prévia
+  const [canvasZoom, setCanvasZoom] = useState<number>(0.85);
 
-  // Visualização e Zoom
-  const [canvasZoom, setCanvasZoom] = useState<number>(1);
-  const [isEditingText, setIsEditingText] = useState<string | null>(null);
-
-  // Referências
-  const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Executa extração de alta precisão
+  // Extração de página individual para prévia
   const runExtraction = useCallback(async (
     targetFile: File,
     pageNum: number,
-    mode: 'pure_vector' | 'art_whiteout' | 'bg_only' = 'pure_vector',
-    detectDynamic: boolean = autoDetectDynamic
+    detectDynamic: boolean = true
   ) => {
     try {
       setLoading(true);
       setError(null);
 
-      const isArtMode = mode === 'art_whiteout' || mode === 'bg_only';
       const options: PdfExtractionOptions = {
         pageNumber: pageNum,
         groupTextLines: true,
         extractImages: true,
         extractShapes: true,
-        renderBackgroundCanvas: isArtMode,
-        applyTextWhiteout: mode === 'art_whiteout',
+        renderBackgroundCanvas: true,
         textColorDefault: '#1f2937',
         autoDetectDynamicVariables: detectDynamic,
       };
@@ -182,684 +122,277 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
       const result = await extractPdfObjects(targetFile, options);
       setExtractionResult(result);
       setElements(result.elements);
-
-      // Por padrão, seleciona TODOS os elementos editáveis extraídos
-      setSelectedIds(new Set(result.elements.map(e => e.id)));
-      if (result.elements.length > 0) {
-        setSelectedElementId(result.elements[0].id);
-      }
     } catch (err: any) {
       console.error('[PdfImportModal] Erro ao extrair PDF:', err);
-      setError(err?.message || 'Falha ao processar o arquivo PDF. Verifique se o arquivo não está protegido por senha.');
+      const msg = err?.message || '';
+      if (msg.includes('password') || msg.includes('senha')) {
+        setError('Este PDF é protegido por senha. Remova a senha antes de importar.');
+      } else {
+        setError('Não foi possível ler este arquivo PDF. Verifique se o arquivo não está corrompido ou tente exportar novamente do Canva/Corel/Illustrator.');
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Alterna o modo de arquitetura
-  const handleModeChange = (newMode: 'pure_vector' | 'art_whiteout' | 'bg_only') => {
-    setImportMode(newMode);
-    if (file) {
-      runExtraction(file, currentPage, newMode, autoDetectDynamic);
+  // Inicializa mapa de páginas quando o arquivo é carregado
+  const initializePageMappings = (numPages: number, defaultDest: PdfImportDestination) => {
+    const mappings: PageMappingEntry[] = [];
+    for (let p = 1; p <= numPages; p++) {
+      let dest: PdfImportDestination | 'ignore' = 'ignore';
+      let name = `Página ${p}`;
+
+      if (numPages === 1) {
+        dest = defaultDest;
+      } else if (p === 1) {
+        dest = defaultDest;
+        name = 'Capa Frente ou Página 1';
+      } else if (p === 2 && (defaultDest === 'miolo_default' || defaultDest === 'miolo_right')) {
+        dest = 'miolo_left';
+        name = 'Miolo Verso';
+      } else if (p === numPages && numPages > 3) {
+        dest = 'cover_back';
+        name = 'Contracapa';
+      } else {
+        dest = 'new_intro';
+        name = `Página Inicial ${p}`;
+      }
+
+      mappings.push({
+        pageNumber: p,
+        destination: dest,
+        customName: name,
+        isBackgroundOnly: false
+      });
+    }
+    setPageMappings(mappings);
+  };
+
+  // Seleção de arquivo
+  const handleFileSelect = async (selectedFile: File) => {
+    if (!selectedFile) return;
+    if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
+      setError('Por favor, selecione um arquivo no formato PDF válido.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setFile(selectedFile);
+      setFileName(selectedFile.name);
+
+      const numPages = await getPdfPageCount(selectedFile);
+      const validTotal = numPages || 1;
+      setTotalPages(validTotal);
+      setCurrentPage(1);
+
+      initializePageMappings(validTotal, chosenDestination);
+
+      await runExtraction(selectedFile, 1, autoDetectDynamic);
+    } catch (err: any) {
+      console.error('[PdfImportModal] Erro na leitura do PDF:', err);
+      setError('Erro ao abrir o PDF. Verifique se o arquivo é um PDF válido e acessível.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Alterna detecção automática de variáveis dinâmicas (Datas, Dias, Meses, Anos)
+  // Carregar arquivo inicial se fornecido
+  useEffect(() => {
+    if (initialFile && isOpen) {
+      handleFileSelect(initialFile);
+    }
+  }, [initialFile, isOpen]);
+
+  // Atualiza destino padrão se fornecido
+  useEffect(() => {
+    if (initialDestination) {
+      setChosenDestination(initialDestination);
+    }
+  }, [initialDestination]);
+
+  // Navegação de páginas da prévia
+  const handlePageChange = async (newPage: number) => {
+    if (!file || newPage < 1 || newPage > totalPages || newPage === currentPage) return;
+    setCurrentPage(newPage);
+    await runExtraction(file, newPage, autoDetectDynamic);
+  };
+
+  // Alterna detecção dinâmica
   const handleToggleAutoDetectDynamic = (enabled: boolean) => {
     setAutoDetectDynamic(enabled);
     setElements(prev => reapplyDynamicDetectionToElements(prev, enabled));
   };
 
-  // Atualiza destino e ajusta categoria e nome sugerido automaticamente
-  const handleDestinationSelect = (newDest: PdfImportDestination) => {
-    setDestination(newDest);
-    let cat: 'full_agenda' | 'miolo' | 'divider' | 'pages' | 'current' | 'library' = 'current';
-    if (newDest === 'full_agenda') {
-      cat = 'full_agenda';
-      setDestinationCategory('full_agenda');
-      setCustomPageName('Agenda Completa (Mapeamento Automático)');
-    } else if (newDest.startsWith('miolo')) {
-      cat = 'miolo';
-      setDestinationCategory('miolo');
-      if (newDest === 'miolo_default') setCustomPageName('Miolo Diário Principal (PDF)');
-      else if (newDest === 'miolo_left') setCustomPageName('Miolo Verso - Esquerda (PDF)');
-      else if (newDest === 'miolo_right') setCustomPageName('Miolo Frente - Direita (PDF)');
-    } else if (newDest === 'divider' || newDest === 'divider_verso') {
-      cat = 'divider';
-      setDestinationCategory('divider');
-      if (newDest === 'divider') setCustomPageName('Capa da Divisória Mensal (PDF)');
-      else setCustomPageName('Verso da Divisória Mensal (PDF)');
-    } else if (newDest === 'new_intro') {
-      cat = 'pages';
-      setDestinationCategory('pages');
-      setCustomPageName('Nova Página Inicial (PDF)');
-    } else if (newDest === 'new_monthly_intro') {
-      cat = 'pages';
-      setDestinationCategory('pages');
-      setCustomPageName('Abertura Mensal (PDF)');
-    } else if (newDest === 'save_template') {
-      cat = 'library';
-      setDestinationCategory('library');
-      setCustomPageName('Modelo de Layout Personalizado');
-    } else {
-      setDestinationCategory('current');
-    }
+  // Atualiza o destino de uma página específica no mapa em lote
+  const handleUpdatePageMapping = (pageNum: number, newDest: PdfImportDestination | 'ignore') => {
+    setPageMappings(prev => prev.map(m => m.pageNumber === pageNum ? { ...m, destination: newDest } : m));
+  };
 
-    // Atualiza nomes e papéis de lote das páginas para refletir o novo destino
-    setPageConfigs(prev => prev.map((cfg) => {
-      const pNum = cfg.pageNumber;
-      const isEven = pNum % 2 === 0;
-      let newName = cfg.customName;
-      let newDivRole = cfg.dividerRole;
-      let newMioloRole = cfg.mioloRole;
-
-      if (cat === 'full_agenda') {
-        if (cfg.detectedType === 'intro') {
-          newName = cfg.customName || `Página Inicial ${pNum}`;
-        } else if (cfg.detectedType === 'monthly_intro') {
-          newName = cfg.customName || `Abertura Mensal ${pNum}`;
-        } else if (cfg.detectedType === 'divider') {
-          newName = 'Capa da Divisória (Frente)';
-          newDivRole = 'front';
-        } else if (cfg.detectedType === 'divider_verso') {
-          newName = 'Verso da Divisória';
-          newDivRole = 'verso';
-        } else if (cfg.detectedType === 'miolo_front') {
-          newName = 'Miolo Frente (Ímpares / Direita)';
-          newMioloRole = 'front';
-        } else if (cfg.detectedType === 'miolo_verso') {
-          newName = 'Miolo Verso (Pares / Esquerda)';
-          newMioloRole = 'verso';
-        }
-      } else if (cat === 'divider') {
-        newDivRole = (pNum === 2 || (newDest === 'divider_verso' && pNum === 1)) ? 'verso' : 'front';
-        newName = newDivRole === 'verso' ? 'Verso da Divisória' : 'Capa da Divisória (Frente)';
-      } else if (cat === 'miolo') {
-        newMioloRole = isEven ? 'verso' : 'front';
-        newName = isEven ? 'Miolo Verso (Pares / Esquerda)' : 'Miolo Frente (Ímpares / Direita)';
-      } else if (newDest === 'new_intro') {
-        newName = `Página Inicial ${pNum}`;
-      } else if (newDest === 'new_monthly_intro') {
-        newName = `Abertura Mensal ${pNum}`;
-      } else if (cat === 'library') {
-        newName = `Modelo PDF Pág ${pNum}`;
+  // Presets rápidos para mapeamento em lote
+  const applyPreset = (presetType: 'cover_and_miolo' | 'spread' | 'all_intros' | 'all_daily') => {
+    setPageMappings(prev => prev.map(m => {
+      const p = m.pageNumber;
+      if (presetType === 'cover_and_miolo') {
+        if (p === 1) return { ...m, destination: 'cover_front', customName: 'Capa Frente' };
+        if (p === 2) return { ...m, destination: 'endsheet_front', customName: 'Guarda Dianteira' };
+        if (p === 3) return { ...m, destination: 'miolo_default', customName: 'Miolo Frente' };
+        if (p === 4) return { ...m, destination: 'miolo_left', customName: 'Miolo Verso' };
+        if (p === totalPages && totalPages > 4) return { ...m, destination: 'cover_back', customName: 'Contracapa' };
+        return { ...m, destination: 'new_intro', customName: `Página Inicial ${p}` };
       }
-
-      return {
-        ...cfg,
-        customName: newName,
-        dividerRole: newDivRole,
-        mioloRole: newMioloRole
-      };
+      if (presetType === 'spread') {
+        if (p % 2 === 1) return { ...m, destination: 'miolo_right', customName: `Miolo Frente (Pág ${p})` };
+        return { ...m, destination: 'miolo_left', customName: `Miolo Verso (Pág ${p})` };
+      }
+      if (presetType === 'all_intros') {
+        return { ...m, destination: 'new_intro', customName: `Página Inicial ${p}` };
+      }
+      if (presetType === 'all_daily') {
+        return { ...m, destination: 'miolo_default', customName: `Miolo Diário ${p}` };
+      }
+      return m;
     }));
   };
 
-  // Ao selecionar arquivo PDF
-  const handleFileSelect = async (selectedFile: File) => {
-    if (!selectedFile || (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf'))) {
-      setError('Por favor, selecione um arquivo em formato PDF válido.');
+  // Importar página individual confirmada
+  const handleConfirmSingleImport = () => {
+    if (!file || !extractionResult) return;
+
+    const finalElements = isBackgroundOnly ? [] : elements;
+    const finalDest = chosenDestination;
+
+    onImport(
+      finalElements,
+      finalDest,
+      {
+        pageName: customPageName || `Página ${currentPage} Importada`,
+        widthMm: extractionResult.viewport.widthMm,
+        heightMm: extractionResult.viewport.heightMm,
+        matchPageDimensions,
+        zeroMargins: true,
+        backgroundImage: isBackgroundOnly ? extractionResult.backgroundDataUrl : undefined,
+        clearExistingElements: true,
+        clearBackground: !isBackgroundOnly,
+        applyBackground: isBackgroundOnly,
+      }
+    );
+
+    onClose();
+  };
+
+  // Importar múltiplas páginas mapeadas em lote
+  const handleConfirmBatchImport = async () => {
+    if (!file) return;
+
+    const activeMappings = pageMappings.filter(m => m.destination !== 'ignore');
+    if (activeMappings.length === 0) {
+      setError('Por favor, selecione pelo menos uma página com um destino válido para importar.');
       return;
     }
-
-    setFile(selectedFile);
-    setFileName(selectedFile.name);
-    setCustomPageName(selectedFile.name.replace(/\.[^/.]+$/, ''));
-    setCurrentPage(1);
-    setStructureSummary(null);
 
     try {
       setLoading(true);
-      const pages = await getPdfPageCount(selectedFile);
-      setTotalPages(pages || 1);
+      setError(null);
+      const batchPages: PdfImportBatchItem[] = [];
 
-      // Executa Análise Inteligente de Estrutura do PDF (Páginas Iniciais, Divisórias, Mensais, Miolo)
-      let summary: AgendaPdfStructureSummary | null = null;
-      if (pages && pages > 1) {
-        setIsAnalyzingStructure(true);
-        try {
-          summary = await analyzeAgendaPdfStructure(selectedFile, (curr, tot) => {
-            setStructureScanProgress({ current: curr, total: tot });
-          });
-          setStructureSummary(summary);
-        } catch (scanErr) {
-          console.warn('[PdfImportModal] Falha na análise de estrutura:', scanErr);
-        } finally {
-          setIsAnalyzingStructure(false);
-          setStructureScanProgress(null);
-        }
-      }
+      for (let i = 0; i < activeMappings.length; i++) {
+        const mapping = activeMappings[i];
+        setBatchProgress({ current: i + 1, total: activeMappings.length });
 
-      // Configuração inicial das páginas:
-      // Se for um arquivo com muitas páginas (>= 4), NÃO seleciona todas as 400 páginas por padrão!
-      // Seleciona de forma inteligente apenas as Páginas Mestras (iniciais, divisória, miolo frente/verso, abertura mensal)
-      const initialConfigs: PdfPageBatchConfig[] = Array.from({ length: pages || 1 }, (_, i) => {
-        const pNum = i + 1;
-        const isEven = pNum % 2 === 0;
-        const analysis = summary?.pageAnalysis?.[pNum];
-        const isMaster = summary?.masterPages?.includes(pNum) ?? (pNum <= 2);
-        const detectedType: AgendaPageClassificationType = analysis?.detectedType || (isEven ? 'miolo_verso' : 'miolo_front');
-
-        let divRole: 'front' | 'verso' = 'front';
-        if (detectedType === 'divider_verso' || pNum === 2 || (destination === 'divider_verso' && pNum === 1)) {
-          divRole = 'verso';
-        }
-
-        let mioloR: 'front' | 'verso' = isEven ? 'verso' : 'front';
-        if (detectedType === 'miolo_verso') mioloR = 'verso';
-        if (detectedType === 'miolo_front') mioloR = 'front';
-
-        let name = analysis?.suggestedName || `${selectedFile.name.replace(/\.[^/.]+$/, '')} - Pág ${pNum}`;
-        if (destinationCategory === 'divider' || destination === 'divider' || destination === 'divider_verso') {
-          name = divRole === 'verso' ? 'Verso da Divisória' : 'Capa da Divisória (Frente)';
-        } else if (destinationCategory === 'miolo' || destination.startsWith('miolo')) {
-          name = mioloR === 'verso' ? 'Miolo Verso (Pares / Esquerda)' : 'Miolo Frente (Ímpares / Direita)';
-        } else if (destination === 'new_intro') {
-          name = `Página Inicial ${pNum}`;
-        } else if (destination === 'new_monthly_intro') {
-          name = `Abertura Mensal ${pNum}`;
-        }
-
-        let badgeLabel = '📄 Página';
-        if (detectedType === 'intro') badgeLabel = '📝 Inicial';
-        else if (detectedType === 'divider') badgeLabel = '📑 Divisória (Frente)';
-        else if (detectedType === 'divider_verso') badgeLabel = '📄 Divisória (Verso)';
-        else if (detectedType === 'monthly_intro') badgeLabel = '📅 Abertura Mensal';
-        else if (detectedType === 'miolo_front') badgeLabel = '📖 Miolo (Frente)';
-        else if (detectedType === 'miolo_verso') badgeLabel = '📖 Miolo (Verso)';
-
-        // Se tiver mais de 4 páginas, seleciona APENAS as páginas mestras para não carregar 400 páginas desnecessariamente!
-        const shouldSelect = (pages || 1) <= 4 ? true : isMaster;
-
-        return {
-          pageNumber: pNum,
-          selected: shouldSelect,
-          customName: name,
-          dividerRole: divRole,
-          mioloRole: mioloR,
-          detectedType,
-          isMaster,
-          badgeLabel,
-          confidence: analysis?.typeConfidence || 0
-        };
-      });
-
-      setPageConfigs(initialConfigs);
-
-      // Se for uma agenda completa com miolo/divisórias detectadas e mais de 10 páginas,
-      // sugerimos automaticamente a categoria 'full_agenda' ou 'miolo' com as mestras selecionadas
-      if (summary && summary.totalPages >= 10 && (summary.dividerPages.length > 0 || summary.mioloPages.front)) {
-        if (initialDestination === 'full_agenda' || !initialDestination || initialDestination === 'miolo_default') {
-          setDestination('full_agenda');
-          setDestinationCategory('full_agenda');
-          setCustomPageName('Agenda Completa (Mapeamento Automático)');
-        }
-      }
-
-      await runExtraction(selectedFile, 1, importMode);
-    } catch (err: any) {
-      console.error('[PdfImportModal] Erro na leitura do PDF:', err);
-      setError('Não foi possível ler o arquivo PDF.');
-      setLoading(false);
-    }
-  };
-
-  // Efeito para carregar arquivo inicial e destino inicial
-  useEffect(() => {
-    if (isOpen && initialFile && !file) {
-      handleFileSelect(initialFile);
-    }
-  }, [isOpen, initialFile]);
-
-  useEffect(() => {
-    if (isOpen && initialDestination) {
-      handleDestinationSelect(initialDestination);
-    }
-  }, [isOpen, initialDestination]);
-
-  // Mudar página
-  const handlePageChange = async (newPage: number) => {
-    if (!file || newPage < 1 || newPage > totalPages || newPage === currentPage) return;
-    setCurrentPage(newPage);
-    await runExtraction(file, newPage, importMode);
-  };
-
-  // Ações de seleção de páginas em lote
-  const togglePageSelection = (pageNumber: number) => {
-    setPageConfigs(prev => prev.map(p => p.pageNumber === pageNumber ? { ...p, selected: !p.selected } : p));
-  };
-
-  const selectAllPages = (selectAll: boolean) => {
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: selectAll })));
-  };
-
-  const selectOnlyCurrentPage = () => {
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: p.pageNumber === currentPage })));
-  };
-
-  // Selecionar apenas as páginas mestras identificadas pela IA
-  const selectMasterPagesOnly = () => {
-    if (!structureSummary?.masterPages?.length) {
-      // Fallback: primeiras 4 páginas
-      setPageConfigs(prev => prev.map(p => ({ ...p, selected: p.pageNumber <= 4 })));
-      return;
-    }
-    const masterSet = new Set(structureSummary.masterPages);
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: masterSet.has(p.pageNumber) })));
-  };
-
-  // Selecionar apenas Miolo (Frente e Verso)
-  const selectOnlyMiolo = () => {
-    const mioloSet = new Set<number>();
-    if (structureSummary?.mioloPages.front) mioloSet.add(structureSummary.mioloPages.front);
-    if (structureSummary?.mioloPages.verso) mioloSet.add(structureSummary.mioloPages.verso);
-    if (mioloSet.size === 0) {
-      mioloSet.add(1);
-      if (totalPages >= 2) mioloSet.add(2);
-    }
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: mioloSet.has(p.pageNumber) })));
-  };
-
-  // Selecionar apenas Divisórias
-  const selectOnlyDividers = () => {
-    const divSet = new Set<number>();
-    if (structureSummary?.dividerPages?.length) {
-      structureSummary.dividerPages.forEach(d => {
-        divSet.add(d.front);
-        if (d.verso) divSet.add(d.verso);
-      });
-    }
-    if (divSet.size === 0) {
-      pageConfigs.forEach(p => {
-        if (p.detectedType === 'divider' || p.detectedType === 'divider_verso') divSet.add(p.pageNumber);
-      });
-    }
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: divSet.has(p.pageNumber) })));
-  };
-
-  // Selecionar apenas Páginas Iniciais
-  const selectOnlyIntros = () => {
-    const introSet = new Set<number>(structureSummary?.introPages || []);
-    if (introSet.size === 0) {
-      pageConfigs.forEach(p => {
-        if (p.detectedType === 'intro') introSet.add(p.pageNumber);
-      });
-    }
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: introSet.has(p.pageNumber) })));
-  };
-
-  // Selecionar apenas Aberturas Mensais
-  const selectOnlyMonthlyIntros = () => {
-    const monthSet = new Set<number>(structureSummary?.monthlyIntroPages || []);
-    if (monthSet.size === 0) {
-      pageConfigs.forEach(p => {
-        if (p.detectedType === 'monthly_intro') monthSet.add(p.pageNumber);
-      });
-    }
-    setPageConfigs(prev => prev.map(p => ({ ...p, selected: monthSet.has(p.pageNumber) })));
-  };
-
-  // Aplicar intervalo de páginas customizado digitado pelo usuário (ex: "1-6, 15, 20-22")
-  const applyPageRange = (rangeStr: string) => {
-    if (!rangeStr.trim()) return;
-    const selectedSet = new Set<number>();
-    const parts = rangeStr.split(/[,;\s]+/);
-    for (const part of parts) {
-      if (!part.trim()) continue;
-      if (part.includes('-')) {
-        const [startStr, endStr] = part.split('-');
-        const start = parseInt(startStr, 10);
-        const end = parseInt(endStr, 10);
-        if (!isNaN(start) && !isNaN(end)) {
-          for (let p = Math.min(start, end); p <= Math.max(start, end); p++) {
-            if (p >= 1 && p <= totalPages) selectedSet.add(p);
-          }
-        }
-      } else {
-        const p = parseInt(part, 10);
-        if (!isNaN(p) && p >= 1 && p <= totalPages) selectedSet.add(p);
-      }
-    }
-    if (selectedSet.size > 0) {
-      setPageConfigs(prev => prev.map(p => ({ ...p, selected: selectedSet.has(p.pageNumber) })));
-    }
-  };
-
-  const setPageRole = (pageNumber: number, role: 'front' | 'verso') => {
-    setPageConfigs(prev => prev.map(p => {
-      if (p.pageNumber !== pageNumber) return p;
-      if (destinationCategory === 'divider') {
-        return { 
-          ...p, 
-          dividerRole: role, 
-          customName: role === 'verso' ? 'Verso da Divisória' : 'Capa da Divisória (Frente)' 
-        };
-      } else {
-        return { 
-          ...p, 
-          mioloRole: role, 
-          customName: role === 'verso' ? 'Miolo Verso (Pares / Esquerda)' : 'Miolo Frente (Ímpares / Direita)' 
-        };
-      }
-    }));
-  };
-
-  const setPageCustomName = (pageNumber: number, name: string) => {
-    setPageConfigs(prev => prev.map(p => p.pageNumber === pageNumber ? { ...p, customName: name } : p));
-  };
-
-  // Alternar inclusão de elemento
-  const toggleElementSelection = (id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedIds.size === elements.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(elements.map(e => e.id)));
-    }
-  };
-
-  // Atualizar elemento
-  const updateElement = (id: string, updates: Partial<LayoutElement>) => {
-    setElements(prev => prev.map(el => {
-      if (el.id === id) {
-        return {
-          ...el,
-          ...updates,
-          style: {
-            ...el.style,
-            ...(updates.style || {})
-          }
-        };
-      }
-      return el;
-    }));
-  };
-
-  // Remover elemento
-  const removeElement = (id: string) => {
-    setElements(prev => prev.filter(e => e.id !== id));
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    if (selectedElementId === id) {
-      setSelectedElementId(null);
-    }
-  };
-
-  // Finalizar importação (Individual ou em Lote)
-  const handleFinalImport = async () => {
-    if (!file) return;
-
-    const activePages = pageConfigs.filter(p => p.selected);
-    if (activePages.length === 0) {
-      alert('Selecione ao menos 1 página do PDF para importar.');
-      return;
-    }
-
-    const isBgOnly = importMode === 'bg_only';
-    const isArtMode = importMode === 'art_whiteout' || importMode === 'bg_only';
-
-    // Caso 1: Apenas 1 página selecionada
-    if (activePages.length === 1) {
-      const targetPage = activePages[0];
-      let result = extractionResult;
-      
-      // Se a página selecionada não for a que está atualmente carregada, extraímos ela
-      if (!result || result.pageNumber !== targetPage.pageNumber) {
-        setLoading(true);
-        try {
-          result = await extractPdfObjects(file, {
-            pageNumber: targetPage.pageNumber,
-            groupTextLines: true,
-            extractImages: true,
-            extractShapes: true,
-            renderBackgroundCanvas: isArtMode,
-            applyTextWhiteout: importMode === 'art_whiteout',
-            textColorDefault: '#1f2937',
-            autoDetectDynamicVariables: autoDetectDynamic,
-          });
-        } catch (err: any) {
-          setLoading(false);
-          alert('Erro ao extrair página: ' + (err?.message || 'Falha no PDF'));
-          return;
-        }
-        setLoading(false);
-      }
-
-      const finalElements = isBgOnly ? [] : (result.pageNumber === currentPage ? elements.filter(el => selectedIds.has(el.id)) : result.elements);
-
-      if (!isBgOnly && finalElements.length === 0) {
-        alert('Nenhum elemento selecionado para importação de layout.');
-        return;
-      }
-
-      const hasBg = (importMode === 'art_whiteout' || importMode === 'bg_only') && !!result.backgroundDataUrl;
-
-      let finalDest = destination;
-      if (destinationCategory === 'full_agenda' || destination === 'full_agenda') {
-        finalDest = 'full_agenda';
-      } else if (destinationCategory === 'divider') {
-        finalDest = targetPage.dividerRole === 'verso' ? 'divider_verso' : 'divider';
-      } else if (destinationCategory === 'miolo' && destination !== 'miolo_default') {
-        finalDest = targetPage.mioloRole === 'verso' ? 'miolo_left' : 'miolo_right';
-      }
-
-      const singleBatchItem: PdfImportBatchItem = {
-        pageNumber: targetPage.pageNumber,
-        pageName: targetPage.customName || customPageName,
-        elements: finalElements,
-        backgroundImage: hasBg ? result.backgroundDataUrl : undefined,
-        destination: (destinationCategory === 'full_agenda' || destination === 'full_agenda')
-          ? (targetPage.detectedType === 'intro' ? 'new_intro'
-            : targetPage.detectedType === 'monthly_intro' ? 'new_monthly_intro'
-            : targetPage.detectedType === 'divider' ? 'divider'
-            : targetPage.detectedType === 'divider_verso' ? 'divider_verso'
-            : targetPage.detectedType === 'miolo_verso' ? 'miolo_left'
-            : targetPage.detectedType === 'miolo_front' ? 'miolo_right'
-            : (targetPage.pageNumber % 2 === 0 ? 'miolo_left' : 'miolo_right'))
-          : finalDest,
-        isDividerVerso: targetPage.dividerRole === 'verso'
-      };
-
-      onImport(
-        finalElements,
-        finalDest,
-        {
-          pageName: targetPage.customName || customPageName,
-          widthMm: result.viewport.widthMm,
-          heightMm: result.viewport.heightMm,
-          matchPageDimensions,
-          zeroMargins,
-          // No modo pure_vector: Fundo limpo sem imagem (zero duplicação, 100% nativo)
-          backgroundImage: hasBg ? result.backgroundDataUrl : undefined,
-          clearExistingElements: finalDest === 'replace' || finalDest === 'miolo_default' || finalDest === 'miolo_left' || finalDest === 'miolo_right' || finalDest === 'divider' || finalDest === 'divider_verso' || finalDest === 'full_agenda',
-          clearBackground: importMode === 'pure_vector',
-          applyBackground: hasBg,
-          batchPages: finalDest === 'full_agenda' ? [singleBatchItem] : undefined
-        }
-      );
-      onClose();
-      return;
-    }
-
-    // Caso 2: Importação em Lote de Múltiplas Páginas
-    setBatchProcessing({
-      current: 1,
-      total: activePages.length,
-      message: `Iniciando importação de ${activePages.length} páginas...`
-    });
-
-    try {
-      const batchItems: PdfImportBatchItem[] = [];
-      let firstViewport = extractionResult?.viewport;
-
-      for (let i = 0; i < activePages.length; i++) {
-        const pConfig = activePages[i];
-        setBatchProcessing({
-          current: i + 1,
-          total: activePages.length,
-          message: `Processando página ${pConfig.pageNumber} (${i + 1} de ${activePages.length})... Convertendo vetores e textos`
+        const extraction = await extractPdfObjects(file, {
+          pageNumber: mapping.pageNumber,
+          groupTextLines: true,
+          extractImages: true,
+          extractShapes: true,
+          renderBackgroundCanvas: true,
+          autoDetectDynamicVariables: autoDetectDynamic,
         });
 
-        // Pausa breve para a renderização visual do progresso
-        await new Promise(r => setTimeout(r, 20));
-
-        let res: PdfPageExtractionResult;
-        if (extractionResult && extractionResult.pageNumber === pConfig.pageNumber) {
-          res = extractionResult;
-        } else {
-          res = await extractPdfObjects(file, {
-            pageNumber: pConfig.pageNumber,
-            groupTextLines: true,
-            extractImages: true,
-            extractShapes: true,
-            renderBackgroundCanvas: isArtMode,
-            applyTextWhiteout: importMode === 'art_whiteout',
-            textColorDefault: '#1f2937',
-            autoDetectDynamicVariables: autoDetectDynamic,
-          });
-        }
-
-        if (!firstViewport) firstViewport = res.viewport;
-
-        const pageHasBg = (importMode === 'art_whiteout' || importMode === 'bg_only') && !!res.backgroundDataUrl;
-        const pageElements = isBgOnly ? [] : (res.pageNumber === currentPage ? elements.filter(el => selectedIds.has(el.id)) : res.elements);
-
-        let itemDest = destination;
-        if (destinationCategory === 'full_agenda' || destination === 'full_agenda') {
-          if (pConfig.detectedType === 'intro') {
-            itemDest = 'new_intro';
-          } else if (pConfig.detectedType === 'monthly_intro') {
-            itemDest = 'new_monthly_intro';
-          } else if (pConfig.detectedType === 'divider') {
-            itemDest = 'divider';
-          } else if (pConfig.detectedType === 'divider_verso') {
-            itemDest = 'divider_verso';
-          } else if (pConfig.detectedType === 'miolo_front') {
-            itemDest = 'miolo_right';
-          } else if (pConfig.detectedType === 'miolo_verso') {
-            itemDest = 'miolo_left';
-          } else if (pConfig.dividerRole === 'verso') {
-            itemDest = 'divider_verso';
-          } else if (pConfig.mioloRole === 'verso') {
-            itemDest = 'miolo_left';
-          } else {
-            itemDest = 'miolo_right';
-          }
-        } else if (destinationCategory === 'divider') {
-          itemDest = pConfig.dividerRole === 'verso' ? 'divider_verso' : 'divider';
-        } else if (destinationCategory === 'miolo') {
-          itemDest = pConfig.mioloRole === 'verso' ? 'miolo_left' : 'miolo_right';
-        }
-
-        batchItems.push({
-          pageNumber: pConfig.pageNumber,
-          pageName: pConfig.customName,
-          elements: pageElements,
-          backgroundImage: pageHasBg ? res.backgroundDataUrl : undefined,
-          destination: itemDest,
-          isDividerVerso: (destinationCategory === 'full_agenda' || destination === 'full_agenda')
-            ? (pConfig.detectedType === 'divider_verso' || pConfig.dividerRole === 'verso' || pConfig.detectedType === 'miolo_verso' || pConfig.mioloRole === 'verso')
-            : destinationCategory === 'divider' ? (pConfig.dividerRole === 'verso') : (pConfig.mioloRole === 'verso')
+        batchPages.push({
+          pageNumber: mapping.pageNumber,
+          pageName: mapping.customName || `Página ${mapping.pageNumber}`,
+          elements: mapping.isBackgroundOnly ? [] : extraction.elements,
+          backgroundImage: extraction.backgroundDataUrl,
+          destination: mapping.destination as PdfImportDestination,
+          isDividerVerso: mapping.destination === 'divider_verso'
         });
       }
 
-      setBatchProcessing({
-        current: activePages.length,
-        total: activePages.length,
-        message: 'Aplicando layouts e organizando estrutura no projeto...'
-      });
-      await new Promise(r => setTimeout(r, 40));
-
-      const primaryDest = (destinationCategory === 'full_agenda' || destination === 'full_agenda')
-        ? 'full_agenda'
-        : destinationCategory === 'divider' 
-          ? (activePages[0].dividerRole === 'verso' ? 'divider_verso' : 'divider')
-          : destination;
-
       onImport(
-        batchItems[0].elements,
-        primaryDest,
+        batchPages[0]?.elements || [],
+        'full_agenda',
         {
-          pageName: customPageName,
-          widthMm: firstViewport?.widthMm,
-          heightMm: firstViewport?.heightMm,
+          pageName: 'Importação em Lote PDF',
           matchPageDimensions,
-          zeroMargins,
-          backgroundImage: batchItems[0].backgroundImage,
-          clearExistingElements: true,
-          clearBackground: importMode === 'pure_vector',
-          applyBackground: isArtMode,
-          batchPages: batchItems
+          zeroMargins: true,
+          batchPages
         }
       );
 
       onClose();
     } catch (err: any) {
-      console.error('[PdfImportModal] Erro na extração em lote:', err);
-      alert('Erro ao extrair lote de páginas do PDF: ' + (err?.message || 'Falha no processamento'));
+      console.error('[PdfImportModal] Erro no lote:', err);
+      setError('Ocorreu um erro ao extrair todas as páginas mapeadas.');
     } finally {
-      setBatchProcessing(null);
+      setLoading(false);
+      setBatchProgress(null);
     }
   };
 
-  // Estatísticas de elementos
-  const dynamicCount = elements.filter(e => isDynamicVariableElement(e.type)).length;
-  const textCount = elements.filter(e => e.type === 'text').length;
-  const lineCount = elements.filter(e => e.type === 'lines').length;
-  const shapeCount = elements.filter(e => ['box', 'circle'].includes(e.type)).length;
-  const imageCount = elements.filter(e => e.type === 'image').length;
+  const getDestinationName = (dest: PdfImportDestination | 'ignore') => {
+    switch (dest) {
+      case 'cover_front': return 'Capa Frente (Studio de Capas)';
+      case 'cover_back': return 'Contracapa (Verso da Capa)';
+      case 'endsheet_front': return 'Guarda Dianteira';
+      case 'endsheet_back': return 'Guarda Traseira';
+      case 'miolo_default': return 'Miolo Diário (Principal / Frente)';
+      case 'miolo_left': return 'Miolo Verso (Página Esquerda)';
+      case 'miolo_right': return 'Miolo Frente (Página Direita)';
+      case 'new_intro': return 'Nova Página Inicial (Dados/Metas)';
+      case 'new_monthly_intro': return 'Nova Abertura Mensal';
+      case 'divider': return 'Divisória Mensal (Frente / Capa)';
+      case 'divider_verso': return 'Divisória Mensal (Verso)';
+      case 'replace': return 'Substituir Página Atual da Tela';
+      case 'append': return 'Adicionar Elementos à Página Atual';
+      case 'ignore': return 'Ignorar (Não Importar)';
+      default: return dest;
+    }
+  };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-[1260px] max-w-[98vw] h-[93vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150 font-sans">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-[1140px] max-w-[98vw] h-[90vh] flex flex-col overflow-hidden">
         
-        {/* Header Superior */}
-        <div className="px-6 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/80">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-tr from-indigo-600 to-indigo-500 p-2 rounded-xl text-white shadow-sm shadow-indigo-200">
-              <Sparkles className="w-5 h-5" />
+        {/* Header Superior Limpo & Moderno */}
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="bg-[#b84a56] p-2 rounded-xl text-white shadow-xs">
+              <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-gray-900">Importar Layout Editável do PDF</h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase tracking-wider">
-                  Objetos Nativos Editáveis • Sem Fundo Duplicado
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Converte retângulos, cores de preenchimento, contornos, textos e linhas do PDF em elementos 100% editáveis no Agenda Master.
+              <h2 className="text-sm font-black text-slate-900 tracking-tight">Importar Layout de PDF</h2>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Defina com precisão qual página do seu PDF quer importar e onde ela deve ser inserida na agenda
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-xl transition-colors cursor-pointer"
+            className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1.5 rounded-xl transition-colors cursor-pointer"
             title="Fechar"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Corpo do Modal */}
+        {/* Dropzone Inicial se nenhum arquivo foi carregado */}
         {!file ? (
-          /* Dropzone Inicial */
-          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-gray-50/40">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50/50">
             <div
               onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onDrop={(e) => {
@@ -870,7 +403,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                 }
               }}
               onClick={() => fileInputRef.current?.click()}
-              className="w-full max-w-xl border-2 border-dashed border-indigo-200 hover:border-indigo-500 rounded-2xl p-12 flex flex-col items-center justify-center text-center bg-white hover:bg-indigo-50/20 transition-all cursor-pointer shadow-sm hover:shadow-md group"
+              className="w-full max-w-md border-2 border-dashed border-[#eedad5] hover:border-[#b84a56] rounded-2xl p-8 sm:p-10 flex flex-col items-center justify-center text-center bg-white hover:bg-[#fff9f8] transition-all cursor-pointer shadow-xs group"
             >
               <input
                 type="file"
@@ -883,543 +416,177 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                 accept=".pdf,application/pdf"
                 className="hidden"
               />
-              <div className="w-16 h-16 bg-indigo-50 group-hover:bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-4 transition-colors">
-                <Upload className="w-8 h-8" />
+              <div className="w-14 h-14 bg-[#fdeeed] group-hover:bg-[#f9ded8] text-[#b84a56] rounded-2xl flex items-center justify-center mb-3 transition-colors">
+                <Upload className="w-7 h-7" />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-1">
-                Selecione o PDF do CorelDraw, Canva, Illustrator ou InDesign
+              <h3 className="text-sm font-bold text-slate-900 mb-1">
+                Clique para selecionar seu arquivo PDF
               </h3>
-              <p className="text-xs text-gray-500 max-w-md mb-4 leading-relaxed">
-                Cada retângulo preenchido se torna uma caixa com cor e contorno editáveis. Cada texto se torna um bloco de texto nativo com alinhamento e posição exatos.
+              <p className="text-xs text-slate-500 max-w-xs mb-4 leading-relaxed">
+                Suporta PDFs de 1 ou múltiplas páginas do Canva, CorelDraw, Illustrator, Photoshop ou InDesign.
               </p>
-              <div className="flex flex-wrap gap-2 justify-center">
-                <span className="inline-flex items-center text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
-                  ✓ Cores de Preenchimento & Contorno Editáveis
-                </span>
-                <span className="inline-flex items-center text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
-                  ✓ Textos Unificados (Sem Espaços Duplos)
-                </span>
-                <span className="inline-flex items-center text-[11px] font-semibold text-gray-700 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg">
-                  ✓ Sem Fundo Estático Duplicado
-                </span>
-              </div>
+              <span className="text-xs font-bold text-[#b84a56] bg-[#fdeeed] px-3.5 py-1.5 rounded-xl hover:bg-[#f5ded9] transition-colors">
+                Escolher Arquivo PDF
+              </span>
             </div>
 
             {error && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2 max-w-xl w-full">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+              <div className="mt-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2 max-w-md w-full">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
                 <span>{error}</span>
               </div>
             )}
           </div>
         ) : (
-          /* Visualizador Interativo */
+          /* Visualizador e Importador Completo */
           <div className="flex-1 flex overflow-hidden">
             
-            {/* Painel Esquerdo: Canvas com os Elementos Nativos Extraídos */}
-            <div className="flex-1 flex flex-col bg-neutral-200/50 overflow-hidden border-r border-gray-200">
+            {/* Lado Esquerdo: Área de Pré-visualização do PDF */}
+            <div className="flex-1 flex flex-col bg-slate-100/70 overflow-hidden border-r border-slate-200 min-w-0">
               
-              {/* Barra de Controle de Visualização */}
-              <div className="px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5 bg-gray-100 px-2.5 py-1 rounded-lg">
-                    <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                    <span className="font-semibold text-gray-700 truncate max-w-[200px]" title={fileName}>
-                      {fileName}
-                    </span>
+              {/* Barra de Ferramentas Superior da Prévia */}
+              <div className="px-3.5 py-2 bg-white border-b border-slate-200 flex items-center justify-between gap-2 text-xs shrink-0 flex-wrap">
+                
+                {/* Nome do Arquivo + Trocar */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-lg text-slate-700 font-medium max-w-[200px] sm:max-w-[240px]">
+                    <FileText className="w-3.5 h-3.5 text-[#b84a56] shrink-0" />
+                    <span className="truncate text-xs font-bold" title={fileName}>{fileName}</span>
                   </div>
-
-                  {totalPages > 1 && (
-                    <div className="flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded-lg">
-                      <button
-                        onClick={() => handlePageChange(currentPage - 1)}
-                        disabled={currentPage <= 1 || loading}
-                        className="p-1 text-gray-600 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
-                        title="Página Anterior"
-                      >
-                        <ChevronLeft className="w-3.5 h-3.5" />
-                      </button>
-                      <span className="font-semibold text-gray-700 text-[11px] px-1">
-                        Pág. {currentPage} de {totalPages}
-                      </span>
-                      <button
-                        onClick={() => handlePageChange(currentPage + 1)}
-                        disabled={currentPage >= totalPages || loading}
-                        className="p-1 text-gray-600 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
-                        title="Próxima Página"
-                      >
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  {extractionResult && (
-                    <span className="text-[11px] font-mono text-gray-500 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
-                      {extractionResult.viewport.widthMm} × {extractionResult.viewport.heightMm} mm
-                    </span>
-                  )}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-[11px] font-bold text-[#b84a56] hover:underline cursor-pointer shrink-0"
+                  >
+                    Trocar
+                  </button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleFileSelect(e.target.files[0]);
+                      }
+                    }}
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                  />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium ${
-                    importMode === 'pure_vector'
-                      ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
-                      : 'text-indigo-800 bg-indigo-50 border-indigo-200'
-                  }`}>
-                    {importMode === 'pure_vector' ? (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Fundo Limpo • Objetos 100% Nativos</span>
-                      </>
-                    ) : (
-                      <>
-                        <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Arte de Fundo • Máscara Whiteout Ativa</span>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 bg-gray-100 px-1 py-0.5 rounded-lg">
-                    <button
-                      onClick={() => setCanvasZoom(z => Math.max(0.4, z - 0.1))}
-                      className="p-1 text-gray-600 hover:text-indigo-600 cursor-pointer"
-                      title="Diminuir Zoom"
-                    >
-                      <ZoomOut className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-[10px] font-mono text-gray-600 w-9 text-center font-bold">
-                      {Math.round(canvasZoom * 100)}%
-                    </span>
-                    <button
-                      onClick={() => setCanvasZoom(z => Math.min(1.5, z + 0.1))}
-                      className="p-1 text-gray-600 hover:text-indigo-600 cursor-pointer"
-                      title="Aumentar Zoom"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                {/* Seletor Claro: Qual página do PDF quer visualizar e importar */}
+                <div className="flex items-center gap-1 bg-[#fdeeed] p-1 rounded-xl border border-[#eedad5]">
+                  <span className="text-[10px] font-black uppercase text-[#b84a56] px-1.5">
+                    Página do PDF:
+                  </span>
+                  <button
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage <= 1 || loading}
+                    className="p-1 bg-white hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs disabled:opacity-30 cursor-pointer"
+                    title="Página Anterior"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  
+                  {/* Seletor dropdown ou input direto para pular para qualquer página */}
+                  <select
+                    value={currentPage}
+                    onChange={(e) => handlePageChange(parseInt(e.target.value) || 1)}
+                    className="bg-white border border-[#eedad5] font-black text-slate-800 text-xs rounded-lg px-2 py-0.5 shadow-2xs cursor-pointer focus:ring-1 focus:ring-[#b84a56]"
+                  >
+                    {Array.from({ length: totalPages }).map((_, i) => (
+                      <option key={i + 1} value={i + 1}>
+                        Página {i + 1} de {totalPages}
+                      </option>
+                    ))}
+                  </select>
 
                   <button
-                    onClick={() => {
-                      setFile(null);
-                      setExtractionResult(null);
-                      setElements([]);
-                      setPageConfigs([]);
-                    }}
-                    className="text-gray-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 text-[11px] font-medium transition-colors cursor-pointer"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage >= totalPages || loading}
+                    className="p-1 bg-white hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs disabled:opacity-30 cursor-pointer"
+                    title="Próxima Página"
                   >
-                    Trocar PDF
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Controles de Zoom */}
+                <div className="flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded-lg text-slate-600">
+                  <button
+                    onClick={() => setCanvasZoom(z => Math.max(0.4, Number((z - 0.1).toFixed(2))))}
+                    className="p-1 hover:text-[#b84a56] cursor-pointer"
+                    title="Diminuir Zoom"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[10px] font-bold font-mono px-1">
+                    {Math.round(canvasZoom * 100)}%
+                  </span>
+                  <button
+                    onClick={() => setCanvasZoom(z => Math.min(2.0, Number((z + 0.1).toFixed(2))))}
+                    className="p-1 hover:text-[#b84a56] cursor-pointer"
+                    title="Aumentar Zoom"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setCanvasZoom(0.85)}
+                    className="p-1 hover:text-[#b84a56] cursor-pointer text-[10px]"
+                    title="Redefinir Zoom"
+                  >
+                    <RotateCcw className="w-3 h-3" />
                   </button>
                 </div>
               </div>
 
-              {/* Barra de Seleção e Mapeamento de Páginas do PDF (Importação em Lote Inteligente) */}
+              {/* Faixa de Atalho para Páginas (quando tem várias páginas) */}
               {totalPages > 1 && (
-                <div className="bg-slate-50 border-b border-gray-200 px-4 py-2.5 shrink-0 flex flex-col gap-2 shadow-2xs">
-                  
-                  {/* Status do Reconhecimento Inteligente da Estrutura */}
-                  {isAnalyzingStructure && (
-                    <div className="flex items-center gap-2 p-2 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-900 animate-pulse">
-                      <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0"></div>
-                      <span className="font-semibold">
-                        Identificando automaticamente Páginas Iniciais, Divisórias, Mensais e Miolo... {structureScanProgress ? `(${structureScanProgress.current} de ${structureScanProgress.total} págs)` : ''}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Banner de Reconhecimento Inteligente da Estrutura da Agenda */}
-                  {structureSummary && (
-                    <div className="p-3 bg-gradient-to-r from-emerald-50/90 via-indigo-50/70 to-blue-50/70 border border-emerald-200/90 rounded-xl shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                      <div className="flex items-start gap-2.5">
-                        <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-xs shrink-0 mt-0.5">
-                          <Sparkles className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-xs font-bold text-gray-900">
-                              Estrutura da Agenda Identificada ({totalPages} págs no PDF)
-                            </h4>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              ⚡ {structureSummary.masterPages.length} Páginas-Mestre Mapeadas
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-600 mt-0.5 leading-tight">
-                            Não é necessário carregar as {totalPages} páginas repetidas. O sistema identificou os layouts únicos:
-                          </p>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                            {structureSummary.mioloPages.front && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-emerald-200 text-emerald-800 shadow-2xs">
-                                📖 Miolo Diário: Pág. {structureSummary.mioloPages.front} {structureSummary.mioloPages.verso ? `& ${structureSummary.mioloPages.verso}` : ''}
-                              </span>
-                            )}
-                            {structureSummary.dividerPages.length > 0 && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-800 shadow-2xs">
-                                📑 Divisórias: {structureSummary.dividerPages.length} {structureSummary.dividerPages.length === 1 ? 'mês' : 'meses'}
-                              </span>
-                            )}
-                            {structureSummary.monthlyIntroPages.length > 0 && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-purple-200 text-purple-800 shadow-2xs">
-                                📅 Aberturas Mensais: {structureSummary.monthlyIntroPages.length}
-                              </span>
-                            )}
-                            {structureSummary.introPages.length > 0 && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-blue-200 text-blue-800 shadow-2xs">
-                                📝 Páginas Iniciais: {structureSummary.introPages.length}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Botão de Ação Rápida: Atualizar Toda a Agenda com 1 Clique */}
-                      <div className="flex items-center gap-2 shrink-0 self-stretch md:self-auto">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleDestinationSelect('full_agenda');
-                            selectMasterPagesOnly();
-                          }}
-                          className={`flex-1 md:flex-initial px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer ${
-                            destinationCategory === 'full_agenda'
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 ring-2 ring-emerald-500/30'
-                              : 'bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300'
-                          }`}
-                          title="Mapear Miolo (Frente e Verso), Páginas Iniciais, Divisórias e Aberturas Mensais de uma só vez"
-                        >
-                          <Zap className="w-3.5 h-3.5 fill-current" />
-                          <span>Atualizar Agenda Completa (1-Clique)</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Barra de Filtros Rápidos de Seleção & Intervalo de Páginas */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                    
-                    {/* Filtros por Categoria de Layout */}
-                    <div className="flex items-center gap-1 overflow-x-auto text-[11px] font-medium custom-scrollbar pb-0.5">
-                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mr-1">Filtrar:</span>
-                      
-                      {structureSummary && (
-                        <button
-                          type="button"
-                          onClick={() => setFilterCategory('master')}
-                          className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
-                            filterCategory === 'master'
-                              ? 'bg-amber-500 text-white font-bold border-amber-600 shadow-xs'
-                              : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
-                          }`}
-                        >
-                          <Star className={`w-3 h-3 ${filterCategory === 'master' ? 'fill-white' : 'text-amber-500 fill-amber-500'}`} />
-                          <span>Páginas-Mestre ({structureSummary.masterPages.length})</span>
-                        </button>
-                      )}
-
+                <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider shrink-0 mr-1">
+                    Pular para Página:
+                  </span>
+                  {Array.from({ length: totalPages }).map((_, i) => {
+                    const p = i + 1;
+                    const isSelected = p === currentPage;
+                    return (
                       <button
-                        type="button"
-                        onClick={() => setFilterCategory('miolo')}
-                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
-                          filterCategory === 'miolo'
-                            ? 'bg-emerald-600 text-white font-bold border-emerald-700 shadow-xs'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+                        key={p}
+                        onClick={() => handlePageChange(p)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all shrink-0 cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#b84a56] text-white shadow-2xs scale-105'
+                            : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
                         }`}
                       >
-                        <BookOpen className="w-3 h-3" />
-                        <span>Miolo Diário</span>
+                        Pág. {p}
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setFilterCategory('divider')}
-                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
-                          filterCategory === 'divider'
-                            ? 'bg-purple-600 text-white font-bold border-purple-700 shadow-xs'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
-                        }`}
-                      >
-                        <Layers className="w-3 h-3" />
-                        <span>Divisórias</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setFilterCategory('intro')}
-                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
-                          filterCategory === 'intro'
-                            ? 'bg-blue-600 text-white font-bold border-blue-700 shadow-xs'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
-                        }`}
-                      >
-                        <FileText className="w-3 h-3" />
-                        <span>Iniciais</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setFilterCategory('monthly_intro')}
-                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
-                          filterCategory === 'monthly_intro'
-                            ? 'bg-indigo-600 text-white font-bold border-indigo-700 shadow-xs'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
-                        }`}
-                      >
-                        <Calendar className="w-3 h-3" />
-                        <span>Mensais</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setFilterCategory('all')}
-                        className={`px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 text-[11px] ${
-                          filterCategory === 'all'
-                            ? 'bg-gray-800 text-white font-bold border-gray-900 shadow-xs'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
-                        }`}
-                      >
-                        <span>Todas ({totalPages})</span>
-                      </button>
-                    </div>
-
-                    {/* Ações de Seleção de Marcação Rápida */}
-                    <div className="flex items-center gap-1.5 text-xs">
-                      {structureSummary && (
-                        <button
-                          type="button"
-                          onClick={selectMasterPagesOnly}
-                          className="text-[10px] font-bold text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
-                          title="Marcar apenas os modelos mestres para poupar tempo de processamento"
-                        >
-                          <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                          <span>Marcar Apenas Mestras</span>
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={selectOnlyMiolo}
-                        className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                        title="Marcar apenas as 2 páginas de miolo (Frente e Verso)"
-                      >
-                        Apenas Miolo
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => selectAllPages(true)}
-                        className="text-[10px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                        title="Marcar todas as páginas para importação"
-                      >
-                        Marcar Todas ({totalPages})
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => selectAllPages(false)}
-                        className="text-[10px] font-medium text-gray-400 hover:text-red-600 bg-white hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                        title="Desmarcar todas"
-                      >
-                        Limpar
-                      </button>
-
-                      {/* Entrada de Intervalo Numérico */}
-                      <div className="flex items-center gap-1 pl-1 border-l border-gray-300 ml-1">
-                        <input
-                          type="text"
-                          value={pageRangeInput}
-                          onChange={(e) => setPageRangeInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              applyPageRange(pageRangeInput);
-                            }
-                          }}
-                          placeholder="Págs: ex 1-6, 15"
-                          className="w-24 text-[10px] px-2 py-0.5 bg-white border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 outline-none"
-                          title="Digite os números ou intervalos de páginas separados por vírgula"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => applyPageRange(pageRangeInput)}
-                          className="text-[10px] font-bold text-gray-700 hover:text-indigo-600 bg-white hover:bg-indigo-50 border border-gray-200 px-1.5 py-0.5 rounded-md cursor-pointer"
-                        >
-                          OK
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Resumo de Seleção Atual */}
-                  <div className="flex items-center justify-between text-[11px] text-gray-500 pt-0.5 border-t border-gray-200/60">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-gray-800">
-                        {pageConfigs.filter(p => p.selected).length} de {totalPages} páginas selecionadas
-                      </span>
-                      {pageConfigs.filter(p => p.selected).length < totalPages && (
-                        <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-medium border border-emerald-100">
-                          ⚡ Economizando processamento de {totalPages - pageConfigs.filter(p => p.selected).length} páginas repetidas
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-gray-400">
-                      Mostrando {pageConfigs.filter((cfg) => {
-                        if (filterCategory === 'master') return cfg.isMaster;
-                        if (filterCategory === 'miolo') return cfg.detectedType === 'miolo_front' || cfg.detectedType === 'miolo_verso';
-                        if (filterCategory === 'divider') return cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso';
-                        if (filterCategory === 'monthly_intro') return cfg.detectedType === 'monthly_intro';
-                        if (filterCategory === 'intro') return cfg.detectedType === 'intro';
-                        return true;
-                      }).length} páginas no carrossel abaixo
-                    </span>
-                  </div>
-
-                  {/* Chips horizontais de páginas com checkboxes e seletores de papel */}
-                  <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 custom-scrollbar">
-                    {pageConfigs
-                      .filter((cfg) => {
-                        if (filterCategory === 'master') return cfg.isMaster;
-                        if (filterCategory === 'miolo') return cfg.detectedType === 'miolo_front' || cfg.detectedType === 'miolo_verso';
-                        if (filterCategory === 'divider') return cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso';
-                        if (filterCategory === 'monthly_intro') return cfg.detectedType === 'monthly_intro';
-                        if (filterCategory === 'intro') return cfg.detectedType === 'intro';
-                        return true;
-                      })
-                      .map((cfg) => {
-                        const isCurrent = cfg.pageNumber === currentPage;
-                        return (
-                          <div
-                            key={cfg.pageNumber}
-                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs shrink-0 transition-all ${
-                              isCurrent
-                                ? 'bg-white border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
-                                : cfg.selected
-                                  ? 'bg-white border-indigo-200/80 text-gray-800 shadow-2xs'
-                                  : 'bg-gray-100/70 border-gray-200 text-gray-400 opacity-60 hover:opacity-100'
-                            }`}
-                          >
-                            {/* Checkbox de Inclusão no Lote */}
-                            <button
-                              type="button"
-                              onClick={() => togglePageSelection(cfg.pageNumber)}
-                              className="text-gray-400 hover:text-indigo-600 cursor-pointer"
-                              title={cfg.selected ? "Desmarcar esta página do lote de importação" : "Incluir esta página no lote de importação"}
-                            >
-                              {cfg.selected ? (
-                                <CheckSquare className="w-4 h-4 text-indigo-600" />
-                              ) : (
-                                <Square className="w-4 h-4 text-gray-300" />
-                              )}
-                            </button>
-
-                            {/* Botão de Ver no Canvas */}
-                            <button
-                              type="button"
-                              onClick={() => handlePageChange(cfg.pageNumber)}
-                              className={`font-bold text-[11px] cursor-pointer hover:text-indigo-600 flex items-center gap-1 ${
-                                isCurrent ? 'text-indigo-700 font-extrabold' : 'text-gray-700'
-                              }`}
-                              title="Clique para visualizar esta página no canvas"
-                            >
-                              <span>Pág. {cfg.pageNumber}</span>
-                              {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse"></span>}
-                            </button>
-
-                            {/* Badge do Tipo Identificado pela Análise da Agenda */}
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border flex items-center gap-1 ${
-                              cfg.detectedType === 'intro'
-                                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                : cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso'
-                                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                : cfg.detectedType === 'monthly_intro'
-                                ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                            }`}>
-                              {cfg.badgeLabel || '📄 Página'}
-                            </span>
-
-                            {/* Indicador de Página Mestra */}
-                            {cfg.isMaster && (
-                              <span className="text-[9px] font-extrabold text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-200 flex items-center gap-0.5" title="Página-mestre modelo recomendada para extração">
-                                <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
-                                <span>Mestra</span>
-                              </span>
-                            )}
-
-                            {/* Seletor de Papel / Função para Divisórias */}
-                            {(destinationCategory === 'divider' || cfg.detectedType === 'divider' || cfg.detectedType === 'divider_verso') && cfg.selected && (
-                              <button
-                                type="button"
-                                onClick={() => setPageRole(cfg.pageNumber, cfg.dividerRole === 'front' ? 'verso' : 'front')}
-                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
-                                  cfg.dividerRole === 'verso'
-                                    ? 'bg-purple-100 text-purple-800 border border-purple-300 hover:bg-purple-200'
-                                    : 'bg-indigo-100 text-indigo-800 border border-indigo-300 hover:bg-indigo-200'
-                                }`}
-                                title="Clique para alternar entre Capa (Frente) e Verso da Divisória"
-                              >
-                                {cfg.dividerRole === 'verso' ? '📄 Verso' : '📑 Frente'}
-                              </button>
-                            )}
-
-                            {/* Seletor de Papel / Função para Miolo */}
-                            {(destinationCategory === 'miolo' || cfg.detectedType === 'miolo_front' || cfg.detectedType === 'miolo_verso') && cfg.selected && (
-                              <button
-                                type="button"
-                                onClick={() => setPageRole(cfg.pageNumber, cfg.mioloRole === 'front' ? 'verso' : 'front')}
-                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
-                                  cfg.mioloRole === 'verso'
-                                    ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
-                                    : 'bg-indigo-100 text-indigo-800 border border-indigo-300 hover:bg-indigo-200'
-                                }`}
-                                title="Clique para alternar entre Frente (Ímpar) e Verso (Par)"
-                              >
-                                {cfg.mioloRole === 'verso' ? '📖 Verso (Par)' : '📖 Frente (Ímpar)'}
-                              </button>
-                            )}
-
-                            {/* Nome da Página para Páginas Iniciais / Mensais */}
-                            {(destinationCategory === 'pages' || destinationCategory === 'full_agenda') && cfg.selected && (
-                              <input
-                                type="text"
-                                value={cfg.customName}
-                                onChange={(e) => setPageCustomName(cfg.pageNumber, e.target.value)}
-                                className="text-[10px] px-1.5 py-0.5 bg-gray-50 border border-gray-200 rounded max-w-[120px] focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none"
-                                placeholder="Nome da página..."
-                                title="Nome com que esta página será criada"
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                  </div>
+                    );
+                  })}
                 </div>
               )}
 
-              {/* Área do Canvas: Mostra os Elementos Editáveis Exatamente como vão para o Editor */}
-              <div 
-                ref={containerRef}
-                className="flex-1 overflow-auto p-6 flex items-center justify-center relative select-none"
-              >
+              {/* Área do Canvas: Prévia Limpa */}
+              <div className="flex-1 overflow-auto p-4 sm:p-6 flex items-center justify-center relative select-none">
                 {loading ? (
-                  <div className="flex flex-col items-center justify-center gap-3 bg-white p-6 rounded-2xl shadow-xl border border-gray-200">
-                    <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-xs font-semibold text-gray-700">
-                      Convertendo vetores e textos em elementos editáveis...
+                  <div className="flex flex-col items-center justify-center gap-2.5 bg-white p-5 rounded-2xl shadow-lg border border-slate-200">
+                    <div className="w-7 h-7 border-3 border-[#b84a56] border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-xs font-bold text-slate-700">
+                      {batchProgress ? `Processando página ${batchProgress.current} de ${batchProgress.total}...` : `Carregando Página ${currentPage}...`}
                     </span>
                   </div>
                 ) : error ? (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2 max-w-md">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2 max-w-md">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
                     <span>{error}</span>
                   </div>
                 ) : (
-                  <div 
+                  <div
                     style={{
                       transform: `scale(${canvasZoom})`,
                       transformOrigin: 'center center',
-                      transition: 'transform 0.12s ease'
+                      transition: 'transform 0.1s ease-out'
                     }}
-                    className="relative bg-white shadow-2xl rounded-sm border border-gray-300"
+                    className="relative bg-white shadow-xl rounded-sm border border-slate-300"
                   >
-                    {/* Viewport da Página */}
                     <div
                       style={{
                         width: `${extractionResult?.viewport.width || 595}px`,
@@ -1428,22 +595,18 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                         overflow: 'hidden',
                         backgroundColor: '#ffffff'
                       }}
-                      onClick={() => setSelectedElementId(null)}
                     >
-                      {/* Fundo decorativo renderizado apenas quando o usuário escolher 'Arte + Whiteout' */}
-                      {importMode === 'art_whiteout' && extractionResult?.backgroundDataUrl && (
+                      {/* Fundo original se modo fundo estiver ativo */}
+                      {isBackgroundOnly && extractionResult?.backgroundDataUrl && (
                         <img
                           src={extractionResult.backgroundDataUrl}
-                          alt="Fundo decorativo original"
-                          className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none opacity-95"
+                          alt="Fundo original"
+                          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                         />
                       )}
 
-                      {/* Renderização de todos os elementos editáveis nas posições exatas */}
-                      {elements.map((el) => {
-                        const isSelected = selectedElementId === el.id;
-                        const isIncluded = selectedIds.has(el.id);
-
+                      {/* Elementos Editáveis renderizados com fidelidade */}
+                      {!isBackgroundOnly && elements.map((el) => {
                         const widthPt = extractionResult?.viewport.width || 595;
                         const heightPt = extractionResult?.viewport.height || 842;
                         const leftPx = (el.x / 100) * widthPt;
@@ -1451,96 +614,39 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                         const widthPx = (el.w / 100) * widthPt;
                         const heightPx = (el.h / 100) * heightPt;
 
-                        if (!isIncluded) return null;
-
                         return (
                           <div
                             key={el.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedElementId(el.id);
-                            }}
-                            onDoubleClick={(e) => {
-                              e.stopPropagation();
-                              if (el.type === 'text') {
-                                setIsEditingText(el.id);
-                              }
-                            }}
                             style={{
                               position: 'absolute',
                               left: `${leftPx}px`,
                               top: `${topPx}px`,
                               width: `${widthPx}px`,
                               height: `${heightPx}px`,
-                              zIndex: isSelected ? 999 : el.zIndex,
-                              backgroundColor: el.type === 'text' || el.type === 'lines'
-                                ? 'transparent'
-                                : (el.style.backgroundColor || 'transparent'),
-                              border: el.type === 'lines'
-                                ? undefined
-                                : (el.style.borderWidth && el.style.borderWidth > 0
-                                    ? `${el.style.borderWidth}px ${el.style.borderStyle || 'solid'} ${el.style.borderColor || '#000000'}`
-                                    : undefined),
-                              borderRadius: el.style.borderRadius
-                                ? `${el.style.borderRadius}px`
-                                : (el.type === 'circle' ? '9999px' : undefined),
+                              zIndex: el.zIndex,
+                              backgroundColor: el.type === 'text' || el.type === 'lines' ? 'transparent' : (el.style.backgroundColor || 'transparent'),
+                              border: el.type === 'lines' ? undefined : (el.style.borderWidth ? `${el.style.borderWidth}px ${el.style.borderStyle || 'solid'} ${el.style.borderColor || 'transparent'}` : undefined),
+                              borderRadius: el.style.borderRadius ? `${el.style.borderRadius}px` : undefined,
                               opacity: el.style.opacity ?? 1,
+                              pointerEvents: 'none'
                             }}
-                            className={`group cursor-pointer transition-shadow ${
-                              isSelected
-                                ? 'ring-2 ring-indigo-600 shadow-md'
-                                : isDynamicVariableElement(el.type)
-                                ? 'ring-1 ring-emerald-500/70 bg-emerald-500/5 hover:ring-2 hover:ring-emerald-600'
-                                : 'hover:ring-1 hover:ring-indigo-300'
-                            }`}
                           >
-                            {(el.type === 'text' || isDynamicVariableElement(el.type)) ? (
-                              isEditingText === el.id && el.type === 'text' ? (
-                                <input
-                                  type="text"
-                                  autoFocus
-                                  defaultValue={el.content || ''}
-                                  onBlur={(e) => {
-                                    updateElement(el.id, { content: e.target.value });
-                                    setIsEditingText(null);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      updateElement(el.id, { content: (e.target as HTMLInputElement).value });
-                                      setIsEditingText(null);
-                                    }
-                                  }}
-                                  className="w-full h-full p-0.5 text-xs bg-white border border-indigo-500 rounded outline-none"
-                                />
-                              ) : (
-                                <div
-                                  style={{
-                                    fontFamily: el.style.fontFamily || 'Inter',
-                                    fontSize: `${el.style.fontSize || 12}px`,
-                                    fontWeight: el.style.fontWeight || 'normal',
-                                    fontStyle: el.style.fontStyle || 'normal',
-                                    color: el.style.color || '#1f2937',
-                                    lineHeight: 1.22,
-                                    whiteSpace: 'nowrap',
-                                    justifyContent:
-                                      el.style.textAlign === 'center'
-                                        ? 'center'
-                                        : el.style.textAlign === 'right'
-                                        ? 'flex-end'
-                                        : 'flex-start',
-                                  }}
-                                  className="w-full h-full flex items-center px-0.5 pointer-events-none relative"
-                                >
-                                  {el.content || el.style.originalPdfText}
-                                  {isDynamicVariableElement(el.type) && !isSelected && (
-                                    <span className="absolute -top-3.5 right-0 bg-emerald-600 text-white text-[7px] font-bold px-1 py-0.2 rounded shadow-xs whitespace-nowrap pointer-events-none">
-                                      {getDynamicBadgeLabel(el)}
-                                    </span>
-                                  )}
-                                </div>
-                              )
+                            {el.type === 'text' || el.type.includes('day') || el.type.includes('month') || el.type.includes('year') || el.type === 'date_placeholder' ? (
+                              <div
+                                style={{
+                                  fontFamily: el.style.fontFamily || 'sans-serif',
+                                  fontSize: `${el.style.fontSize || 12}px`,
+                                  fontWeight: el.style.fontWeight || 'normal',
+                                  color: el.style.color || '#1f2937',
+                                  whiteSpace: 'nowrap',
+                                  justifyContent: el.style.textAlign === 'center' ? 'center' : (el.style.textAlign === 'right' ? 'flex-end' : 'flex-start')
+                                }}
+                                className="w-full h-full flex items-center px-0.5"
+                              >
+                                {el.content || el.style.originalPdfText || el.name}
+                              </div>
                             ) : el.type === 'lines' ? (
-                              <div className="w-full h-full flex items-center justify-center pointer-events-none">
+                              <div className="w-full h-full flex items-center justify-center">
                                 <svg className="w-full h-full overflow-visible">
                                   <line
                                     x1={el.w < el.h ? "50%" : "0"}
@@ -1548,34 +654,17 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                                     x2={el.w < el.h ? "50%" : "100%"}
                                     y2={el.w < el.h ? "100%" : "50%"}
                                     stroke={el.style.color || el.style.borderColor || '#374151'}
-                                    strokeWidth={Math.max(1, (el.style.borderWidth || 1) * canvasZoom)}
-                                    shapeRendering="crispEdges"
-                                    strokeDasharray={
-                                      el.style.borderStyle === 'dashed'
-                                        ? '5,5'
-                                        : el.style.borderStyle === 'dotted'
-                                        ? '2,2'
-                                        : 'none'
-                                    }
+                                    strokeWidth={Math.max(1, el.style.borderWidth || 1)}
                                   />
                                 </svg>
                               </div>
-                            ) : el.type === 'image' ? (
+                            ) : el.type === 'image' && el.style.imageUrl ? (
                               <img
                                 src={el.style.imageUrl}
-                                alt={el.name || 'Imagem'}
-                                className="w-full h-full object-contain pointer-events-none"
+                                alt="Imagem extraída"
+                                className="w-full h-full object-contain"
                               />
-                            ) : (
-                              <div className="w-full h-full pointer-events-none" />
-                            )}
-
-                            {isSelected && (
-                              <div className={`absolute -top-5 left-0 ${isDynamicVariableElement(el.type) ? 'bg-emerald-600' : 'bg-indigo-600'} text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow flex items-center gap-1 whitespace-nowrap pointer-events-none z-50`}>
-                                {isDynamicVariableElement(el.type) ? <Calendar className="w-2.5 h-2.5" /> : el.type === 'text' ? <Type className="w-2.5 h-2.5" /> : el.type === 'lines' ? <Minus className="w-2.5 h-2.5" /> : <Square className="w-2.5 h-2.5" />}
-                                <span>{el.name}</span>
-                              </div>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })}
@@ -1583,1196 +672,459 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Rodapé da Prévia: Dimensões */}
+              <div className="px-4 py-2 bg-white border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">
+                <span className="font-medium text-[11px]">
+                  Página {currentPage} de {totalPages} • {elements.length} elementos identificados
+                </span>
+                {extractionResult?.viewport && (
+                  <span className="font-mono text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                    Dimensão: {Math.round(extractionResult.viewport.widthMm)} × {Math.round(extractionResult.viewport.heightMm)} mm
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Painel Direito: Lista de Camadas e Ajustes */}
-            <div className="w-[390px] bg-white flex flex-col h-full border-l border-gray-200">
+            {/* Lado Direito: Opções Detalhadas de "QUAL PÁGINA IMPORTAR COMO O QUE" */}
+            <div className="w-[370px] sm:w-[410px] bg-white flex flex-col h-full border-l border-slate-200 shrink-0 overflow-hidden">
               
-              {/* Header do Painel */}
-              <div className="p-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/60">
-                <div className="flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-indigo-600" />
-                  <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-                    Elementos Editáveis
-                  </h3>
+              {/* Abas Superiores: Importar Página Específica vs Mapear Múltiplas Páginas */}
+              {totalPages > 1 && (
+                <div className="flex border-b border-slate-200 bg-slate-50 p-1.5 gap-1 shrink-0">
+                  <button
+                    onClick={() => setImportMode('single')}
+                    className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      importMode === 'single'
+                        ? 'bg-white text-[#b84a56] shadow-xs ring-1 ring-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Página {currentPage}</span>
+                  </button>
+                  <button
+                    onClick={() => setImportMode('batch')}
+                    className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      importMode === 'batch'
+                        ? 'bg-white text-[#b84a56] shadow-xs ring-1 ring-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <BookCopy className="w-3.5 h-3.5" />
+                    <span>Mapear Todas ({totalPages} Págs)</span>
+                  </button>
                 </div>
-                <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                  <span>{selectedIds.size} / {elements.length} ativos</span>
-                </div>
-              </div>
+              )}
 
-              {/* Resumo de Elementos Encontrados */}
-              <div className="p-3 bg-indigo-50/40 border-b border-indigo-100 flex items-center justify-between text-xs">
-                <div className="flex flex-wrap items-center gap-2.5 text-gray-600 text-[11px]">
-                  {dynamicCount > 0 && (
-                    <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold border border-emerald-200">
-                      ⚡ {dynamicCount} var. dinâmicas
-                    </span>
-                  )}
-                  <span>📝 <strong>{textCount}</strong> textos</span>
-                  {lineCount > 0 && <span>📏 <strong>{lineCount}</strong> linhas</span>}
-                  <span>🎨 <strong>{shapeCount}</strong> formas</span>
-                  {imageCount > 0 && <span>🖼️ <strong>{imageCount}</strong> imagens</span>}
-                </div>
-                <button
-                  type="button"
-                  onClick={toggleSelectAll}
-                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer shrink-0"
-                >
-                  {selectedIds.size === elements.length ? 'Desmarcar' : 'Marcar Todos'}
-                </button>
-              </div>
+              {/* CONTEÚDO 1: IMPORTAR PÁGINA ESPECÍFICA */}
+              {importMode === 'single' ? (
+                <div className="flex-1 flex flex-col p-4 space-y-3.5 overflow-y-auto">
+                  
+                  {/* Badge de Destaque da Página Escolhida */}
+                  <div className="bg-[#fdeeed] p-3 rounded-xl border border-[#eedad5] flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-[#b84a56] block">
+                        Página Selecionada do PDF
+                      </span>
+                      <span className="text-sm font-black text-slate-900">
+                        Página {currentPage} de {totalPages}
+                      </span>
+                    </div>
+                    {totalPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handlePageChange(currentPage - 1)}
+                          disabled={currentPage <= 1 || loading}
+                          className="p-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs disabled:opacity-30 cursor-pointer"
+                          title="Página Anterior"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handlePageChange(currentPage + 1)}
+                          disabled={currentPage >= totalPages || loading}
+                          className="p-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs disabled:opacity-30 cursor-pointer"
+                          title="Próxima Página"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-              {/* Lista com Rolagem */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                
-                {/* 1. Modo de Aplicação no AgendaMaster */}
-                <div className="space-y-2 p-3 bg-gray-50/80 rounded-xl border border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-gray-800 uppercase tracking-wider block">
-                      Como usar este PDF?
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-2">
+                      Importar esta página ({currentPage}) como o quê na agenda?
                     </label>
-                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
-                      {importMode === 'pure_vector' ? '100% Editável' : (importMode === 'art_whiteout' ? 'Editável + Arte' : 'Apenas Fundo')}
-                    </span>
-                  </div>
 
-                  <div className="grid grid-cols-1 gap-1.5">
-                    {/* Opção 1: Pure Vector (Layout Nativo) */}
-                    <button
-                      type="button"
-                      onClick={() => handleModeChange('pure_vector')}
-                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
-                        importMode === 'pure_vector'
-                          ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 text-gray-900 shadow-sm'
-                          : 'border-gray-200 hover:border-gray-300 bg-white/60 text-gray-600'
-                      }`}
-                    >
-                      <div className={`mt-0.5 p-1 rounded shrink-0 ${importMode === 'pure_vector' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                        <Sparkles className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-bold flex items-center gap-1.5">
-                          <span>Layout 100% Nativo & Editável</span>
-                          <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-semibold">Recomendado</span>
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
-                          Fundo limpo. Caixas, molduras e textos convertidos em elementos nativos e editáveis do AgendaMaster. Zero duplicação.
-                        </p>
-                      </div>
-                    </button>
-
-                    {/* Opção 2: Layout + Arte */}
-                    <button
-                      type="button"
-                      onClick={() => handleModeChange('art_whiteout')}
-                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
-                        importMode === 'art_whiteout'
-                          ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 text-gray-900 shadow-sm'
-                          : 'border-gray-200 hover:border-gray-300 bg-white/60 text-gray-600'
-                      }`}
-                    >
-                      <div className={`mt-0.5 p-1 rounded shrink-0 ${importMode === 'art_whiteout' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                        <Layers className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-bold flex items-center gap-1.5">
-                          <span>Layout Editável + Arte de Fundo</span>
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
-                          Elementos nativos editáveis sobrepostos à imagem de fundo original do PDF.
-                        </p>
-                      </div>
-                    </button>
-
-                    {/* Opção 3: Apenas Fundo Estático */}
-                    <button
-                      type="button"
-                      onClick={() => handleModeChange('bg_only')}
-                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
-                        importMode === 'bg_only'
-                          ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 text-gray-900 shadow-sm'
-                          : 'border-gray-200 hover:border-gray-300 bg-white/60 text-gray-600'
-                      }`}
-                    >
-                      <div className={`mt-0.5 p-1 rounded shrink-0 ${importMode === 'bg_only' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                        <Palette className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-bold flex items-center gap-1.5">
-                          <span>Apenas Plano de Fundo Estático</span>
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
-                          Aplica a página inteira como imagem de fundo sem extrair elementos individuais.
-                        </p>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. Destino do Layout no Projeto */}
-                <div className="space-y-2.5 p-3 bg-white rounded-xl border border-gray-200 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-gray-800 uppercase tracking-wider block">
-                      Destino do Layout no Projeto
-                    </label>
-                  </div>
-
-                  {/* Abas de Categorias de Destino */}
-                  <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg text-[11px] font-medium flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDestinationCategory('full_agenda');
-                        handleDestinationSelect('full_agenda');
-                      }}
-                      className={`py-1.5 px-2 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        destinationCategory === 'full_agenda'
-                          ? 'bg-emerald-600 text-white font-bold shadow-xs'
-                          : 'text-emerald-800 hover:text-emerald-950 bg-emerald-50/80 border border-emerald-200'
-                      }`}
-                      title="Mapeamento Inteligente da Agenda Completa"
-                    >
-                      <Zap className="w-3 h-3 fill-current" />
-                      <span>Completa</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDestinationCategory('miolo');
-                        if (!destination.startsWith('miolo')) handleDestinationSelect('miolo_default');
-                      }}
-                      className={`flex-1 py-1.5 px-1.5 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        destinationCategory === 'miolo'
-                          ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <BookOpen className="w-3 h-3" />
-                      <span>Miolo</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDestinationCategory('divider');
-                        if (destination !== 'divider' && destination !== 'divider_verso') handleDestinationSelect('divider');
-                      }}
-                      className={`flex-1 py-1.5 px-1.5 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        destinationCategory === 'divider'
-                          ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <Layers className="w-3 h-3" />
-                      <span>Divisórias</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDestinationCategory('pages');
-                        if (destination !== 'new_intro' && destination !== 'new_monthly_intro') handleDestinationSelect('new_intro');
-                      }}
-                      className={`flex-1 py-1.5 px-1.5 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        destinationCategory === 'pages'
-                          ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <FileText className="w-3 h-3" />
-                      <span>Páginas</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDestinationCategory('current');
-                        if (destination !== 'replace' && destination !== 'append') handleDestinationSelect('replace');
-                      }}
-                      className={`flex-1 py-1.5 px-1.5 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        destinationCategory === 'current'
-                          ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Atual</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDestinationCategory('library');
-                        handleDestinationSelect('save_template');
-                      }}
-                      className={`flex-1 py-1.5 px-1.5 rounded-md flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        destinationCategory === 'library'
-                          ? 'bg-white text-amber-700 font-bold shadow-xs'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <BookmarkPlus className="w-3 h-3" />
-                      <span>Modelos</span>
-                    </button>
-                  </div>
-
-                  {/* Opções da Categoria Agenda Completa */}
-                  {destinationCategory === 'full_agenda' && (
-                    <div className="space-y-2 pt-1">
-                      <div className="p-3 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
-                        <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                          <Zap className="w-4 h-4 fill-emerald-600 text-emerald-600" />
-                          <span>Atualização de Agenda Completa</span>
-                        </div>
-                        <p className="text-[11px] text-gray-600 leading-relaxed">
-                          O AgendaMaster distribui cada página selecionada automaticamente para seu destino correspondente:
-                        </p>
-                        <div className="space-y-1.5 pt-1 text-[11px]">
-                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
-                            <span className="font-semibold text-gray-700">📖 Miolo Diário</span>
-                            <span className="text-emerald-800 font-bold text-[10px]">Frente & Verso</span>
-                          </div>
-                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
-                            <span className="font-semibold text-gray-700">📑 Divisórias Mensais</span>
-                            <span className="text-emerald-800 font-bold text-[10px]">Capa & Verso</span>
-                          </div>
-                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
-                            <span className="font-semibold text-gray-700">📝 Páginas Iniciais</span>
-                            <span className="text-emerald-800 font-bold text-[10px]">
-                              {structureSummary?.introPages.length ? `${structureSummary.introPages.length} detectadas` : 'Dados / Metas'}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between p-1.5 bg-white/80 rounded-lg border border-emerald-100">
-                            <span className="font-semibold text-gray-700">📅 Aberturas Mensais</span>
-                            <span className="text-emerald-800 font-bold text-[10px]">
-                              {structureSummary?.monthlyIntroPages.length ? `${structureSummary.monthlyIntroPages.length} detectadas` : 'Visão Mensal'}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="pt-1 text-[10px] text-gray-500 italic">
-                          💡 Dica: Apenas as páginas marcadas no carrossel serão importadas. Nenhuma página desnecessária é processada!
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Opções da Categoria Miolo */}
-                  {destinationCategory === 'miolo' && (
-                    <div className="space-y-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleDestinationSelect('miolo_default');
-                          setPageRole(currentPage, 'front');
-                        }}
-                        className={`w-full p-2 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'miolo_default'
-                            ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5">
-                            <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Miolo Diário Principal</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Aplica este layout a todos os dias da agenda.
-                          </p>
-                        </div>
-                        {destination === 'miolo_default' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
-                      </button>
-
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleDestinationSelect('miolo_left');
-                            setPageRole(currentPage, 'verso');
-                          }}
-                          className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                            destination === 'miolo_left'
-                              ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                              : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                          }`}
-                        >
-                          <div className="text-[11px] font-bold flex items-center gap-1">
-                            <ArrowRightLeft className="w-3 h-3 text-indigo-600" />
-                            <span>Verso / Esquerda</span>
-                          </div>
-                          <p className="text-[9px] text-gray-500 mt-0.5">
-                            Páginas pares / semana esquerda
-                          </p>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleDestinationSelect('miolo_right');
-                            setPageRole(currentPage, 'front');
-                          }}
-                          className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                            destination === 'miolo_right'
-                              ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                              : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                          }`}
-                        >
-                          <div className="text-[11px] font-bold flex items-center gap-1">
-                            <ArrowRightLeft className="w-3 h-3 text-indigo-600" />
-                            <span>Frente / Direita</span>
-                          </div>
-                          <p className="text-[9px] text-gray-500 mt-0.5">
-                            Páginas ímpares / semana direita
-                          </p>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Opções da Categoria Divisórias */}
-                  {destinationCategory === 'divider' && (
-                    <div className="space-y-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleDestinationSelect('divider');
-                          setPageRole(currentPage, 'front');
-                        }}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'divider'
-                            ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Capa da Divisória Mensal (Frente / Ímpar)</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Aplica este layout à capa frontal que abre cada mês da agenda.
-                          </p>
-                        </div>
-                        {destination === 'divider' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleDestinationSelect('divider_verso');
-                          setPageRole(currentPage, 'verso');
-                        }}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'divider_verso'
-                            ? 'border-purple-600 bg-purple-50/70 ring-1 ring-purple-600 text-purple-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5 text-purple-900">
-                            <ArrowRightLeft className="w-3.5 h-3.5 text-purple-600" />
-                            <span>Verso da Divisória Mensal (Costas / Par)</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Aplica este layout ao verso impresso atrás da divisória de cada mês.
-                          </p>
-                        </div>
-                        {destination === 'divider_verso' && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Opções da Categoria Páginas */}
-                  {destinationCategory === 'pages' && (
-                    <div className="space-y-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleDestinationSelect('new_intro')}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'new_intro'
-                            ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Nova Página Inicial (Intro)</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Cria uma nova página em Páginas Iniciais (dados pessoais, metas, etc.).
-                          </p>
-                        </div>
-                        {destination === 'new_intro' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDestinationSelect('new_monthly_intro')}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'new_monthly_intro'
-                            ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Nova Abertura Mensal</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Cria uma página introdutória mensal que antecede os dias de cada mês.
-                          </p>
-                        </div>
-                        {destination === 'new_monthly_intro' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Opções da Categoria Atual */}
-                  {destinationCategory === 'current' && (
-                    <div className="space-y-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleDestinationSelect('replace')}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'replace'
-                            ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5">
-                            <RefreshCw className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Substituir Página Atual</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5 truncate max-w-[280px]">
-                            Aplica diretamente na página aberta: <strong>{currentPageTitle}</strong>
-                          </p>
-                        </div>
-                        {destination === 'replace' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDestinationSelect('append')}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'append'
-                            ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 text-indigo-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5">
-                            <Layout className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Adicionar à Página Atual</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Insere os novos elementos sem apagar o conteúdo existente.
-                          </p>
-                        </div>
-                        {destination === 'append' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Opções da Categoria Modelos */}
-                  {destinationCategory === 'library' && (
-                    <div className="space-y-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleDestinationSelect('save_template')}
-                        className={`w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                          destination === 'save_template'
-                            ? 'border-amber-500 bg-amber-50/70 ring-1 ring-amber-500 text-amber-950 font-semibold'
-                            : 'border-gray-200 hover:border-gray-300 text-gray-700 bg-white'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1.5 text-amber-900">
-                            <BookmarkPlus className="w-3.5 h-3.5 text-amber-600" />
-                            <span>Salvar na Biblioteca de Modelos ⭐</span>
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
-                            Guarda em "Meus Modelos" para aplicar no Miolo ou em qualquer página quando quiser.
-                          </p>
-                        </div>
-                        {destination === 'save_template' && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Papel da Página Atual no Projeto (Divisórias ou Miolo) */}
-                  {destinationCategory === 'divider' && (
-                    <div className="p-2.5 bg-indigo-50/60 border border-indigo-150 rounded-xl space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-gray-800 uppercase tracking-wider">
-                          Papel da Página Atual (Pág. {currentPage})
-                        </label>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          pageConfigs.find(p => p.pageNumber === currentPage)?.dividerRole === 'verso'
-                            ? 'bg-purple-100 text-purple-700'
-                            : 'bg-indigo-100 text-indigo-700'
-                        }`}>
-                          {pageConfigs.find(p => p.pageNumber === currentPage)?.dividerRole === 'verso' ? 'Verso da Divisória' : 'Capa (Frente)'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPageRole(currentPage, 'front');
-                            handleDestinationSelect('divider');
-                          }}
-                          className={`py-1.5 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                            pageConfigs.find(p => p.pageNumber === currentPage)?.dividerRole === 'front'
-                              ? 'bg-indigo-600 text-white shadow-xs'
-                              : 'bg-white text-gray-700 border border-gray-250 hover:bg-gray-50'
-                          }`}
-                        >
-                          <Layers className="w-3 h-3" />
-                          <span>📑 Frente (Capa)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPageRole(currentPage, 'verso');
-                            handleDestinationSelect('divider_verso');
-                          }}
-                          className={`py-1.5 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                            pageConfigs.find(p => p.pageNumber === currentPage)?.dividerRole === 'verso'
-                              ? 'bg-purple-600 text-white shadow-xs'
-                              : 'bg-white text-gray-700 border border-gray-250 hover:bg-gray-50'
-                          }`}
-                        >
-                          <ArrowRightLeft className="w-3 h-3" />
-                          <span>📄 Verso da Divisória</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {destinationCategory === 'miolo' && (
-                    <div className="p-2.5 bg-indigo-50/60 border border-indigo-150 rounded-xl space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-gray-800 uppercase tracking-wider">
-                          Papel da Página Atual no Miolo (Pág. {currentPage})
-                        </label>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          pageConfigs.find(p => p.pageNumber === currentPage)?.mioloRole === 'verso'
-                            ? 'bg-amber-100 text-amber-900'
-                            : 'bg-indigo-100 text-indigo-700'
-                        }`}>
-                          {pageConfigs.find(p => p.pageNumber === currentPage)?.mioloRole === 'verso' ? 'Verso (Par)' : 'Frente (Ímpar)'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPageRole(currentPage, 'front');
-                            handleDestinationSelect('miolo_right');
-                          }}
-                          className={`py-1.5 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                            pageConfigs.find(p => p.pageNumber === currentPage)?.mioloRole === 'front'
-                              ? 'bg-indigo-600 text-white shadow-xs'
-                              : 'bg-white text-gray-700 border border-gray-250 hover:bg-gray-50'
-                          }`}
-                        >
-                          <ArrowRightLeft className="w-3 h-3" />
-                          <span>📖 Frente (Ímpar)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPageRole(currentPage, 'verso');
-                            handleDestinationSelect('miolo_left');
-                          }}
-                          className={`py-1.5 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                            pageConfigs.find(p => p.pageNumber === currentPage)?.mioloRole === 'verso'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'bg-white text-gray-700 border border-gray-250 hover:bg-gray-50'
-                          }`}
-                        >
-                          <ArrowRightLeft className="w-3 h-3" />
-                          <span>📖 Verso (Par)</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Card Resumo do Lote de Páginas Selecionadas */}
-                  {pageConfigs.filter(p => p.selected).length > 1 && (
-                    <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2 shadow-2xs">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950">
-                          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>Importação em Lote ({pageConfigs.filter(p => p.selected).length} Páginas)</span>
-                        </div>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-200/80 text-indigo-900 uppercase">
-                          Lote Ativo
-                        </span>
-                      </div>
+                    {/* Lista Completa e Categorizada de Destinos */}
+                    <div className="space-y-1.5">
                       
-                      <p className="text-[10px] text-indigo-900/80 leading-tight">
-                        {destinationCategory === 'divider'
-                          ? 'As páginas marcadas alimentarão a Capa (Frente) e o Verso das Divisórias Mensais simultaneamente.'
-                          : destinationCategory === 'miolo'
-                            ? 'As páginas marcadas alimentarão as duas faces do Miolo Diário (Frente e Verso/Par).'
-                            : destinationCategory === 'pages'
-                              ? `Cada página selecionada será criada como uma nova página em ${destination === 'new_intro' ? 'Páginas Iniciais' : 'Abertura Mensal'}.`
-                              : 'Cada página selecionada será salva na sua Biblioteca de Modelos.'}
-                      </p>
-
-                      <div className="space-y-1 max-h-32 overflow-y-auto pr-1 custom-scrollbar text-[11px]">
-                        {pageConfigs.filter(p => p.selected).map(p => (
-                          <div key={p.pageNumber} className="flex items-center justify-between bg-white px-2 py-1 rounded border border-indigo-100 text-gray-700">
-                            <span className="font-semibold text-gray-800">Pág. {p.pageNumber}</span>
-                            <span className="text-[10px] font-medium text-indigo-700 truncate max-w-[170px]">
-                              {destinationCategory === 'divider'
-                                ? (p.dividerRole === 'verso' ? '📄 Verso da Divisória' : '📑 Capa (Frente)')
-                                : destinationCategory === 'miolo'
-                                  ? (p.mioloRole === 'verso' ? '📖 Verso (Par)' : '📖 Frente (Ímpar)')
-                                  : p.customName}
-                            </span>
-                          </div>
-                        ))}
+                      {/* 1. Capa Frente */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('cover_front');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Capa Frente');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'cover_front' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'cover_front' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <BookMarked className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Capa Frente (Studio de Capas)</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Capa principal com gabarito de cartonagem</span>
+                        </div>
                       </div>
-                    </div>
-                  )}
 
-                  {/* Nome da Página / Modelo */}
-                  <div className="pt-2 border-t border-gray-100">
-                    <label className="text-[10px] font-bold text-gray-700 block mb-1">
-                      {destination === 'save_template' ? 'Nome do Modelo:' : 'Identificação / Nome:'}
-                    </label>
-                    <input
-                      type="text"
-                      value={customPageName}
-                      onChange={(e) => setCustomPageName(e.target.value)}
-                      placeholder="Ex: Layout Miolo 2026, Dados Pessoais..."
-                      className="w-full text-xs px-2.5 py-1.5 bg-gray-50 border border-gray-300 rounded-lg focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none"
-                    />
+                      {/* 2. Contracapa / Verso */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('cover_back');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Contracapa');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'cover_back' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'cover_back' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <BookMarked className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Contracapa / Verso da Capa</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Parte traseira da encadernação</span>
+                        </div>
+                      </div>
+
+                      {/* 3. Guarda Dianteira */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('endsheet_front');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Guarda Dianteira');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'endsheet_front' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'endsheet_front' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <ShieldCheck className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Guarda Dianteira (Endsheet)</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Página interna colada no verso da capa</span>
+                        </div>
+                      </div>
+
+                      {/* 4. Miolo Diário Principal (Frente) */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('miolo_default');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Layout de Miolo Diário');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'miolo_default' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_default' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <BookOpen className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Miolo Diário (Principal / Frente)</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Modelo para os dias da agenda</span>
+                        </div>
+                      </div>
+
+                      {/* 5. Miolo Verso (Página Par) */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('miolo_left');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Layout Miolo Verso');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'miolo_left' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_left' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <ArrowRightLeft className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Miolo Verso (Página Esquerda / Par)</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Layout diferenciado para o verso do dia</span>
+                        </div>
+                      </div>
+
+                      {/* 6. Nova Página Inicial */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('new_intro');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName(`Página Inicial ${currentPage}`);
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'new_intro' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'new_intro' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Nova Página Inicial</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Dados pessoais, metas, calendários</span>
+                        </div>
+                      </div>
+
+                      {/* 7. Divisória Mensal */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('divider');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Divisória Mensal');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'divider' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'divider' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <Layers className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Divisória Mensal (Capa)</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Capa de abertura dos meses</span>
+                        </div>
+                      </div>
+
+                      {/* 8. Apenas Plano de Fundo */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('replace');
+                          setIsBackgroundOnly(true);
+                          setCustomPageName('Plano de Fundo');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <Palette className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Usar como Plano de Fundo</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Apenas a imagem de fundo estática</span>
+                        </div>
+                      </div>
+
+                    </div>
                   </div>
 
-                  {/* Dimensões e Margens do Layout (Escala 1:1 Fiel ao PDF) */}
-                  <div className="pt-2 border-t border-gray-100 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-bold text-gray-700 flex items-center gap-1">
-                        <Sliders className="w-3 h-3 text-indigo-600" />
-                        <span>Dimensões e Proporção Fiel (1:1)</span>
-                      </label>
-                      {extractionResult?.viewport && (
-                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded font-mono">
-                          PDF: {Math.round(extractionResult.viewport.widthMm)} × {Math.round(extractionResult.viewport.heightMm)} mm
-                        </span>
-                      )}
-                    </div>
+                  {/* Ajustes Úteis */}
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      Ajustes Automáticos:
+                    </label>
 
-                    <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-2.5 space-y-2">
-                      <label className="flex items-start gap-2 cursor-pointer">
+                    <div className="space-y-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="font-bold text-slate-800 text-[11px]">
+                          Ajustar página ao tamanho do PDF
+                        </span>
                         <input
                           type="checkbox"
                           checked={matchPageDimensions}
                           onChange={(e) => setMatchPageDimensions(e.target.checked)}
-                          className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                          className="accent-[#b84a56] w-4 h-4 cursor-pointer"
                         />
-                        <div className="text-[10px] text-gray-700 leading-tight">
-                          <span className="font-bold text-gray-900 block">
-                            Ajustar tamanho da página para o PDF ({Math.round(extractionResult?.viewport.widthMm || 148)} × {Math.round(extractionResult?.viewport.heightMm || 210)} mm)
-                          </span>
-                          <span className="text-gray-500 text-[9px] mt-0.5 block">
-                            Define o formato exato da página (A5, A4 ou Personalizado) para evitar qualquer estiramento ou distorção de proporção.
-                          </span>
-                        </div>
                       </label>
 
-                      <label className="flex items-start gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={zeroMargins}
-                          onChange={(e) => setZeroMargins(e.target.checked)}
-                          className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
-                        />
-                        <div className="text-[10px] text-gray-700 leading-tight">
-                          <span className="font-bold text-gray-900 block">
-                            Escala 1:1 Fiel ao PDF (Zerar margens adicionais)
+                      <label className="flex items-center justify-between cursor-pointer pt-1.5 border-t border-slate-200/60">
+                        <div className="leading-tight">
+                          <span className="font-bold text-slate-800 text-[11px] block">
+                            Converter datas automaticamente
                           </span>
-                          <span className="text-gray-500 text-[9px] mt-0.5 block">
-                            O PDF original já possui seus próprios respiros. O sistema mantém fidelidade 1:1 e preserva suas margens de encadernação iniciais para cálculo inteligente ao espelhar páginas pares no verso.
+                          <span className="text-[9px] text-slate-500">
+                            Dias e meses mudam sozinhos na agenda
                           </span>
                         </div>
-                      </label>
-
-                      <label className="flex items-start gap-2 cursor-pointer pt-1.5 border-t border-indigo-100/80">
                         <input
                           type="checkbox"
                           checked={autoDetectDynamic}
                           onChange={(e) => handleToggleAutoDetectDynamic(e.target.checked)}
-                          className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                          className="accent-[#b84a56] w-4 h-4 cursor-pointer"
                         />
-                        <div className="text-[10px] text-gray-700 leading-tight">
-                          <span className="font-bold text-emerald-900 flex items-center gap-1">
-                            <span>⚡ Converter Datas, Dias e Meses em Variáveis Dinâmicas</span>
-                            {dynamicCount > 0 && (
-                              <span className="bg-emerald-600 text-white text-[8px] px-1.5 py-0.2 rounded-full">
-                                {dynamicCount} detectadas
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-gray-500 text-[9px] mt-0.5 block">
-                            Identifica automaticamente números de dia, dias da semana, meses, anos e datas por extenso do PDF para que mudem sozinhos em cada dia/mês da agenda.
-                          </span>
-                        </div>
                       </label>
                     </div>
                   </div>
-                </div>
 
-                {/* 2. Inspetor do Elemento Selecionado */}
-                {selectedElementId && (() => {
-                  const selEl = elements.find(e => e.id === selectedElementId);
-                  if (!selEl) return null;
-                  const isTextOrDynamic = selEl.type === 'text' || isDynamicVariableElement(selEl.type);
-                  return (
-                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2.5 text-xs">
-                    <div className="flex items-center justify-between font-bold text-gray-900 text-[11px]">
-                      <span>Editar Elemento Selecionado</span>
-                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                        isDynamicVariableElement(selEl.type)
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold'
-                          : 'bg-white text-indigo-600 border-gray-200'
-                      }`}>
-                        {isDynamicVariableElement(selEl.type) ? getDynamicBadgeLabel(selEl) : selEl.type}
-                      </span>
+                  {/* Espaço flexível */}
+                  <div className="flex-1" />
+
+                  {/* Botões de Ação */}
+                  <div className="pt-3 border-t border-slate-200 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleConfirmSingleImport}
+                      disabled={loading || !extractionResult}
+                      className="flex-1 px-4 py-2.5 text-xs font-black text-white bg-[#b84a56] hover:bg-[#a23d48] rounded-xl transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-98"
+                    >
+                      <Sparkles className="w-4 h-4 shrink-0" />
+                      <span className="truncate">Importar Página {currentPage}</span>
+                    </button>
+                  </div>
+
+                </div>
+              ) : (
+                /* CONTEÚDO 2: MAPEAMENTO EM LOTE DE TODAS AS PÁGINAS */
+                <div className="flex-1 flex flex-col p-4 space-y-3 overflow-hidden">
+                  
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-[#b84a56] block">
+                      Mapeador Inteligente do PDF
+                    </span>
+                    <h3 className="text-xs font-black text-slate-900">
+                      Defina o que cada página do PDF vai ser:
+                    </h3>
+                  </div>
+
+                  {/* Presets Rápidos com 1 clique */}
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                      Configurações Rápidas:
+                    </span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        onClick={() => applyPreset('cover_and_miolo')}
+                        className="p-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-800 transition-colors text-left flex items-center gap-1 cursor-pointer"
+                        title="Pág 1: Capa, Pág 2: Guarda, Pág 3: Miolo Frente, Pág 4: Miolo Verso"
+                      >
+                        <Wand2 className="w-3 h-3 text-[#b84a56] shrink-0" />
+                        <span className="truncate">Capa + Miolo</span>
+                      </button>
+                      <button
+                        onClick={() => applyPreset('spread')}
+                        className="p-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-800 transition-colors text-left flex items-center gap-1 cursor-pointer"
+                        title="Alterna Frente e Verso do Miolo"
+                      >
+                        <ArrowRightLeft className="w-3 h-3 text-indigo-600 shrink-0" />
+                        <span className="truncate">Frente e Verso</span>
+                      </button>
+                      <button
+                        onClick={() => applyPreset('all_intros')}
+                        className="p-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-800 transition-colors text-left flex items-center gap-1 cursor-pointer"
+                        title="Todas as páginas viram Páginas Iniciais"
+                      >
+                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span className="truncate">Todas Iniciais</span>
+                      </button>
+                      <button
+                        onClick={() => applyPreset('all_daily')}
+                        className="p-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-800 transition-colors text-left flex items-center gap-1 cursor-pointer"
+                        title="Todas como miolo principal"
+                      >
+                        <BookOpen className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span className="truncate">Todas Miolo</span>
+                      </button>
                     </div>
+                  </div>
 
-                    {isTextOrDynamic && (
-                      <div className="space-y-2">
-                        {/* Seletor de Comportamento: Texto Fixo vs Variável Dinâmica da Agenda */}
-                        <div className="p-2 bg-white border border-emerald-200 rounded-lg space-y-1.5">
-                          <label className="text-[10px] font-bold text-emerald-900 flex items-center justify-between">
-                            <span>⚡ Comportamento na Agenda:</span>
-                            {selEl.style?.originalPdfText && (
-                              <span className="text-[9px] font-normal text-gray-400 truncate max-w-[140px]" title={selEl.style.originalPdfText}>
-                                PDF: "{selEl.style.originalPdfText}"
-                              </span>
-                            )}
-                          </label>
+                  {/* Tabela de Mapeamento com Scroll */}
+                  <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                    {pageMappings.map((entry) => (
+                      <div
+                        key={entry.pageNumber}
+                        className={`p-2 rounded-lg border transition-all flex items-center gap-2 ${
+                          entry.pageNumber === currentPage
+                            ? 'bg-[#fdeeed]/60 border-[#b84a56]'
+                            : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <button
+                          onClick={() => handlePageChange(entry.pageNumber)}
+                          className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-black shrink-0 cursor-pointer"
+                          title="Clique para ver a prévia desta página"
+                        >
+                          Pág. {entry.pageNumber}
+                        </button>
+
+                        <div className="flex-1 min-w-0">
                           <select
-                            value={selEl.type}
-                            onChange={(e) => {
-                              const newType = e.target.value as any;
-                              const converted = convertElementBetweenStaticAndDynamic(selEl, newType);
-                              setElements(prev => prev.map(item => item.id === selEl.id ? converted : item));
-                            }}
-                            className="w-full text-[11px] font-semibold px-2 py-1.5 bg-emerald-50/50 border border-emerald-300 rounded-md text-gray-800 focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
+                            value={entry.destination}
+                            onChange={(e) => handleUpdatePageMapping(entry.pageNumber, e.target.value as any)}
+                            className="w-full text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-md px-1.5 py-1 focus:ring-1 focus:ring-[#b84a56] cursor-pointer truncate"
                           >
-                            <option value="text">📝 Texto Fixo / Estático (Não muda)</option>
-                            <option value="day_number">📅 Número do Dia (01 a 31 - Dinâmico)</option>
-                            <option value="day_name">🗓️ Dia da Semana (Segunda, Terça... - Dinâmico)</option>
-                            <option value="month_name">📆 Nome do Mês (Janeiro a Dezembro - Dinâmico)</option>
-                            <option value="month_number">🔢 Número do Mês (01 a 12 - Dinâmico)</option>
-                            <option value="year">🎯 Ano da Agenda (2025, 2026... - Dinâmico)</option>
-                            <option value="date_placeholder">✨ Data Composta / Completa (Ex: 15 de Janeiro - Dinâmico)</option>
+                            <option value="ignore">❌ Ignorar (Não Importar)</option>
+                            <option value="cover_front">📕 Capa Frente (Studio de Capas)</option>
+                            <option value="cover_back">📘 Contracapa / Verso (Studio de Capas)</option>
+                            <option value="endsheet_front">📑 Guarda Dianteira</option>
+                            <option value="endsheet_back">📑 Guarda Traseira</option>
+                            <option value="miolo_default">📖 Miolo Diário (Principal / Frente)</option>
+                            <option value="miolo_left">📄 Miolo Verso (Página Esquerda)</option>
+                            <option value="new_intro">📋 Nova Página Inicial (Dados/Metas)</option>
+                            <option value="new_monthly_intro">📅 Nova Abertura Mensal</option>
+                            <option value="divider">🗂️ Divisória Mensal (Frente)</option>
+                            <option value="divider_verso">🗂️ Divisória Mensal (Verso)</option>
                           </select>
-
-                          {isDynamicVariableElement(selEl.type) && (
-                            <div className="grid grid-cols-2 gap-1.5 pt-1">
-                              {(selEl.type === 'day_name' || selEl.type === 'month_name') && (
-                                <div>
-                                  <label className="text-[9px] text-gray-500 block mb-0.5">Formato:</label>
-                                  <select
-                                    value={selEl.style.nameFormat || 'full'}
-                                    onChange={(e) => updateElement(selEl.id, { style: { nameFormat: e.target.value } })}
-                                    className="w-full text-[10px] px-1.5 py-1 bg-white border border-gray-300 rounded outline-none"
-                                  >
-                                    <option value="full">Completo</option>
-                                    {selEl.type === 'day_name' && <option value="no_feira">Sem "-feira" (Segunda)</option>}
-                                    <option value="short">Abreviado (3 letras)</option>
-                                    <option value="initial">Inicial (1 letra)</option>
-                                  </select>
-                                </div>
-                              )}
-
-                              {(selEl.type === 'day_number' || selEl.type === 'day_name' || selEl.type === 'date_placeholder') && (
-                                <div>
-                                  <label className="text-[9px] text-gray-500 block mb-0.5">Dia na Página:</label>
-                                  <select
-                                    value={selEl.style.dayIndex || 0}
-                                    onChange={(e) => updateElement(selEl.id, { style: { dayIndex: Number(e.target.value) } })}
-                                    className="w-full text-[10px] px-1.5 py-1 bg-white border border-gray-300 rounded outline-none"
-                                  >
-                                    <option value={0}>1º Dia da Página (Padrão)</option>
-                                    <option value={1}>2º Dia (+1 dia / 2DPP)</option>
-                                    <option value={2}>3º Dia (+2 dias)</option>
-                                    <option value={3}>4º Dia (+3 dias)</option>
-                                    <option value={4}>5º Dia (+4 dias)</option>
-                                    <option value={5}>6º Dia (+5 dias)</option>
-                                    <option value={6}>7º Dia (+6 dias)</option>
-                                  </select>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {selEl.type === 'text' && (
-                          <div>
-                            <label className="text-[10px] text-gray-600 block">Texto:</label>
-                            <input
-                              type="text"
-                              value={selEl.content || ''}
-                              onChange={(e) => updateElement(selectedElementId, { content: e.target.value })}
-                              className="w-full text-xs px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
-                            />
-                          </div>
-                        )}
-
-                        {selEl.type === 'date_placeholder' && (
-                          <div>
-                            <label className="text-[10px] text-gray-600 block">Template Dinâmico:</label>
-                            <input
-                              type="text"
-                              value={selEl.style.dateTemplate || '{{DD}} de {{MMMM}}'}
-                              onChange={(e) => updateElement(selectedElementId, { style: { variant: 'custom_template', dateTemplate: e.target.value } })}
-                              placeholder="Ex: {{DD}} de {{MMMM}} de {{YYYY}}"
-                              className="w-full text-[11px] font-mono px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-emerald-500 outline-none"
-                            />
-                            <span className="text-[9px] text-gray-400 block mt-0.5">
-                              Tags: {'{{DD}}'}, {'{{D}}'}, {'{{MM}}'}, {'{{MMM}}'}, {'{{MMMM}}'}, {'{{YYYY}}'}, {'{{ dddd }}'}
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-2 pt-1">
-                          <label className="text-[10px] text-gray-600">Tam (pt):</label>
-                          <input
-                            type="number"
-                            value={selEl.style.fontSize || 12}
-                            onChange={(e) => updateElement(selectedElementId, { style: { fontSize: Number(e.target.value) } })}
-                            className="w-14 text-xs px-1.5 py-0.5 bg-white border border-gray-300 rounded text-center"
-                          />
-                          <label className="text-[10px] text-gray-600 ml-1">Cor:</label>
-                          <input
-                            type="color"
-                            value={selEl.style.color || '#1f2937'}
-                            onChange={(e) => updateElement(selectedElementId, { style: { color: e.target.value } })}
-                            className="w-6 h-6 p-0 border border-gray-300 rounded cursor-pointer"
-                          />
-                        </div>
-                        <div className="flex items-center justify-between pt-1 border-t border-gray-200/60">
-                          <span className="text-[10px] text-gray-600">Máscara Whiteout:</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const currBg = selEl.style.backgroundColor;
-                              const isWhite = currBg === '#ffffff' || currBg === 'rgb(255, 255, 255)';
-                              updateElement(selectedElementId, {
-                                style: {
-                                  backgroundColor: isWhite ? 'transparent' : '#ffffff',
-                                  padding: isWhite ? 0 : 1,
-                                  borderRadius: isWhite ? 0 : 2
-                                }
-                              });
-                            }}
-                            className={`text-[10px] px-2 py-0.5 rounded border transition-colors cursor-pointer font-medium ${
-                              selEl.style.backgroundColor === '#ffffff'
-                                ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold'
-                                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                            }`}
-                          >
-                            {selEl.style.backgroundColor === '#ffffff' ? 'Ativada (Cobre Fundo)' : 'Transparente'}
-                          </button>
                         </div>
                       </div>
-                    )}
-
-                    {['box', 'circle'].includes(elements.find(e => e.id === selectedElementId)?.type || '') && (
-                      <div className="space-y-2">
-                        <div>
-                          <label className="text-[10px] text-gray-600 block mb-0.5">Nome do Bloco:</label>
-                          <input
-                            type="text"
-                            value={elements.find(e => e.id === selectedElementId)?.name || ''}
-                            onChange={(e) => updateElement(selectedElementId, { name: e.target.value })}
-                            className="w-full text-xs px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] text-gray-600 block mb-0.5">Cor de Preenchimento:</label>
-                            <div className="flex items-center gap-1.5 bg-white border border-gray-300 rounded p-1">
-                              <input
-                                type="color"
-                                value={
-                                  elements.find(e => e.id === selectedElementId)?.style.backgroundColor?.startsWith('#')
-                                    ? elements.find(e => e.id === selectedElementId)?.style.backgroundColor
-                                    : '#f3f4f6'
-                                }
-                                onChange={(e) => updateElement(selectedElementId, { style: { backgroundColor: e.target.value } })}
-                                className="w-5 h-5 border-none cursor-pointer rounded"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => updateElement(selectedElementId, { style: { backgroundColor: 'transparent' } })}
-                                className="text-[9px] text-gray-500 hover:text-gray-900 underline"
-                              >
-                                Transparente
-                              </button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] text-gray-600 block mb-0.5">Cor do Contorno:</label>
-                            <div className="flex items-center gap-1.5 bg-white border border-gray-300 rounded p-1">
-                              <input
-                                type="color"
-                                value={
-                                  elements.find(e => e.id === selectedElementId)?.style.borderColor?.startsWith('#')
-                                    ? elements.find(e => e.id === selectedElementId)?.style.borderColor
-                                    : '#9ca3af'
-                                }
-                                onChange={(e) => updateElement(selectedElementId, { style: { borderColor: e.target.value, borderWidth: 1 } })}
-                                className="w-5 h-5 border-none cursor-pointer rounded"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => updateElement(selectedElementId, { style: { borderWidth: 0, borderColor: 'transparent' } })}
-                                className="text-[9px] text-gray-500 hover:text-gray-900 underline"
-                              >
-                                Sem Borda
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {elements.find(e => e.id === selectedElementId)?.type === 'lines' && (
-                      <div className="space-y-2">
-                        <div>
-                          <label className="text-[10px] text-gray-600 block mb-0.5">Nome da Linha:</label>
-                          <input
-                            type="text"
-                            value={elements.find(e => e.id === selectedElementId)?.name || ''}
-                            onChange={(e) => updateElement(selectedElementId, { name: e.target.value })}
-                            className="w-full text-xs px-2 py-1 bg-white border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] text-gray-600 block mb-0.5">Cor da Linha:</label>
-                            <div className="flex items-center gap-1.5 bg-white border border-gray-300 rounded p-1">
-                              <input
-                                type="color"
-                                value={
-                                  elements.find(e => e.id === selectedElementId)?.style.color?.startsWith('#')
-                                    ? elements.find(e => e.id === selectedElementId)?.style.color
-                                    : (elements.find(e => e.id === selectedElementId)?.style.borderColor?.startsWith('#')
-                                      ? elements.find(e => e.id === selectedElementId)?.style.borderColor
-                                      : '#374151')
-                                }
-                                onChange={(e) =>
-                                  updateElement(selectedElementId, {
-                                    style: { color: e.target.value, borderColor: e.target.value }
-                                  })
-                                }
-                                className="w-5 h-5 border-none cursor-pointer rounded"
-                              />
-                              <span className="text-[10px] text-gray-600 font-mono truncate">
-                                {elements.find(e => e.id === selectedElementId)?.style.color || elements.find(e => e.id === selectedElementId)?.style.borderColor || '#374151'}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] text-gray-600 block mb-0.5">Espessura (pt):</label>
-                            <input
-                              type="number"
-                              step="0.25"
-                              min="0.25"
-                              max="10"
-                              value={elements.find(e => e.id === selectedElementId)?.style.borderWidth || 1}
-                              onChange={(e) =>
-                                updateElement(selectedElementId, {
-                                  style: { borderWidth: Number(e.target.value) }
-                                })
-                              }
-                              className="w-full text-xs px-2 py-1 bg-white border border-gray-300 rounded text-center"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between pt-1 border-t border-gray-200/60">
-                          <span className="text-[10px] text-gray-600">Estilo:</span>
-                          <div className="flex items-center gap-1">
-                            {(['solid', 'dashed', 'dotted'] as const).map(style => (
-                              <button
-                                key={style}
-                                type="button"
-                                onClick={() => updateElement(selectedElementId, { style: { borderStyle: style } })}
-                                className={`text-[9px] px-2 py-0.5 rounded border transition-colors cursor-pointer capitalize ${
-                                  (elements.find(e => e.id === selectedElementId)?.style.borderStyle || 'solid') === style
-                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                }`}
-                              >
-                                {style === 'solid' ? 'Contínua' : style === 'dashed' ? 'Tracejada' : 'Pontilhada'}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    ))}
                   </div>
-                  );
-                })()}
 
-                {/* 3. Lista de Todos os Elementos da Página */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-gray-700 uppercase tracking-wider block">
-                    Lista de Camadas Extraídas
-                  </label>
+                  {/* Botões de Ação para o Lote */}
+                  <div className="pt-2 border-t border-slate-200 flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
 
-                  <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100 max-h-[260px] overflow-y-auto bg-white">
-                    {elements.length === 0 ? (
-                      <div className="p-4 text-center text-xs text-gray-400">
-                        Nenhum elemento encontrado nesta página.
-                      </div>
-                    ) : (
-                      elements.map((el) => {
-                        const isSelected = selectedElementId === el.id;
-                        const isIncluded = selectedIds.has(el.id);
-
-                        return (
-                          <div
-                            key={el.id}
-                            onClick={() => setSelectedElementId(el.id)}
-                            className={`px-3 py-2 text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                              isSelected
-                                ? 'bg-indigo-50 text-indigo-950 font-medium'
-                                : 'hover:bg-gray-50 text-gray-700'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleElementSelection(el.id);
-                                }}
-                                className="text-gray-400 hover:text-indigo-600 cursor-pointer"
-                              >
-                                {isIncluded ? (
-                                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
-                                ) : (
-                                  <Square className="w-3.5 h-3.5 text-gray-300" />
-                                )}
-                              </button>
-
-                              {isDynamicVariableElement(el.type) ? (
-                                <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              ) : el.type === 'text' ? (
-                                <Type className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                              ) : el.type === 'lines' ? (
-                                <Minus className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              ) : el.type === 'image' ? (
-                                <Palette className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                              ) : (
-                                <div
-                                  className="w-3.5 h-3.5 rounded-xs border shrink-0"
-                                  style={{
-                                    backgroundColor: el.style.backgroundColor && el.style.backgroundColor !== 'transparent' ? el.style.backgroundColor : '#f3f4f6',
-                                    borderColor: el.style.borderColor && el.style.borderColor !== 'transparent' ? el.style.borderColor : '#d1d5db',
-                                  }}
-                                />
-                              )}
-
-                              <span className="truncate text-[11px]" title={el.content || el.name}>
-                                {isDynamicVariableElement(el.type) ? `${el.name} ("${el.style.originalPdfText || el.content}")` : (el.content || el.name)}
-                              </span>
-                              {isDynamicVariableElement(el.type) && (
-                                <span className="ml-auto text-[9px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded shrink-0">
-                                  {getDynamicBadgeLabel(el)}
-                                </span>
-                              )}
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeElement(el.id);
-                              }}
-                              className="text-gray-300 hover:text-red-500 p-0.5 rounded transition-colors cursor-pointer"
-                              title="Remover este elemento"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleConfirmBatchImport}
+                      disabled={loading}
+                      className="flex-1 px-4 py-2.5 text-xs font-black text-white bg-[#b84a56] hover:bg-[#a23d48] rounded-xl transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-98"
+                    >
+                      <Sparkles className="w-4 h-4 shrink-0" />
+                      <span className="truncate">
+                        Importar Todas ({pageMappings.filter(m => m.destination !== 'ignore').length} páginas)
+                      </span>
+                    </button>
                   </div>
+
                 </div>
+              )}
 
-              </div>
-
-              {/* Botões de Ação do Rodapé */}
-              <div className="p-3.5 border-t border-gray-100 bg-gray-50/80 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-3.5 py-2 text-xs font-semibold text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleFinalImport}
-                  disabled={pageConfigs.filter(p => p.selected).length === 0}
-                  className={`flex-1 px-4 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                    destinationCategory === 'full_agenda' || destination === 'full_agenda'
-                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
-                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
-                  }`}
-                >
-                  {destinationCategory === 'full_agenda' || destination === 'full_agenda' ? <Zap className="w-4 h-4 fill-current" /> : <Sparkles className="w-4 h-4" />}
-                  <span>
-                    {(destinationCategory === 'full_agenda' || destination === 'full_agenda')
-                      ? `Atualizar Agenda Completa (${pageConfigs.filter(p => p.selected).length} Páginas Mapeadas) ⚡`
-                      : importMode === 'bg_only'
-                      ? `Aplicar como Fundo (${pageConfigs.filter(p => p.selected).length > 1 ? `${pageConfigs.filter(p => p.selected).length} Páginas em Lote` : (destination === 'miolo_default' ? 'Miolo Diário' : (destination === 'divider' ? 'Capa da Divisória' : (destination === 'divider_verso' ? 'Verso da Divisória' : 'Página')))})`
-                      : pageConfigs.filter(p => p.selected).length > 1
-                        ? `Importar ${pageConfigs.filter(p => p.selected).length} Páginas Selecionadas em Lote (${destinationCategory === 'divider' ? 'Divisória Frente + Verso' : (destinationCategory === 'miolo' ? 'Miolo Frente + Verso' : (destination === 'new_intro' ? 'Páginas Iniciais' : (destination === 'new_monthly_intro' ? 'Abertura Mensal' : 'Modelos')))}) 🚀`
-                        : `Importar como Layout (${destination === 'miolo_default' ? 'Miolo Diário' : (destination === 'miolo_left' ? 'Miolo Verso' : (destination === 'miolo_right' ? 'Miolo Frente' : (destination === 'divider' ? 'Capa Divisória' : (destination === 'divider_verso' ? 'Verso Divisória' : (destination === 'new_intro' ? 'Pág. Inicial' : (destination === 'new_monthly_intro' ? 'Abertura Mensal' : (destination === 'save_template' ? 'Meus Modelos' : 'Pág. Atual')))))))})`}
-                  </span>
-                </button>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Progresso da Importação em Lote */}
-        {batchProcessing && (
-          <div className="absolute inset-0 z-50 bg-black/70 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-white text-center animate-in fade-in duration-200">
-            <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 max-w-md w-full shadow-2xl flex flex-col items-center">
-              <div className="w-12 h-12 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin mb-4"></div>
-              <h3 className="text-base font-bold text-white mb-1">Processando Páginas do PDF</h3>
-              <p className="text-xs text-gray-300 mb-5 leading-relaxed">{batchProcessing.message}</p>
-              
-              {/* Barra de Progresso */}
-              <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden mb-2 border border-gray-700">
-                <div 
-                  className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300"
-                  style={{ width: `${Math.round((batchProcessing.current / batchProcessing.total) * 100)}%` }}
-                ></div>
-              </div>
-              <span className="text-[11px] font-mono text-indigo-400 font-semibold">
-                Página {batchProcessing.current} de {batchProcessing.total} ({Math.round((batchProcessing.current / batchProcessing.total) * 100)}%)
-              </span>
             </div>
           </div>
         )}

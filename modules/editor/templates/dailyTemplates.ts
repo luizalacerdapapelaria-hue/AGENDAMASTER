@@ -1606,3 +1606,487 @@ export const APPOINTMENT_2DPP_BOTTOM: LayoutElement[] = [
         style: { rowCount: 7, color: '#86efac', borderColor: '#bbf7d0', showCheckboxes: true, checkboxStyle: 'circle' }
     }
 ];
+
+// ============================================================================
+// 11. AGENDA PERMANENTE (NÃO DATADA) — 1 DPP & 2 DPP
+// ============================================================================
+export const DAILY_PERMANENT: LayoutElement[] = [
+    // Aquarelas Orgânicas de Fundo
+    {
+        id: 'perm-wc-top',
+        name: 'Aquarela Rosé Topo',
+        type: 'circle',
+        x: -4, y: -3, w: 32, h: 19,
+        zIndex: 0,
+        style: { backgroundColor: '#fdf2f8', borderWidth: 0, opacity: 0.75 }
+    },
+    {
+        id: 'perm-wc-bot',
+        name: 'Aquarela Sálvia Rodapé',
+        type: 'circle',
+        x: 72, y: 83, w: 32, h: 19,
+        zIndex: 0,
+        style: { backgroundColor: '#f0fdf4', borderWidth: 0, opacity: 0.65 }
+    },
+
+    // Cabeçalho Esquerdo: Card Livre para Preencher Dia / Mês / Ano
+    {
+        id: 'perm-date-box',
+        name: 'Moldura Data Livre',
+        type: 'box',
+        x: 6, y: 3.8, w: 34, h: 11.8,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#fff1f2',
+            borderColor: '#fbcfe8',
+            borderWidth: 1,
+            borderRadius: 12
+        }
+    },
+    {
+        id: 'perm-date-lbl',
+        name: 'Rótulo Data',
+        type: 'text',
+        content: 'DATA',
+        x: 7.5, y: 4.8, w: 31, h: 2.5,
+        zIndex: 2,
+        style: {
+            fontSize: 6.5,
+            fontWeight: 'bold',
+            fontFamily: 'Montserrat',
+            color: '#9d174d',
+            textAlign: 'center',
+            letterSpacing: 1.5
+        }
+    },
+    {
+        id: 'perm-date-slashes',
+        name: 'Campos Dia / Mês / Ano',
+        type: 'text',
+        content: '___ / ___ / _____',
+        x: 7, y: 7.6, w: 32, h: 4.6,
+        zIndex: 2,
+        style: {
+            fontSize: 12.5,
+            fontWeight: 'bold',
+            fontFamily: 'Playfair Display',
+            color: '#881337',
+            textAlign: 'center',
+            verticalAlign: 'middle'
+        }
+    },
+    {
+        id: 'perm-date-hint',
+        name: 'Legenda Dia Mês Ano',
+        type: 'text',
+        content: 'DIA       MÊS         ANO',
+        x: 7, y: 12.6, w: 32, h: 2.2,
+        zIndex: 2,
+        style: {
+            fontSize: 5,
+            fontWeight: 'bold',
+            fontFamily: 'Montserrat',
+            color: '#be185d',
+            textAlign: 'center',
+            letterSpacing: 0.6
+        }
+    },
+
+    // Cabeçalho Direito: Seletor de Dia da Semana (S T Q Q S S D)
+    {
+        id: 'perm-week-box',
+        name: 'Card Dia da Semana',
+        type: 'box',
+        x: 42, y: 3.8, w: 52, h: 11.8,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#fffbfc',
+            borderColor: '#fce7f3',
+            borderWidth: 1,
+            borderRadius: 12
+        }
+    },
+    {
+        id: 'perm-week-lbl',
+        name: 'Rótulo Dia da Semana',
+        type: 'text',
+        content: '✦ DIA DA SEMANA',
+        x: 44, y: 4.8, w: 48, h: 2.5,
+        zIndex: 2,
+        style: {
+            fontSize: 6.2,
+            fontWeight: 'bold',
+            fontFamily: 'Montserrat',
+            color: '#9d174d',
+            textAlign: 'center',
+            letterSpacing: 1.2
+        }
+    },
+    {
+        id: 'perm-week-selector',
+        name: 'Seletor Dia da Semana (S a D)',
+        type: 'permanent_day_header',
+        x: 44, y: 7.6, w: 48, h: 6.8,
+        zIndex: 2,
+        style: {
+            variant: 'circles_outline',
+            nameFormat: 'initial',
+            shapeScale: 0.9,
+            fontSize: 8.5,
+            fontFamily: 'Montserrat',
+            color: '#9d174d',
+            borderColor: '#f9a8d4',
+            borderWidth: 1
+        }
+    },
+
+    // Box de Prioridades do Dia (Lavanda Pastel)
+    {
+        id: 'perm-prio-box',
+        name: 'Box Prioridades Pastel',
+        type: 'box',
+        x: 6, y: 17.5, w: 88, h: 13.5,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#faf5ff',
+            borderColor: '#e9d5ff',
+            borderWidth: 1,
+            borderRadius: 10
+        }
+    },
+    {
+        id: 'perm-prio-title',
+        name: 'Título Prioridades',
+        type: 'text',
+        content: '✦ PRIORIDADES DO DIA',
+        x: 8.5, y: 18.6, w: 52, h: 3,
+        zIndex: 2,
+        style: {
+            fontSize: 7,
+            fontWeight: 'bold',
+            fontFamily: 'Montserrat',
+            color: '#6b21a8',
+            textAlign: 'left',
+            letterSpacing: 0.8
+        }
+    },
+    {
+        id: 'perm-prio-sub',
+        name: 'Subtítulo Caligráfico Prioridades',
+        type: 'text',
+        content: 'foco essencial',
+        x: 65, y: 18.2, w: 26, h: 3.5,
+        zIndex: 2,
+        style: {
+            fontSize: 9.5,
+            fontWeight: 'normal',
+            fontFamily: 'Dancing Script',
+            color: '#9333ea',
+            textAlign: 'right'
+        }
+    },
+    {
+        id: 'perm-prio-lines',
+        name: 'Check-list de Prioridades',
+        type: 'lines',
+        x: 8.5, y: 21.8, w: 83, h: 8,
+        zIndex: 2,
+        style: {
+            rowCount: 3,
+            color: '#d8b4fe',
+            borderColor: '#e9d5ff',
+            borderWidth: 0.6,
+            borderStyle: 'solid',
+            showCheckboxes: true,
+            checkboxStyle: 'circle'
+        }
+    },
+
+    // Pauta Principal de Horários (07:00 às 20:00)
+    {
+        id: 'perm-sched-bg',
+        name: 'Moldura da Pauta',
+        type: 'box',
+        x: 6, y: 32.5, w: 88, h: 46,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#ffffff',
+            borderColor: '#fce7f3',
+            borderWidth: 1,
+            borderRadius: 10
+        }
+    },
+    {
+        id: 'perm-sched-title',
+        name: 'Título Pauta Diária',
+        type: 'text',
+        content: 'AGENDA & COMPROMISSOS',
+        x: 8, y: 33.6, w: 55, h: 3,
+        zIndex: 2,
+        style: {
+            fontSize: 7,
+            fontWeight: 'bold',
+            fontFamily: 'Montserrat',
+            color: '#9d174d',
+            textAlign: 'left',
+            letterSpacing: 0.8
+        }
+    },
+    {
+        id: 'perm-sched-lines',
+        name: 'Linhas com Horários',
+        type: 'lines',
+        x: 8, y: 37, w: 84, h: 40,
+        zIndex: 2,
+        style: {
+            lineSpacing: 14,
+            color: '#fbcfe8',
+            borderWidth: 0.5,
+            borderStyle: 'solid',
+            showTimes: true,
+            startHour: 7,
+            stepHour: 1,
+            timeFontSize: 7,
+            timeColor: '#be185d',
+            timeFontWeight: 'bold',
+            timeColumnWidth: 26
+        }
+    },
+
+    // Rodapé Duplo Pastel: Lembretes (Sálvia) + Autocuidado (Rosé)
+    {
+        id: 'perm-notes-box',
+        name: 'Box Lembretes Sálvia',
+        type: 'box',
+        x: 6, y: 80, w: 54, h: 13.5,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#f0fdf4',
+            borderColor: '#bbf7d0',
+            borderWidth: 1,
+            borderRadius: 10
+        }
+    },
+    {
+        id: 'perm-notes-title',
+        name: 'Título Lembretes',
+        type: 'text',
+        content: '✿ LEMBRETES & GRATIDÃO',
+        x: 8, y: 81, w: 48, h: 3,
+        zIndex: 2,
+        style: {
+            fontSize: 6.8,
+            fontWeight: 'bold',
+            fontFamily: 'Montserrat',
+            color: '#166534',
+            textAlign: 'left',
+            letterSpacing: 0.8
+        }
+    },
+    {
+        id: 'perm-notes-lines',
+        name: 'Linhas de Lembretes',
+        type: 'lines',
+        x: 8, y: 84.2, w: 50, h: 8,
+        zIndex: 2,
+        style: {
+            lineSpacing: 13,
+            color: '#bbf7d0',
+            borderWidth: 0.5,
+            borderStyle: 'dashed'
+        }
+    },
+    {
+        id: 'perm-care-box',
+        name: 'Box Autocuidado Pastel',
+        type: 'box',
+        x: 62, y: 80, w: 32, h: 13.5,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#fff1f2',
+            borderColor: '#fecdd3',
+            borderWidth: 1,
+            borderRadius: 10
+        }
+    },
+    {
+        id: 'perm-water',
+        name: 'Hidratação Diária',
+        type: 'footer_tracker',
+        x: 63.5, y: 81.2, w: 29, h: 5.5,
+        zIndex: 2,
+        style: {
+            variant: 'water',
+            title: 'HIDRATAÇÃO',
+            color: '#9d174d'
+        }
+    },
+    {
+        id: 'perm-mood',
+        name: 'Humor do Dia',
+        type: 'footer_tracker',
+        x: 63.5, y: 87.2, w: 29, h: 5.5,
+        zIndex: 2,
+        style: {
+            variant: 'mood',
+            title: 'MEU HUMOR',
+            color: '#9d174d'
+        }
+    },
+    {
+        id: 'perm-quote',
+        name: 'Frase Inspiradora do Dia',
+        type: 'quote',
+        x: 6, y: 94.2, w: 88, h: 3.8,
+        zIndex: 2,
+        style: {
+            fontSize: 8.5,
+            fontStyle: 'normal',
+            fontFamily: 'Dancing Script',
+            color: '#be185d',
+            textAlign: 'center'
+        }
+    }
+];
+
+// 2 Dias por Página Permanente (coordenadas 0..100 relativas a cada metade da página)
+export const PERMANENT_2DPP_TOP: LayoutElement[] = [
+    {
+        id: 'perm2-t-card',
+        name: 'Card Superior Permanente',
+        type: 'box',
+        x: 5, y: 4, w: 90, h: 91,
+        zIndex: 0,
+        style: { backgroundColor: '#fffbfc', borderColor: '#fbcfe8', borderWidth: 1, borderRadius: 12 }
+    },
+    {
+        id: 'perm2-t-date-box',
+        name: 'Badge Data Livre (Topo)',
+        type: 'box',
+        x: 7, y: 7, w: 32, h: 15,
+        zIndex: 1,
+        style: { backgroundColor: '#fff1f2', borderColor: '#fecdd3', borderWidth: 1, borderRadius: 8 }
+    },
+    {
+        id: 'perm2-t-date-txt',
+        name: 'Data Livre (Topo)',
+        type: 'text',
+        content: 'DATA: ___ / ___ / ___',
+        x: 8, y: 8.5, w: 30, h: 12,
+        zIndex: 2,
+        style: { fontSize: 8.5, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#881337', textAlign: 'center', verticalAlign: 'middle' }
+    },
+    {
+        id: 'perm2-t-week',
+        name: 'Dia da Semana (Topo)',
+        type: 'permanent_day_header',
+        x: 42, y: 7.5, w: 51, h: 14,
+        zIndex: 2,
+        style: {
+            variant: 'circles_outline',
+            nameFormat: 'initial',
+            shapeScale: 0.88,
+            fontSize: 7.5,
+            fontFamily: 'Montserrat',
+            color: '#9d174d',
+            borderColor: '#f9a8d4',
+            borderWidth: 1
+        }
+    },
+    {
+        id: 'perm2-t-prio-box',
+        name: 'Foco do Dia (Topo)',
+        type: 'box',
+        x: 7, y: 24.5, w: 86, h: 12.5,
+        zIndex: 1,
+        style: { backgroundColor: '#faf5ff', borderColor: '#e9d5ff', borderWidth: 0.8, borderRadius: 6 }
+    },
+    {
+        id: 'perm2-t-prio-lbl',
+        name: 'Label Foco (Topo)',
+        type: 'text',
+        content: '✦ FOCO DO DIA:',
+        x: 8.5, y: 27.5, w: 22, h: 6.5,
+        zIndex: 2,
+        style: { fontSize: 6, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#6b21a8', letterSpacing: 0.7 }
+    },
+    {
+        id: 'perm2-t-lines',
+        name: 'Pauta (Topo)',
+        type: 'lines',
+        x: 7, y: 39.5, w: 86, h: 51,
+        zIndex: 2,
+        style: { lineSpacing: 14, color: '#fce7f3', borderWidth: 0.5, showCheckboxes: true, checkboxStyle: 'circle' }
+    }
+];
+
+export const PERMANENT_2DPP_BOTTOM: LayoutElement[] = [
+    {
+        id: 'perm2-b-card',
+        name: 'Card Inferior Permanente',
+        type: 'box',
+        x: 5, y: 4, w: 90, h: 91,
+        zIndex: 0,
+        style: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', borderWidth: 1, borderRadius: 12, opacity: 0.55 }
+    },
+    {
+        id: 'perm2-b-date-box',
+        name: 'Badge Data Livre (Base)',
+        type: 'box',
+        x: 7, y: 7, w: 32, h: 15,
+        zIndex: 1,
+        style: { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0', borderWidth: 1, borderRadius: 8 }
+    },
+    {
+        id: 'perm2-b-date-txt',
+        name: 'Data Livre (Base)',
+        type: 'text',
+        content: 'DATA: ___ / ___ / ___',
+        x: 8, y: 8.5, w: 30, h: 12,
+        zIndex: 2,
+        style: { fontSize: 8.5, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#14532d', textAlign: 'center', verticalAlign: 'middle' }
+    },
+    {
+        id: 'perm2-b-week',
+        name: 'Dia da Semana (Base)',
+        type: 'permanent_day_header',
+        x: 42, y: 7.5, w: 51, h: 14,
+        zIndex: 2,
+        style: {
+            variant: 'circles_outline',
+            nameFormat: 'initial',
+            shapeScale: 0.88,
+            fontSize: 7.5,
+            fontFamily: 'Montserrat',
+            color: '#166534',
+            borderColor: '#86efac',
+            borderWidth: 1
+        }
+    },
+    {
+        id: 'perm2-b-prio-box',
+        name: 'Foco do Dia (Base)',
+        type: 'box',
+        x: 7, y: 24.5, w: 86, h: 12.5,
+        zIndex: 1,
+        style: { backgroundColor: '#ffffff', borderColor: '#bbf7d0', borderWidth: 0.8, borderRadius: 6 }
+    },
+    {
+        id: 'perm2-b-prio-lbl',
+        name: 'Label Foco (Base)',
+        type: 'text',
+        content: '✿ FOCO DO DIA:',
+        x: 8.5, y: 27.5, w: 22, h: 6.5,
+        zIndex: 2,
+        style: { fontSize: 6, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#166534', letterSpacing: 0.7 }
+    },
+    {
+        id: 'perm2-b-lines',
+        name: 'Pauta (Base)',
+        type: 'lines',
+        x: 7, y: 39.5, w: 86, h: 51,
+        zIndex: 2,
+        style: { lineSpacing: 14, color: '#bbf7d0', borderWidth: 0.6, showCheckboxes: true, checkboxStyle: 'circle' }
+    }
+];
+

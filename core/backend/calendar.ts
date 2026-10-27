@@ -455,6 +455,50 @@ export const generateGenericPages = (count: number): DayData[] => {
     return pages;
 };
 
+export const generatePermanentAgendaDays = (
+    dayCount: number = 365,
+    splitIntoCycles: boolean = false,
+    daysPerCycle: number = 31
+): DayData[] => {
+    const pages: DayData[] = [];
+    if (splitIntoCycles) {
+        let seq = 0;
+        for (let cycleIdx = 0; cycleIdx < 12; cycleIdx++) {
+            for (let d = 0; d < daysPerCycle; d++) {
+                // Sequential date strictly for rotating daily quotes/verses across pages
+                const seqDate = new Date(2025, 0, 1 + seq);
+                pages.push({
+                    date: seqDate,
+                    dayOfWeek: seq % 7,
+                    dayOfMonth: 0,
+                    month: cycleIdx,
+                    year: 0,
+                    holiday: undefined,
+                    moonPhase: undefined
+                });
+                seq++;
+            }
+        }
+        return pages;
+    }
+
+    const total = Math.max(1, dayCount || 365);
+    for (let i = 0; i < total; i++) {
+        // Sequential date strictly for rotating daily quotes/verses across pages
+        const seqDate = new Date(2025, 0, 1 + i);
+        pages.push({
+            date: seqDate,
+            dayOfWeek: i % 7,
+            dayOfMonth: 0,
+            month: 0,
+            year: 0,
+            holiday: undefined,
+            moonPhase: undefined
+        });
+    }
+    return pages;
+};
+
 export const generateMonthGrid = (year: number, month: number, startOfWeekDay: number | boolean = 0): (number | null)[][] => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -523,9 +567,10 @@ export const isProjectYearRestricted = (
     year: number,
     startMonth: number = 0,
     durationMonths: number = 12,
-    userPlan: string = ''
+    userPlan: string = '',
+    isPermanent: boolean = false
 ): boolean => {
-    if (projectType === 'notebook' || projectType === 'devotional') return false;
+    if (isPermanent || projectType === 'notebook' || projectType === 'devotional') return false;
 
     const planLower = (userPlan || '').toLowerCase();
     const is2028Unlocked = planLower.includes('2028') || planLower.includes('renovad') || planLower.includes('master');

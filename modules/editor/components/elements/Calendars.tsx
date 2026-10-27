@@ -3,6 +3,7 @@ import React from 'react';
 import { CalendarElementProps } from './types';
 import { getMonthName, getDayName, generateMonthGrid, checkIsHoliday } from '../../../../core/backend/calendar';
 import { TextStyleConfig } from '../../../../types';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 const applyTextTransform = (text: string, transform?: string) => {
     if (!text) return text;
@@ -242,9 +243,10 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                         letterSpacing: `${titleStyle.letterSpacing}px`, 
                         lineHeight: titleStyle.lineHeight || 1.2,
                         whiteSpace: 'nowrap',
-                        overflow: 'hidden',
+                        overflow: titleStyle.textStrokeWidth ? 'visible' : 'hidden',
                         textOverflow: 'ellipsis',
-                        backgroundColor: titleStyle.backgroundColor 
+                        backgroundColor: titleStyle.backgroundColor,
+                        ...getTextStrokeCss(titleStyle, titleStyle.color || '#000000'),
                     }}
                 >
                     {transformedTitle}
@@ -291,7 +293,11 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                 >
                                     <span 
                                         className="truncate max-w-full inline-block"
-                                        style={{ lineHeight: '1.1' }}
+                                        style={{
+                                            lineHeight: '1.1',
+                                            overflow: weekStyle.textStrokeWidth ? 'visible' : undefined,
+                                            ...getTextStrokeCss(weekStyle, weekStyle.color || '#666666'),
+                                        }}
                                     >
                                         {transformedWd}
                                     </span>
@@ -397,7 +403,20 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                                     }}
                                                 >
                                                     {satNum ? (
-                                                        <span className="inline-block leading-none select-none max-w-full text-center" style={{ lineHeight: 1, fontSize: 'inherit' }}>
+                                                        <span
+                                                            className="inline-block leading-none select-none max-w-full text-center"
+                                                            style={{
+                                                                lineHeight: 1,
+                                                                fontSize: 'inherit',
+                                                                ...getTextStrokeCss(
+                                                                    {
+                                                                        ...satActiveStyle,
+                                                                        color: isCurrentSat ? currentDayHighlightTextColor : satActiveStyle.color,
+                                                                    },
+                                                                    isCurrentSat ? currentDayHighlightTextColor : (satActiveStyle.color || '#333333')
+                                                                ),
+                                                            }}
+                                                        >
                                                             {String(satNum).padStart(2, '0')}
                                                         </span>
                                                     ) : ''}
@@ -443,7 +462,20 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                                     }}
                                                 >
                                                     {sunNum ? (
-                                                        <span className="inline-block leading-none select-none max-w-full text-center" style={{ lineHeight: 1, fontSize: 'inherit' }}>
+                                                        <span
+                                                            className="inline-block leading-none select-none max-w-full text-center"
+                                                            style={{
+                                                                lineHeight: 1,
+                                                                fontSize: 'inherit',
+                                                                ...getTextStrokeCss(
+                                                                    {
+                                                                        ...sunActiveStyle,
+                                                                        color: isCurrentSun ? currentDayHighlightTextColor : sunActiveStyle.color,
+                                                                    },
+                                                                    isCurrentSun ? currentDayHighlightTextColor : (sunActiveStyle.color || '#333333')
+                                                                ),
+                                                            }}
+                                                        >
                                                             {String(sunNum).padStart(2, '0')}
                                                         </span>
                                                     ) : ''}
@@ -510,7 +542,20 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                                     }}
                                 >
                                     {dayNum ? (
-                                        <span className="inline-block leading-none select-none max-w-full text-center" style={{ lineHeight: 1, fontSize: 'inherit' }}>
+                                        <span
+                                            className="inline-block leading-none select-none max-w-full text-center"
+                                            style={{
+                                                lineHeight: 1,
+                                                fontSize: 'inherit',
+                                                ...getTextStrokeCss(
+                                                    {
+                                                        ...activeStyle,
+                                                        color: isCurrentDayPage ? currentDayHighlightTextColor : activeStyle.color,
+                                                    },
+                                                    isCurrentDayPage ? currentDayHighlightTextColor : (activeStyle.color || '#333333')
+                                                ),
+                                            }}
+                                        >
                                             {String(dayNum).padStart(2, '0')}
                                         </span>
                                     ) : ''}

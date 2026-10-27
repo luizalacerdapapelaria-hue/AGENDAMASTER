@@ -52,7 +52,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Agenda <span className="text-[#b84a56]">Master</span>
               </span>
               <span className="bg-[#fcedea] text-[#9f3d4a] border border-[#f8d4ce] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                v2.0.0
+                v2.0.3
               </span>
             </div>
           </div>
@@ -861,7 +861,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="font-black text-slate-800">Agenda Master</span>
-            <span>• Versão 2.0.0</span>
+            <span>• Versão 2.0.3</span>
           </div>
           <p>© {new Date().getFullYear()} Luiza Lacerda Papelaria. Todos os direitos reservados.</p>
         </div>

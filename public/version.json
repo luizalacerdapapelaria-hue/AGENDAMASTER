@@ -1,6 +1,5 @@
 {
-  "version": "2.0.1",
-  "releaseDate": "2026-10-21",
-  "notes": "Versão 2.0.1 com melhorias de inicialização, estabilidade na atualização e otimizações gerais."
+  "version": "2.0.3",
+  "releaseDate": "2026-10-26",
+  "notes": "Limpeza e renovação 100% automática de cache e sessão em segundo plano, sem precisar clicar em nada."
 }
-

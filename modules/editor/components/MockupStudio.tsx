@@ -5,16 +5,40 @@ import {
   ZoomIn, ZoomOut, Maximize2, BookOpen, FileText, CheckCheck, Loader2,
   Bookmark, Edit3, Monitor, Grid, Compass, Box, X, Calendar,
   Play, Pause, Volume2, VolumeX, FastForward, PlayCircle,
-  Video, Film, Share2, Smartphone
+  Video, Film, Share2, Smartphone, BookMarked, Shield, Ruler, ArrowLeftRight
 } from 'lucide-react';
-import { AgendaConfig, DayData } from '../../../types';
+import { AgendaConfig, DayData, CoverProjectConfig } from '../../../types';
 import { getMonthName } from '../../../core/backend/calendar';
+import { applyHtml2CanvasTextStrokeFallback } from '../../../core/logic/textStroke';
+import {
+  createDefaultCoverConfig,
+  CARDBOARD_PRESETS,
+  findMatchingCardboardPreset,
+  formatMmLabel,
+  formatCmLabel
+} from './cover/coverGabaritoData';
 import {
   encodeMockupVideoMP4,
   SpreadStep,
   VideoFormatPreset,
   VideoPagePreset
 } from '../utils/mockupVideoGenerator';
+
+export interface CoverRenderResult {
+  node: React.ReactNode;
+  widthPx: number;
+  heightPx: number;
+  totalWidthMm: number;
+  totalHeightMm: number;
+  effectiveBleedMm: number;
+  isSpread: boolean;
+  backgroundColor: string;
+  hasElements: boolean;
+}
+
+export type MockupSubject = 'cover' | 'miolo';
+export type CoverViewMode = 'front_closed' | 'duo_front_back' | 'open_endsheet' | 'standing_hero';
+export type CoverLamination = 'matte' | 'glossy' | 'holographic' | 'glitter';
 
 export interface MockupStudioProps {
   config: AgendaConfig;
@@ -25,6 +49,9 @@ export interface MockupStudioProps {
   currentPageInEditor?: number;
   onClose?: () => void;
   generatedData?: DayData[];
+  initialSubject?: MockupSubject;
+  renderCoverPage?: (pageTypeOrId: string) => CoverRenderResult | null;
+  onUpdateCoverConfig?: (newCover: CoverProjectConfig) => void;
 }
 
 export type MockupMode = 'spread' | 'single';
@@ -53,10 +80,74 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   renderPrintLayout,
   currentPageInEditor = 1,
   onClose,
-  generatedData = []
+  generatedData = [],
+  initialSubject = 'miolo',
+  renderCoverPage,
+  onUpdateCoverConfig
 }) => {
-  // --- STATE ---
-  // Page selection
+  // --- COVER & SUBJECT STATE ---
+  const effectiveCover = useMemo(
+    () => config.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM),
+    [config.cover, PAGE_WIDTH_MM, PAGE_HEIGHT_MM]
+  );
+  const [mockupSubject, setMockupSubject] = useState<MockupSubject>(initialSubject);
+  const [coverViewMode, setCoverViewMode] = useState<CoverViewMode>('front_closed');
+  const [coverLamination, setCoverLamination] = useState<CoverLamination>('matte');
+  const [showCornerProtectors, setShowCornerProtectors] = useState<boolean>(false);
+  const [showHardcoverBacking, setShowHardcoverBacking] = useState<boolean>(true);
+  const [cbUnit, setCbUnit] = useState<'mm' | 'cm'>('mm');
+
+  const updateCover = useCallback((updater: (prev: CoverProjectConfig) => CoverProjectConfig) => {
+    if (onUpdateCoverConfig) {
+      onUpdateCoverConfig(updater(effectiveCover));
+    }
+  }, [onUpdateCoverConfig, effectiveCover]);
+
+  const formatCbInputVal = useCallback((mm: number, unit: 'mm' | 'cm') => {
+    if (unit === 'cm') {
+      const cm = Math.round((mm / 10) * 100) / 100;
+      return String(cm).replace('.', ',');
+    }
+    return String(Math.round(mm * 10) / 10).replace('.', ',');
+  }, []);
+
+  const [cbWidthStr, setCbWidthStr] = useState<string>(() =>
+    formatCbInputVal(effectiveCover.cardboardSize.width || 155, 'mm')
+  );
+  const [cbHeightStr, setCbHeightStr] = useState<string>(() =>
+    formatCbInputVal(effectiveCover.cardboardSize.height || 215, 'mm')
+  );
+  const [editingCbField, setEditingCbField] = useState<'w' | 'h' | null>(null);
+
+  useEffect(() => {
+    if (editingCbField !== 'w') {
+      setCbWidthStr(formatCbInputVal(effectiveCover.cardboardSize.width || 155, cbUnit));
+    }
+    if (editingCbField !== 'h') {
+      setCbHeightStr(formatCbInputVal(effectiveCover.cardboardSize.height || 215, cbUnit));
+    }
+  }, [effectiveCover.cardboardSize.width, effectiveCover.cardboardSize.height, cbUnit, editingCbField, formatCbInputVal]);
+
+  const applyMockupCardboardSize = useCallback((rawW: number, rawH: number) => {
+    const clampedW = Math.round(Math.max(40, Math.min(600, rawW)) * 10) / 10;
+    const clampedH = Math.round(Math.max(40, Math.min(600, rawH)) * 10) / 10;
+    const matched = findMatchingCardboardPreset(clampedW, clampedH);
+    updateCover(prev => ({
+      ...prev,
+      formatPreset: matched ? matched.id : 'custom',
+      cardboardSize: { width: clampedW, height: clampedH }
+    }));
+  }, [updateCover]);
+
+  const parseCbInputToMm = useCallback((raw: string, unit: 'mm' | 'cm'): number | null => {
+    const cleaned = raw.trim().replace(',', '.');
+    if (!cleaned) return null;
+    const num = parseFloat(cleaned);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return unit === 'cm' ? num * 10 : num;
+  }, []);
+
+  // --- MIOLO PAGE STATE ---
   const [mockupMode, setMockupMode] = useState<MockupMode>('spread');
   const [leftPageNum, setLeftPageNum] = useState<number>(() => {
     const total = Math.max(1, actualTotalPagesCount || 1);
@@ -82,7 +173,14 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
   // 3D & Styling options
   const [perspective, setPerspective] = useState<MockupPerspective>('isometric');
-  const [wireoFinish, setWireoFinish] = useState<WireoFinish>('gold');
+  const [wireoFinish, setWireoFinish] = useState<WireoFinish>(() => {
+    const cov = config.cover;
+    if (cov?.wireO) {
+      if (!cov.wireO.showWireO || cov.spine?.enabled) return 'none';
+      return cov.wireO.wireColor || 'gold';
+    }
+    return 'gold';
+  });
   const [backgroundType, setBackgroundType] = useState<MockupBackground>('studio-white');
   const [showRibbon, setShowRibbon] = useState<boolean>(true);
   const [ribbonColor, setRibbonColor] = useState<string>('#c59b27'); // Gold ribbon
@@ -93,9 +191,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   // Fine-tuning 3D Angles
-  const [customAngleX, setCustomAngleX] = useState<number>(22);
-  const [customAngleY, setCustomAngleY] = useState<number>(-12);
-  const [customAngleZ, setCustomAngleZ] = useState<number>(6);
+  const [customAngleX, setCustomAngleX] = useState<number>(() => initialSubject === 'cover' ? 14 : 22);
+  const [customAngleY, setCustomAngleY] = useState<number>(() => initialSubject === 'cover' ? -12 : -12);
+  const [customAngleZ, setCustomAngleZ] = useState<number>(() => initialSubject === 'cover' ? 3 : 6);
 
   // UI state
   const [activeSettingsTab, setActiveSettingsTab] = useState<'pages' | '3d' | 'wireo' | 'environment' | 'props'>('pages');
@@ -349,21 +447,49 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   const flipDuration = flipSpeed === 'fast' ? 520 : flipSpeed === 'smooth' ? 950 : 720;
   const autoPlayInterval = flipSpeed === 'fast' ? 1400 : flipSpeed === 'smooth' ? 2600 : 2000;
 
-  // Clean endpaper / contracapa node when pageNum === 0 (facing Page 1 or after an even final page)
-  const renderEndpaperNode = useCallback(() => (
-    <div
-      className="w-full h-full bg-[#fafaf9] relative overflow-hidden flex items-center justify-center select-none"
-      style={{ width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm` }}
-    >
+  // Clean endpaper / contracapa node when pageNum === 0 (uses designed Guarda if available)
+  const renderEndpaperNode = useCallback((isBackEndsheet = false) => {
+    if (renderCoverPage) {
+      const guardData = renderCoverPage(isBackEndsheet ? 'endsheet_back' : 'endsheet_front');
+      if (guardData && guardData.hasElements) {
+        const targetW = PAGE_WIDTH_MM * 3.78;
+        const targetH = PAGE_HEIGHT_MM * 3.78;
+        const scaleX = targetW / guardData.widthPx;
+        const scaleY = targetH / guardData.heightPx;
+        return (
+          <div
+            className="relative overflow-hidden select-none"
+            style={{ width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm`, backgroundColor: guardData.backgroundColor || '#fafaf9' }}
+          >
+            <div
+              style={{
+                width: `${guardData.widthPx}px`,
+                height: `${guardData.heightPx}px`,
+                transform: `scale(${scaleX}, ${scaleY})`,
+                transformOrigin: 'top left'
+              }}
+            >
+              {guardData.node}
+            </div>
+          </div>
+        );
+      }
+    }
+    return (
       <div
-        className="pointer-events-none border border-stone-200/70 rounded-sm"
-        style={{
-          width: 'calc(100% - 24mm)',
-          height: 'calc(100% - 24mm)'
-        }}
-      />
-    </div>
-  ), [PAGE_WIDTH_MM, PAGE_HEIGHT_MM]);
+        className="w-full h-full bg-[#fafaf9] relative overflow-hidden flex items-center justify-center select-none"
+        style={{ width: `${PAGE_WIDTH_MM}mm`, height: `${PAGE_HEIGHT_MM}mm` }}
+      >
+        <div
+          className="pointer-events-none border border-stone-200/70 rounded-sm"
+          style={{
+            width: 'calc(100% - 24mm)',
+            height: 'calc(100% - 24mm)'
+          }}
+        />
+      </div>
+    );
+  }, [PAGE_WIDTH_MM, PAGE_HEIGHT_MM, renderCoverPage]);
 
   // Render & cache node helper
   const getPageNode = useCallback((pageNum: number) => {
@@ -584,10 +710,22 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     return () => clearInterval(timer);
   }, [isAutoPlaying, autoPlayInterval, mockupMode, rightPageNum, singlePageNum, totalPages, triggerFlipNext]);
 
-  // Keyboard navigation: Left/Right arrows to flip, Space to toggle auto-play
+  // Keyboard navigation: Left/Right arrows to flip miolo or cycle cover scenes
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName || '')) {
+        return;
+      }
+      if (mockupSubject === 'cover') {
+        const modes: CoverViewMode[] = ['front_closed', 'duo_front_back', 'open_endsheet', 'standing_hero'];
+        const idx = modes.indexOf(coverViewMode);
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+          e.preventDefault();
+          setCoverViewMode(modes[(idx + 1) % modes.length]);
+        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+          e.preventDefault();
+          setCoverViewMode(modes[(idx - 1 + modes.length) % modes.length]);
+        }
         return;
       }
       if (e.key === 'ArrowRight' || e.key === 'PageDown') {
@@ -604,9 +742,10 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [triggerFlipNext, triggerFlipPrev]);
+  }, [mockupSubject, coverViewMode, triggerFlipNext, triggerFlipPrev]);
 
   const handleUseCurrentEditorPage = () => {
+    setMockupSubject('miolo');
     if (mockupMode === 'single') {
       setSinglePageNum(currentPageInEditor);
     } else {
@@ -617,6 +756,27 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     showToast(`Página ${currentPageInEditor} carregada no mockup!`);
   };
 
+  const handleSwitchSubject = (nextSubject: MockupSubject) => {
+    setMockupSubject(nextSubject);
+    if (nextSubject === 'cover') {
+      setIsAutoPlaying(false);
+      if (effectiveCover.spine.enabled) {
+        setWireoFinish('none');
+      } else if (effectiveCover.wireO.showWireO) {
+        setWireoFinish(effectiveCover.wireO.wireColor || 'gold');
+      }
+      if (perspective === 'isometric') {
+        setCustomAngleX(14);
+        setCustomAngleY(-12);
+        setCustomAngleZ(3);
+      }
+    } else if (perspective === 'isometric') {
+      setCustomAngleX(22);
+      setCustomAngleY(-12);
+      setCustomAngleZ(6);
+    }
+  };
+
   // Preset Perspectives Sync
   useEffect(() => {
     if (perspective === 'flatlay') {
@@ -624,19 +784,19 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       setCustomAngleY(0);
       setCustomAngleZ(0);
     } else if (perspective === 'isometric') {
-      setCustomAngleX(22);
+      setCustomAngleX(mockupSubject === 'cover' ? 14 : 22);
       setCustomAngleY(-12);
-      setCustomAngleZ(6);
+      setCustomAngleZ(mockupSubject === 'cover' ? 3 : 6);
     } else if (perspective === 'tilted') {
-      setCustomAngleX(32);
+      setCustomAngleX(mockupSubject === 'cover' ? 24 : 32);
       setCustomAngleY(0);
       setCustomAngleZ(0);
     } else if (perspective === 'closeup') {
-      setCustomAngleX(15);
+      setCustomAngleX(12);
       setCustomAngleY(-6);
-      setCustomAngleZ(3);
+      setCustomAngleZ(2);
     }
-  }, [perspective]);
+  }, [perspective, mockupSubject]);
 
   // Render nodes for selected pages (without page numbers for a clean mockup)
   const leftPageNode = useMemo(() => {
@@ -675,11 +835,19 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     }
   }, [renderPrintLayout, singlePageNum]);
 
-  // Dimension helpers for page scaling
+  // Physical cardboard & miolo millimeter dimensions + proportional pixel scales
+  const cbWidthMm = Math.max(40, effectiveCover.cardboardSize.width || 155);
+  const cbHeightMm = Math.max(40, effectiveCover.cardboardSize.height || 215);
+
   const BASE_PAGE_W_PX = PAGE_WIDTH_MM * 3.78; // 96dpi reference
   const BASE_PAGE_H_PX = PAGE_HEIGHT_MM * 3.78;
-  const DISPLAY_PAGE_W = 310; // Target width in pixels inside mockup
-  const DISPLAY_PAGE_H = DISPLAY_PAGE_W * (PAGE_HEIGHT_MM / PAGE_WIDTH_MM);
+  const mioloMaxWMm = showHardcoverBacking ? Math.max(PAGE_WIDTH_MM, cbWidthMm) : PAGE_WIDTH_MM;
+  const mioloMaxHMm = showHardcoverBacking ? Math.max(PAGE_HEIGHT_MM, cbHeightMm) : PAGE_HEIGHT_MM;
+  const mioloSpreadPxPerMm = Math.min(2.095, 340 / Math.max(1, mioloMaxWMm), 500 / Math.max(1, mioloMaxHMm));
+  const DISPLAY_PAGE_W = Math.round(PAGE_WIDTH_MM * mioloSpreadPxPerMm);
+  const DISPLAY_PAGE_H = Math.round(PAGE_HEIGHT_MM * mioloSpreadPxPerMm);
+  const MIOLO_BOARD_W = Math.round(cbWidthMm * mioloSpreadPxPerMm);
+  const MIOLO_BOARD_H = Math.round(cbHeightMm * mioloSpreadPxPerMm);
   const SCALE_FACTOR = DISPLAY_PAGE_W / BASE_PAGE_W_PX;
 
   // Wire-o metallic style configuration with true wire wireframe colors and realistic gradients
@@ -841,6 +1009,549 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   // Wire-o Rings Count based on height (Realistic 2:1 pitch: 18 double-loop wire pairs)
   const wireoRingsCount = 18;
 
+  // --- HARDCOVER 3D MOCKUP HELPERS & RENDERERS ---
+  const needCoverTextures = mockupSubject === 'cover' || showHardcoverBacking;
+  const frontCoverData = useMemo(
+    () => (needCoverTextures && renderCoverPage ? renderCoverPage('front') : null),
+    [needCoverTextures, renderCoverPage, config.cover]
+  );
+  const backCoverData = useMemo(
+    () => (needCoverTextures && renderCoverPage ? renderCoverPage('back') : null),
+    [needCoverTextures, renderCoverPage, config.cover]
+  );
+  const endsheetFrontData = useMemo(
+    () => (mockupSubject === 'cover' && renderCoverPage ? renderCoverPage('endsheet_front') : null),
+    [mockupSubject, renderCoverPage, config.cover]
+  );
+  const firstMioloPageNode = useMemo(() => {
+    if (mockupSubject !== 'cover') return null;
+    try {
+      const nodes = renderPrintLayout(1, 1, undefined, false, true);
+      return nodes && nodes.length > 0 ? nodes[0] : null;
+    } catch {
+      return null;
+    }
+  }, [mockupSubject, renderPrintLayout]);
+
+  // True physical millimeter-to-pixel scales per scene (bounded cleanly inside render stage)
+  const spineExtraMm = effectiveCover.spine.enabled ? Math.max(8, effectiveCover.spine.calculatedSpineWidthMm || 15) : 0;
+  const heroPxPerMm = Math.min(2.13, 470 / Math.max(1, cbWidthMm + spineExtraMm), 530 / Math.max(1, cbHeightMm));
+  const COVER_HERO_W_PX = Math.round(cbWidthMm * heroPxPerMm);
+  const COVER_HERO_H_PX = Math.round(cbHeightMm * heroPxPerMm);
+
+  const duoPxPerMm = Math.min(1.80, 320 / Math.max(1, cbWidthMm), 490 / Math.max(1, cbHeightMm));
+  const COVER_DUO_W_PX = Math.round(cbWidthMm * duoPxPerMm);
+  const COVER_DUO_H_PX = Math.round(cbHeightMm * duoPxPerMm);
+
+  const openMaxWMm = Math.max(cbWidthMm, PAGE_WIDTH_MM);
+  const openMaxHMm = Math.max(cbHeightMm, PAGE_HEIGHT_MM);
+  const openPxPerMm = Math.min(1.87, 335 / Math.max(1, openMaxWMm), 500 / Math.max(1, openMaxHMm));
+
+  const standingPxPerMm = Math.min(1.96, 370 / Math.max(1, cbWidthMm), 490 / Math.max(1, cbHeightMm));
+
+  const activeScenePxPerMm = mockupSubject === 'cover'
+    ? (coverViewMode === 'front_closed'
+        ? heroPxPerMm
+        : coverViewMode === 'duo_front_back'
+        ? duoPxPerMm
+        : coverViewMode === 'open_endsheet'
+        ? openPxPerMm
+        : standingPxPerMm)
+    : (mockupMode === 'single' ? mioloSpreadPxPerMm * 1.15 : mioloSpreadPxPerMm);
+
+  const renderCroppedCoverRegion = useCallback((
+    data: CoverRenderResult | null,
+    cropXMm: number,
+    cropYMm: number,
+    cropWMm: number,
+    cropHMm: number,
+    targetWPx: number,
+    targetHPx: number,
+    fallbackBg = '#ffffff'
+  ) => {
+    if (!data || cropWMm <= 0 || cropHMm <= 0) {
+      return <div className="w-full h-full" style={{ backgroundColor: fallbackBg }} />;
+    }
+    const scaleX = (targetWPx * data.totalWidthMm) / (data.widthPx * cropWMm);
+    const scaleY = (targetHPx * data.totalHeightMm) / (data.heightPx * cropHMm);
+    const leftPx = -cropXMm * (targetWPx / cropWMm);
+    const topPx = -cropYMm * (targetHPx / cropHMm);
+
+    return (
+      <div
+        className="relative overflow-hidden select-none pointer-events-none"
+        style={{
+          width: `${targetWPx}px`,
+          height: `${targetHPx}px`,
+          backgroundColor: data.backgroundColor || fallbackBg
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: `${leftPx}px`,
+            top: `${topPx}px`,
+            width: `${data.widthPx}px`,
+            height: `${data.heightPx}px`,
+            transform: `scale(${scaleX}, ${scaleY})`,
+            transformOrigin: 'top left'
+          }}
+        >
+          {data.node}
+        </div>
+      </div>
+    );
+  }, []);
+
+  const renderFrontBoardFace = useCallback((wPx: number, hPx: number) => {
+    if (!frontCoverData) return <div className="w-full h-full bg-white" />;
+    const cropX = frontCoverData.isSpread
+      ? frontCoverData.totalWidthMm - frontCoverData.effectiveBleedMm - cbWidthMm
+      : frontCoverData.effectiveBleedMm;
+    const cropY = frontCoverData.effectiveBleedMm;
+    return renderCroppedCoverRegion(frontCoverData, cropX, cropY, cbWidthMm, cbHeightMm, wPx, hPx, '#ffffff');
+  }, [frontCoverData, cbWidthMm, cbHeightMm, renderCroppedCoverRegion]);
+
+  const renderBackBoardFace = useCallback((wPx: number, hPx: number) => {
+    if (frontCoverData?.isSpread && (!backCoverData || !backCoverData.hasElements)) {
+      return renderCroppedCoverRegion(
+        frontCoverData,
+        frontCoverData.effectiveBleedMm,
+        frontCoverData.effectiveBleedMm,
+        cbWidthMm,
+        cbHeightMm,
+        wPx,
+        hPx,
+        frontCoverData.backgroundColor || '#ffffff'
+      );
+    }
+    const source = backCoverData || frontCoverData;
+    if (!source) return <div className="w-full h-full bg-white" />;
+    return renderCroppedCoverRegion(
+      source,
+      source.effectiveBleedMm,
+      source.effectiveBleedMm,
+      cbWidthMm,
+      cbHeightMm,
+      wPx,
+      hPx,
+      source.backgroundColor || '#ffffff'
+    );
+  }, [backCoverData, frontCoverData, cbWidthMm, cbHeightMm, renderCroppedCoverRegion]);
+
+  const renderSpineBoardFace = useCallback((spineWPx: number, hPx: number) => {
+    const spineWMm = Math.max(8, effectiveCover.spine.calculatedSpineWidthMm || 15);
+    if (frontCoverData?.isSpread) {
+      const cropX = frontCoverData.effectiveBleedMm + cbWidthMm + effectiveCover.spine.hingeGapMm;
+      const cropY = frontCoverData.effectiveBleedMm;
+      return renderCroppedCoverRegion(frontCoverData, cropX, cropY, spineWMm, cbHeightMm, spineWPx, hPx, frontCoverData.backgroundColor || '#f8fafc');
+    }
+    return (
+      <div
+        className="w-full h-full"
+        style={{ backgroundColor: frontCoverData?.backgroundColor || '#f1f5f9' }}
+      />
+    );
+  }, [frontCoverData, effectiveCover.spine, cbWidthMm, cbHeightMm, renderCroppedCoverRegion]);
+
+  const renderLaminationOverlay = useCallback((uid: string) => {
+    if (coverLamination === 'glossy') {
+      return (
+        <div
+          className="absolute inset-0 pointer-events-none z-20"
+          style={{
+            background:
+              'linear-gradient(118deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.04) 26%, rgba(255,255,255,0.34) 37%, rgba(255,255,255,0.08) 46%, rgba(255,255,255,0) 64%, rgba(255,255,255,0.14) 100%)',
+            boxShadow: 'inset 0 1px 1.5px rgba(255,255,255,0.65), inset 0 -1px 2px rgba(0,0,0,0.14)'
+          }}
+        />
+      );
+    }
+    if (coverLamination === 'holographic') {
+      return (
+        <div
+          className="absolute inset-0 pointer-events-none z-20 overflow-hidden"
+          style={{
+            background:
+              'linear-gradient(128deg, rgba(244,114,182,0.16) 0%, rgba(251,191,36,0.14) 23%, rgba(52,211,153,0.15) 48%, rgba(96,165,250,0.18) 74%, rgba(192,132,252,0.18) 100%)',
+            boxShadow: 'inset 0 1px 1.5px rgba(255,255,255,0.6), inset 0 -1px 2px rgba(0,0,0,0.12)'
+          }}
+        >
+          <svg className="w-full h-full opacity-55" viewBox="0 0 200 280" preserveAspectRatio="none">
+            <defs>
+              <pattern id={`holoPattern_${uid}`} width="48" height="48" patternUnits="userSpaceOnUse">
+                <polygon points="0,0 22,8 12,26" fill="rgba(255,255,255,0.22)" />
+                <polygon points="24,4 46,16 30,34" fill="rgba(186,230,253,0.18)" />
+                <polygon points="6,28 28,36 16,48" fill="rgba(251,207,232,0.20)" />
+                <polygon points="32,30 48,26 42,46" fill="rgba(254,243,199,0.18)" />
+              </pattern>
+            </defs>
+            <rect width="200" height="280" fill={`url(#holoPattern_${uid})`} />
+          </svg>
+        </div>
+      );
+    }
+    if (coverLamination === 'glitter') {
+      return (
+        <div
+          className="absolute inset-0 pointer-events-none z-20 overflow-hidden"
+          style={{
+            background:
+              'linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(254,249,195,0.06) 45%, rgba(255,255,255,0.18) 100%)',
+            boxShadow: 'inset 0 1px 1.5px rgba(255,255,255,0.6), inset 0 -1px 2px rgba(0,0,0,0.12)'
+          }}
+        >
+          <svg className="w-full h-full opacity-80" viewBox="0 0 180 250" preserveAspectRatio="none">
+            <defs>
+              <pattern id={`glitterPattern_${uid}`} width="36" height="36" patternUnits="userSpaceOnUse">
+                <circle cx="5" cy="7" r="0.8" fill="rgba(255,255,255,0.85)" />
+                <circle cx="19" cy="4" r="0.6" fill="rgba(254,240,138,0.8)" />
+                <circle cx="31" cy="12" r="0.9" fill="rgba(255,255,255,0.9)" />
+                <circle cx="12" cy="18" r="0.7" fill="rgba(253,230,138,0.75)" />
+                <circle cx="27" cy="24" r="0.8" fill="rgba(255,255,255,0.8)" />
+                <circle cx="7" cy="30" r="0.6" fill="rgba(255,255,255,0.75)" />
+                <circle cx="21" cy="33" r="0.9" fill="rgba(254,249,195,0.85)" />
+                <path d="M16 9 L16.8 11.2 L19 12 L16.8 12.8 L16 15 L15.2 12.8 L13 12 L15.2 11.2 Z" fill="rgba(255,255,255,0.85)" />
+                <path d="M29 29 L29.5 30.5 L31 31 L29.5 31.5 L29 33 L28.5 31.5 L27 31 L28.5 30.5 Z" fill="rgba(255,255,255,0.75)" />
+              </pattern>
+            </defs>
+            <rect width="180" height="250" fill={`url(#glitterPattern_${uid})`} />
+          </svg>
+        </div>
+      );
+    }
+    // Default 'matte' (Soft Touch / Fosca Aveludada)
+    return (
+      <div
+        className="absolute inset-0 pointer-events-none z-20"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.02) 48%, rgba(15,23,42,0.06) 100%)',
+          boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.48), inset 0 -1.5px 2px rgba(0,0,0,0.14)'
+        }}
+      />
+    );
+  }, [coverLamination]);
+
+  // Hardcover Wire-o strictly centered in the 1st cm (marginMm = 5mm default) from the CARDBOARD BORDER
+  const renderHardcoverWireO = useCallback((
+    bindingSide: 'left' | 'right',
+    boardWPx: number,
+    boardHPx: number,
+    uid: string
+  ) => {
+    if (!effectiveCover.wireO.showWireO || wireoFinish === 'none' || !wireoStyles || effectiveCover.spine.enabled) {
+      return null;
+    }
+
+    const pxPerMm = boardWPx / cbWidthMm;
+    const wireMarginMm = effectiveCover.wireO.marginMm ?? 5; // Default 5mm = exact center of 1st cm from cardboard border
+    const holeCenterFromEdgePx = wireMarginMm * pxPerMm;
+    const wirePitchMm = effectiveCover.wireO.pitch === '3:1' ? 8.47 : 12.7;
+    const holeWMm = effectiveCover.wireO.pitch === '3:1' ? 4.0 : 5.0;
+    const holeHMm = effectiveCover.wireO.pitch === '3:1' ? 4.0 : 5.5;
+    const holeWPx = Math.max(4.5, holeWMm * pxPerMm);
+    const holeHPx = Math.max(4.5, holeHMm * pxPerMm);
+    const holeRx = effectiveCover.wireO.shape === 'round' ? Math.min(holeWPx, holeHPx) / 2 : 1.1;
+
+    const holeCount = Math.max(3, Math.floor((cbHeightMm - 20) / wirePitchMm) + 1);
+    const totalHolesSpanMm = (holeCount - 1) * wirePitchMm;
+    const firstHoleOffsetMm = Math.max(6, (cbHeightMm - totalHolesSpanMm) / 2);
+
+    const outerOverhangPx = Math.max(10, Math.round(8.5 * pxPerMm));
+    const innerReachPx = Math.ceil(holeCenterFromEdgePx + holeWPx / 2 + 8);
+    const svgW = outerOverhangPx + innerReachPx;
+    const holeCenterX = bindingSide === 'left'
+      ? outerOverhangPx + holeCenterFromEdgePx
+      : innerReachPx - holeCenterFromEdgePx;
+    const crestX = bindingSide === 'left' ? 2.5 : svgW - 2.5;
+    const gradId = `hcWireGrad_${uid}`;
+
+    return (
+      <div
+        className="absolute top-0 bottom-0 pointer-events-none z-30 select-none"
+        style={{
+          width: `${svgW}px`,
+          height: `${boardHPx}px`,
+          ...(bindingSide === 'left'
+            ? { left: `-${outerOverhangPx}px` }
+            : { right: `-${outerOverhangPx}px` }),
+          transform: 'translateZ(6px)'
+        }}
+      >
+        <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${svgW} ${boardHPx}`} fill="none">
+          <defs>
+            <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={wireoStyles.wireShadow} />
+              <stop offset="28%" stopColor={wireoStyles.wireHighlight} />
+              <stop offset="56%" stopColor={wireoStyles.wireColor} />
+              <stop offset="82%" stopColor={wireoStyles.specularGlow} />
+              <stop offset="100%" stopColor={wireoStyles.wireShadow} />
+            </linearGradient>
+          </defs>
+
+          {Array.from({ length: holeCount }).map((_, idx) => {
+            const centerY = (firstHoleOffsetMm + idx * wirePitchMm) * pxPerMm;
+            const yTop = centerY - 1.55;
+            const yBottom = centerY + 1.55;
+            const midCtrlX = bindingSide === 'left'
+              ? outerOverhangPx * 0.55
+              : svgW - outerOverhangPx * 0.55;
+            const entryX = bindingSide === 'left' ? holeCenterX + 0.9 : holeCenterX - 0.9;
+
+            return (
+              <g key={`hc-wire-${uid}-${idx}`}>
+                {/* Punched Hole through Hardcover Board (Centered in 1st cm from cardboard border) */}
+                <rect
+                  x={holeCenterX - holeWPx / 2}
+                  y={centerY - holeHPx / 2}
+                  width={holeWPx}
+                  height={holeHPx}
+                  rx={holeRx}
+                  fill={wireoStyles.holeBg}
+                  stroke="rgba(15,23,42,0.55)"
+                  strokeWidth="0.65"
+                />
+                {/* Inner Holler cardboard thickness rim inside hole */}
+                <rect
+                  x={holeCenterX - holeWPx / 2 + 0.5}
+                  y={centerY - holeHPx / 2 + 0.5}
+                  width={Math.max(1, holeWPx - 1)}
+                  height={Math.min(2.1, holeHPx * 0.4)}
+                  rx={Math.max(0.4, holeRx - 0.3)}
+                  fill="rgba(0,0,0,0.6)"
+                />
+
+                {/* Soft Wire Cast Shadow on Cover Surface */}
+                <path
+                  d={`M ${crestX + 1},${yTop + 2.2} C ${midCtrlX},${yTop + 1.9} ${holeCenterX},${yTop + 1.4} ${entryX},${yTop + 1.2}`}
+                  stroke={wireShadowStroke}
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <path
+                  d={`M ${crestX + 1},${yBottom + 2.2} C ${midCtrlX},${yBottom + 1.9} ${holeCenterX},${yBottom + 1.4} ${entryX},${yBottom + 1.2}`}
+                  stroke={wireShadowStroke}
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+
+                {/* Back metallic loop behind board edge */}
+                <path
+                  d={`M ${crestX},${yTop} C ${crestX},${yTop + 2.2} ${midCtrlX},${yTop + 2.4} ${outerOverhangPx},${yTop + 1.2}`}
+                  stroke={wireoStyles.wireShadow}
+                  strokeWidth="1.45"
+                  strokeLinecap="round"
+                  opacity="0.78"
+                />
+
+                {/* Twin-Loop Metallic Wire Rings (2:1 or 3:1) */}
+                <path
+                  d={`M ${crestX},${yTop} C ${crestX},${yTop - 2.1} ${midCtrlX},${yTop - 1.9} ${entryX},${yTop}`}
+                  stroke={`url(#${gradId})`}
+                  strokeWidth="1.85"
+                  strokeLinecap="round"
+                />
+                <path
+                  d={`M ${crestX},${yBottom} C ${crestX},${yBottom - 2.1} ${midCtrlX},${yBottom - 1.9} ${entryX},${yBottom}`}
+                  stroke={`url(#${gradId})`}
+                  strokeWidth="1.85"
+                  strokeLinecap="round"
+                />
+
+                {/* Specular gleam along top of each wire loop */}
+                <path
+                  d={`M ${bindingSide === 'left' ? crestX + 2 : crestX - 2},${yTop - 1.25} C ${midCtrlX},${yTop - 1.55} ${holeCenterX},${yTop - 0.7} ${holeCenterX},${yTop - 0.35}`}
+                  stroke="rgba(255,255,255,0.88)"
+                  strokeWidth="0.6"
+                  strokeLinecap="round"
+                />
+                <path
+                  d={`M ${bindingSide === 'left' ? crestX + 2 : crestX - 2},${yBottom - 1.25} C ${midCtrlX},${yBottom - 1.55} ${holeCenterX},${yBottom - 0.7} ${holeCenterX},${yBottom - 0.35}`}
+                  stroke="rgba(255,255,255,0.88)"
+                  strokeWidth="0.6"
+                  strokeLinecap="round"
+                />
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
+  }, [effectiveCover.wireO, effectiveCover.spine.enabled, wireoFinish, wireoStyles, cbWidthMm, cbHeightMm, wireShadowStroke]);
+
+  const renderFrontElasticOverlay = useCallback((boardWPx: number) => {
+    if (!effectiveCover.elastic.showElastic) return null;
+    const pxPerMm = boardWPx / cbWidthMm;
+    const centerFromRightPx = Math.min(boardWPx - 8, effectiveCover.elastic.positionMm * pxPerMm);
+    const bandWidthPx = Math.max(7, effectiveCover.elastic.widthMm * pxPerMm);
+    const claspSizePx = Math.max(18, Math.round(13.5 * pxPerMm));
+    const claspBg = wireoStyles?.ringGradient || 'linear-gradient(135deg, #a37920 0%, #fff0a5 35%, #d4af37 65%, #8f6716 100%)';
+
+    return (
+      <div
+        className="absolute pointer-events-none z-30 flex items-center justify-center"
+        style={{
+          top: '-3px',
+          bottom: '-3px',
+          right: `${centerFromRightPx - bandWidthPx / 2}px`,
+          width: `${bandWidthPx}px`,
+          borderRadius: '2px',
+          backgroundColor: effectiveCover.elastic.color || '#d4a373',
+          backgroundImage:
+            'repeating-linear-gradient(0deg, rgba(255,255,255,0.10) 0px, rgba(255,255,255,0.10) 1px, rgba(0,0,0,0.08) 1px, rgba(0,0,0,0.08) 2.5px), linear-gradient(90deg, rgba(0,0,0,0.22) 0%, rgba(255,255,255,0.18) 32%, rgba(255,255,255,0.04) 68%, rgba(0,0,0,0.26) 100%)',
+          boxShadow: '-3px 0 7px rgba(0,0,0,0.24), 2px 0 5px rgba(0,0,0,0.18)'
+        }}
+      >
+        {effectiveCover.elastic.showClasp && (
+          <div
+            className="rounded-full flex items-center justify-center shadow-lg border border-white/50 select-none shrink-0"
+            style={{
+              width: `${claspSizePx}px`,
+              height: `${claspSizePx}px`,
+              background: claspBg,
+              boxShadow: '0 4px 10px rgba(0,0,0,0.32), inset 0 1px 2px rgba(255,255,255,0.75)'
+            }}
+          >
+            <span
+              className="font-black tracking-tight text-amber-950 leading-none"
+              style={{ fontSize: `${Math.max(8, Math.round(claspSizePx * 0.39))}px` }}
+            >
+              {effectiveCover.elastic.claspText || '★'}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }, [effectiveCover.elastic, cbWidthMm, wireoStyles]);
+
+  const renderBackEyeletsOverlay = useCallback((boardWPx: number, boardHPx: number) => {
+    if (!effectiveCover.elastic.showElastic) return null;
+    const pxPerMm = boardWPx / cbWidthMm;
+    const centerFromLeftPx = Math.min(boardWPx - 8, effectiveCover.elastic.positionMm * pxPerMm);
+    const bandWidthPx = Math.max(7, effectiveCover.elastic.widthMm * pxPerMm);
+    const eyeletOffsetYPx = Math.max(12, Math.round(Math.min(18, cbHeightMm * 0.22) * pxPerMm));
+    const eyeletSizePx = Math.max(10, Math.round(7.5 * pxPerMm));
+    const eyeletInnerPx = Math.max(5, Math.round(eyeletSizePx * 0.48));
+    const eyeletBg = wireoStyles?.ringGradient || 'linear-gradient(135deg, #a37920 0%, #fff0a5 40%, #d4af37 75%, #8f6716 100%)';
+
+    return (
+      <div className="absolute inset-0 pointer-events-none z-30">
+        {/* Elastic segments emerging from top & bottom eyelets */}
+        <div
+          className="absolute"
+          style={{
+            top: '-2px',
+            height: `${eyeletOffsetYPx + 2}px`,
+            left: `${centerFromLeftPx - bandWidthPx / 2}px`,
+            width: `${bandWidthPx}px`,
+            backgroundColor: effectiveCover.elastic.color || '#d4a373',
+            backgroundImage: 'linear-gradient(90deg, rgba(0,0,0,0.22) 0%, rgba(255,255,255,0.16) 50%, rgba(0,0,0,0.22) 100%)',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.24)'
+          }}
+        />
+        <div
+          className="absolute"
+          style={{
+            bottom: '-2px',
+            height: `${eyeletOffsetYPx + 2}px`,
+            left: `${centerFromLeftPx - bandWidthPx / 2}px`,
+            width: `${bandWidthPx}px`,
+            backgroundColor: effectiveCover.elastic.color || '#d4a373',
+            backgroundImage: 'linear-gradient(90deg, rgba(0,0,0,0.22) 0%, rgba(255,255,255,0.16) 50%, rgba(0,0,0,0.22) 100%)',
+            boxShadow: '0 -2px 5px rgba(0,0,0,0.24)'
+          }}
+        />
+
+        {/* Metallic Eyelets (Ilhoses) */}
+        {effectiveCover.elastic.showEyelet && (
+          <>
+            {[eyeletOffsetYPx, boardHPx - eyeletOffsetYPx].map((cy, idx) => (
+              <div
+                key={`eyelet-${idx}`}
+                className="absolute rounded-full flex items-center justify-center"
+                style={{
+                  left: `${centerFromLeftPx}px`,
+                  top: `${cy}px`,
+                  width: `${eyeletSizePx}px`,
+                  height: `${eyeletSizePx}px`,
+                  transform: 'translate(-50%, -50%)',
+                  background: eyeletBg,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.38), inset 0 1px 1px rgba(255,255,255,0.8)'
+                }}
+              >
+                <div
+                  className="rounded-full"
+                  style={{
+                    width: `${eyeletInnerPx}px`,
+                    height: `${eyeletInnerPx}px`,
+                    backgroundColor: effectiveCover.elastic.color || '#1e293b',
+                    boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.65)'
+                  }}
+                />
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  }, [effectiveCover.elastic, cbWidthMm, cbHeightMm, wireoStyles]);
+
+  const renderCornerProtectors = useCallback((outerSide: 'right' | 'left', uid: string, boardWPx?: number) => {
+    if (!showCornerProtectors) return null;
+    const pxPerMm = (boardWPx || COVER_HERO_W_PX) / cbWidthMm;
+    const cornerSizePx = Math.max(14, Math.round(13 * pxPerMm));
+    const metalColor = wireoStyles?.wireColor || '#d4af37';
+    const metalHighlight = wireoStyles?.wireHighlight || '#fff9d6';
+    const metalShadow = wireoStyles?.wireShadow || '#785208';
+    const gradId = `cornerMetal_${uid}`;
+
+    return (
+      <div className="absolute inset-0 pointer-events-none z-30">
+        <svg className="w-0 h-0 absolute">
+          <defs>
+            <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor={metalShadow} />
+              <stop offset="38%" stopColor={metalHighlight} />
+              <stop offset="68%" stopColor={metalColor} />
+              <stop offset="100%" stopColor={metalShadow} />
+            </linearGradient>
+          </defs>
+        </svg>
+
+        {/* Top Outer Corner */}
+        <svg
+          className={`absolute top-0 ${outerSide === 'right' ? 'right-0' : 'left-0'}`}
+          viewBox="0 0 24 24"
+          style={{
+            width: `${cornerSizePx}px`,
+            height: `${cornerSizePx}px`,
+            transform: outerSide === 'left' ? 'scaleX(-1)' : undefined,
+            filter: 'drop-shadow(-1px 1px 2px rgba(0,0,0,0.32))'
+          }}
+        >
+          <path d="M 2 0 L 24 0 L 24 22 Q 22 22 0 2 Z" fill={`url(#${gradId})`} />
+          <path d="M 6 2.5 L 21.5 2.5 L 21.5 18 Z" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="0.7" />
+        </svg>
+
+        {/* Bottom Outer Corner */}
+        <svg
+          className={`absolute bottom-0 ${outerSide === 'right' ? 'right-0' : 'left-0'}`}
+          viewBox="0 0 24 24"
+          style={{
+            width: `${cornerSizePx}px`,
+            height: `${cornerSizePx}px`,
+            transform: outerSide === 'left' ? 'scale(-1, -1)' : 'scaleY(-1)',
+            filter: 'drop-shadow(-1px -1px 2px rgba(0,0,0,0.32))'
+          }}
+        >
+          <path d="M 2 0 L 24 0 L 24 22 Q 22 22 0 2 Z" fill={`url(#${gradId})`} />
+          <path d="M 6 2.5 L 21.5 2.5 L 21.5 18 Z" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="0.7" />
+        </svg>
+      </div>
+    );
+  }, [showCornerProtectors, wireoStyles, COVER_HERO_W_PX, cbWidthMm]);
+
   // Export Mockup as High-Res PNG (Single reliable download handler with multi-layer fallback)
   const handleExportPNG = async () => {
     const surface = mockupSurfaceRef.current;
@@ -861,6 +1572,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
         backgroundColor: isTransparent ? null : undefined,
         logging: false,
         onclone: (clonedDoc: Document) => {
+          applyHtml2CanvasTextStrokeFallback(clonedDoc);
           const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
           if (clonedSurface) {
             clonedSurface.style.transform = 'none';
@@ -873,7 +1585,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
         }
       });
 
-      const filename = mockupMode === 'spread'
+      const filename = mockupSubject === 'cover'
+        ? `Mockup-Capa-Dura-${coverViewMode}.png`
+        : mockupMode === 'spread'
         ? `Mockup-Agenda-Paginas-${leftPageNum}-${rightPageNum}.png`
         : `Mockup-Agenda-Pagina-${singlePageNum}.png`;
 
@@ -946,6 +1660,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
         backgroundColor: isTransparent ? null : undefined,
         logging: false,
         onclone: (clonedDoc: Document) => {
+          applyHtml2CanvasTextStrokeFallback(clonedDoc);
           const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
           if (clonedSurface) {
             clonedSurface.style.transform = 'none';
@@ -1184,7 +1899,10 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
               useCORS: true,
               allowTaint: false,
               backgroundColor: '#ffffff',
-              logging: false
+              logging: false,
+              onclone: (clonedDoc: Document) => {
+                applyHtml2CanvasTextStrokeFallback(clonedDoc);
+              }
             });
             pageCanvasCacheRef.current.set(pNum, pageCanvas);
           }
@@ -1217,6 +1935,13 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
           width: targetW,
           height: targetH,
           pageAspect: PAGE_HEIGHT_MM / PAGE_WIDTH_MM,
+          pageWidthMm: PAGE_WIDTH_MM,
+          pageHeightMm: PAGE_HEIGHT_MM,
+          cardboardWidthMm: cbWidthMm,
+          cardboardHeightMm: cbHeightMm,
+          showHardcoverBacking,
+          coverBoardColor: frontCoverData?.backgroundColor || '#e2e8f0',
+          backCoverBoardColor: backCoverData?.backgroundColor || frontCoverData?.backgroundColor || '#cbd5e1',
           mockupMode,
           perspective,
           customAngleX,
@@ -1311,26 +2036,56 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight">Estúdio de Mockup 3D</h1>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Fotorrealista
+              <span className="text-[11px] text-slate-400 hidden xl:inline">
+                · {mockupSubject === 'cover' ? 'Capas Duras & Cartonagem' : 'Miolo & Folheamento'}
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden sm:block">
-              Exiba e exporte o layout da sua agenda com acabamentos de papelaria artesanal.
+              Exiba e exporte capas duras e páginas internas com acabamentos reais de encadernação.
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Quick Page Sync */}
-          <button
-            onClick={handleUseCurrentEditorPage}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-lg transition-all cursor-pointer shadow-xs"
-            title="Carregar a página que você está editando agora no canvas"
-          >
-            <Edit3 className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden md:inline">Página do Editor (pág. {currentPageInEditor})</span>
-          </button>
+          {/* Subject Switcher: Capas 3D vs Miolo Aberto */}
+          <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+            <button
+              onClick={() => handleSwitchSubject('cover')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                mockupSubject === 'cover'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Visualizar Mockup 3D das Capas Duras, Guardas, Elástico e Wire-o"
+            >
+              <BookMarked className="w-3.5 h-3.5" />
+              <span>Capas 3D</span>
+            </button>
+            <button
+              onClick={() => handleSwitchSubject('miolo')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                mockupSubject === 'miolo'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Visualizar e folhear páginas internas do Miolo"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Miolo</span>
+            </button>
+          </div>
+
+          {/* Quick Page Sync (Miolo) */}
+          {mockupSubject === 'miolo' && (
+            <button
+              onClick={handleUseCurrentEditorPage}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-lg transition-all cursor-pointer shadow-xs"
+              title="Carregar a página que você está editando agora no canvas"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden md:inline">Página do Editor (pág. {currentPageInEditor})</span>
+            </button>
+          )}
 
           {/* Copy Image Button */}
           <button
@@ -1359,19 +2114,21 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
           </button>
 
           {/* Download Video MP4 for WhatsApp Button */}
-          <button
-            onClick={() => setVideoModalOpen(true)}
-            disabled={isExporting || isGeneratingVideo}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg shadow-md shadow-emerald-600/25 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-            title="Baixar vídeo em MP4 folheando as páginas para enviar no WhatsApp do cliente"
-          >
-            {isGeneratingVideo ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Video className="w-3.5 h-3.5" />
-            )}
-            <span>{isGeneratingVideo ? `Vídeo (${videoProgress}%)` : 'Baixar Vídeo MP4'}</span>
-          </button>
+          {mockupSubject === 'miolo' && (
+            <button
+              onClick={() => setVideoModalOpen(true)}
+              disabled={isExporting || isGeneratingVideo}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg shadow-md shadow-emerald-600/25 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+              title="Baixar vídeo em MP4 folheando as páginas para enviar no WhatsApp do cliente"
+            >
+              {isGeneratingVideo ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Video className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden lg:inline">{isGeneratingVideo ? `Vídeo (${videoProgress}%)` : 'Baixar Vídeo MP4'}</span>
+            </button>
+          )}
 
           {/* Close / Return */}
           {onClose && (
@@ -1400,8 +2157,8 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                 activeSettingsTab === 'pages' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              <BookOpen className="w-4 h-4" />
-              <span className="text-[10px]">Páginas</span>
+              {mockupSubject === 'cover' ? <BookMarked className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />}
+              <span className="text-[10px]">{mockupSubject === 'cover' ? 'Capas' : 'Páginas'}</span>
             </button>
             <button
               onClick={() => setActiveSettingsTab('3d')}
@@ -1441,8 +2198,217 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
             </button>
           </div>
 
-          {/* TAB 1: PÁGINAS (The Core Feature requested by user) */}
-          {activeSettingsTab === 'pages' && (
+          {/* TAB 1A: CAPAS DURAS & ACABAMENTOS DE CARTONAGEM */}
+          {activeSettingsTab === 'pages' && mockupSubject === 'cover' && (
+            <div className="p-4 space-y-5">
+              {/* 1. Cena de Apresentação da Capa */}
+              <div>
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
+                  Cena de Apresentação da Capa
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'front_closed', title: 'Capa Fechada 3D', desc: 'Frente montada c/ elástico e corte lateral' },
+                    { id: 'duo_front_back', title: 'Frente + Contracapa', desc: 'Par completo p/ catálogo e aprovação' },
+                    { id: 'open_endsheet', title: 'Aberta (Guarda + Miolo)', desc: 'Guarda interna colada + 1ª pág. da agenda' },
+                    { id: 'standing_hero', title: 'Vitrine Dupla 3/4', desc: 'Capa e contracapa sobrepostas em destaque' }
+                  ].map((scene) => (
+                    <button
+                      key={scene.id}
+                      onClick={() => setCoverViewMode(scene.id as CoverViewMode)}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        coverViewMode === scene.id
+                          ? 'bg-amber-500/20 border-amber-400 text-white ring-1 ring-amber-400/50'
+                          : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="text-xs font-bold block text-white">{scene.title}</span>
+                      <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">{scene.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Laminação BOPP da Capa */}
+              <div>
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
+                  Laminação BOPP / Acabamento
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'matte', label: 'Fosca Aveludada', sub: 'Toque sedoso sem reflexo duro' },
+                    { id: 'glossy', label: 'Brilho Espelhado', sub: 'Reflexo diagonal luminoso' },
+                    { id: 'holographic', label: 'Holográfica', sub: 'Brilho prismático caquinhos' },
+                    { id: 'glitter', label: 'Glitter Fino', sub: 'Micropartículas cintilantes' }
+                  ].map((lam) => (
+                    <button
+                      key={lam.id}
+                      onClick={() => setCoverLamination(lam.id as CoverLamination)}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        coverLamination === lam.id
+                          ? 'bg-indigo-600/30 border-indigo-400 text-white'
+                          : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="text-xs font-bold block text-white">{lam.label}</span>
+                      <span className="text-[10px] text-slate-400 block">{lam.sub}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Acabamentos Físicos (Elástico, Passador, Ilhós, Cantoneiras) */}
+              <div className="p-3.5 bg-slate-950/70 rounded-xl border border-slate-800 space-y-3">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
+                  Acessórios de Cartonagem
+                </span>
+
+                {/* Elástico */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">Elástico de Fechamento</span>
+                    <span className="text-[10px] text-slate-400">{effectiveCover.elastic.positionMm}mm da borda do papelão</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={effectiveCover.elastic.showElastic}
+                    onChange={(e) =>
+                      updateCover(prev => ({
+                        ...prev,
+                        elastic: { ...prev.elastic, showElastic: e.target.checked }
+                      }))
+                    }
+                    className="w-4 h-4 accent-amber-500 cursor-pointer"
+                  />
+                </div>
+
+                {effectiveCover.elastic.showElastic && (
+                  <div className="space-y-2.5 pt-1 border-t border-slate-800/80">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={effectiveCover.elastic.color || '#d4a373'}
+                        onChange={(e) =>
+                          updateCover(prev => ({
+                            ...prev,
+                            elastic: { ...prev.elastic, color: e.target.value }
+                          }))
+                        }
+                        className="w-8 h-7 p-0 border border-slate-700 rounded cursor-pointer bg-transparent shrink-0"
+                      />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {['#d4a373', '#f4acb7', '#b84a56', '#1e293b', '#f8fafc', '#a3b18a', '#c59b27'].map((c) => (
+                          <button
+                            key={c}
+                            onClick={() =>
+                              updateCover(prev => ({
+                                ...prev,
+                                elastic: { ...prev.elastic, color: c }
+                              }))
+                            }
+                            className="w-5 h-5 rounded-full border border-white/25 transition-transform hover:scale-110 cursor-pointer"
+                            style={{ backgroundColor: c }}
+                            title={`Cor do elástico ${c}`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Passador Decorativo */}
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={effectiveCover.elastic.showClasp}
+                          onChange={(e) =>
+                            updateCover(prev => ({
+                              ...prev,
+                              elastic: { ...prev.elastic, showClasp: e.target.checked }
+                            }))
+                          }
+                          className="w-3.5 h-3.5 accent-amber-500 cursor-pointer"
+                        />
+                        <span>Passador Metálico</span>
+                      </label>
+                      {effectiveCover.elastic.showClasp && (
+                        <input
+                          type="text"
+                          maxLength={2}
+                          value={effectiveCover.elastic.claspText || ''}
+                          placeholder="★"
+                          onChange={(e) =>
+                            updateCover(prev => ({
+                              ...prev,
+                              elastic: { ...prev.elastic, claspText: e.target.value }
+                            }))
+                          }
+                          className="w-12 px-2 py-0.5 text-center text-xs font-bold bg-slate-900 border border-slate-700 rounded text-amber-300"
+                          title="Inicial ou símbolo do passador"
+                        />
+                      )}
+                    </div>
+
+                    {/* Ilhós na Contracapa */}
+                    <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
+                      <span>Ilhós Metálico na Contracapa</span>
+                      <input
+                        type="checkbox"
+                        checked={effectiveCover.elastic.showEyelet}
+                        onChange={(e) =>
+                          updateCover(prev => ({
+                            ...prev,
+                            elastic: { ...prev.elastic, showEyelet: e.target.checked }
+                          }))
+                        }
+                        className="w-3.5 h-3.5 accent-amber-500 cursor-pointer"
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {/* Cantoneiras Metálicas */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="text-xs font-bold text-white block">Cantoneiras Metálicas</span>
+                      <span className="text-[10px] text-slate-400">Proteção nos cantos externos da capa</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={showCornerProtectors}
+                    onChange={(e) => setShowCornerProtectors(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* 4. Resumo Técnico de Precisão (Papelão + Wire-o no 1º cm) */}
+              <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/90 text-[11px] text-slate-400 space-y-1">
+                <div className="flex items-center justify-between text-slate-200 font-semibold">
+                  <span>Papelão Montado</span>
+                  <span className="font-mono text-xs text-amber-300">
+                    {formatMmLabel(cbWidthMm)} × {formatMmLabel(cbHeightMm)} mm ({formatCmLabel(cbWidthMm)} × {formatCmLabel(cbHeightMm)} cm)
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Eixo de Furação Wire-o ({effectiveCover.wireO.pitch})</span>
+                  <span className="font-mono text-amber-300">
+                    {(effectiveCover.wireO.marginMm ?? 5) === 5
+                      ? '5 mm (Centro do 1º cm)'
+                      : `${effectiveCover.wireO.marginMm} mm da borda`}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 pt-1 leading-relaxed">
+                  A vira de {effectiveCover.bleedMm} mm é dobrada automaticamente para trás do papelão, exibindo a capa na proporção real exata em 3D.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 1B: PÁGINAS DO MIOLO */}
+          {activeSettingsTab === 'pages' && mockupSubject === 'miolo' && (
             <div className="p-4 space-y-5">
               {/* Display Mode: Spread vs Single */}
               <div>
@@ -1477,6 +2443,44 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                     <span>Página Única</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Hardcover Overhang ("Beiral") Backing Toggle behind Open Miolo */}
+              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Ruler className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-bold text-white block">Beiral da Capa Dura sob o Miolo</span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Papelão {formatMmLabel(cbWidthMm)}×{formatMmLabel(cbHeightMm)}mm • Miolo {formatMmLabel(PAGE_WIDTH_MM)}×{formatMmLabel(PAGE_HEIGHT_MM)}mm
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={showHardcoverBacking}
+                    onChange={(e) => setShowHardcoverBacking(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 cursor-pointer shrink-0"
+                  />
+                </div>
+                {showHardcoverBacking && (
+                  <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px]">
+                    <span className="text-slate-400">
+                      Sobra real: <strong className="text-amber-300 font-mono">+{formatMmLabel(Math.max(0, cbWidthMm - PAGE_WIDTH_MM))}mm</strong> lat. / <strong className="text-amber-300 font-mono">+{formatMmLabel(Math.max(0, (cbHeightMm - PAGE_HEIGHT_MM) / 2))}mm</strong> sup·inf
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleSwitchSubject('cover');
+                        setActiveSettingsTab('pages');
+                      }}
+                      className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                    >
+                      Editar medida
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Spread Controls: Left & Right Page */}
@@ -1894,81 +2898,119 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                   Acabamento do Wire-o Metálico
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setWireoFinish('gold')}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                      wireoFinish === 'gold' ? 'bg-amber-500/20 border-amber-400 text-amber-200' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-600 via-amber-300 to-amber-700 shadow-sm border border-amber-300/40 shrink-0"></span>
-                    <span>Dourado Ouro</span>
-                  </button>
+                  {([
+                    { id: 'gold', label: 'Dourado Ouro', activeCls: 'bg-amber-500/20 border-amber-400 text-amber-200', dotCls: 'bg-gradient-to-tr from-amber-600 via-amber-300 to-amber-700 border-amber-300/40' },
+                    { id: 'silver', label: 'Prata Cromada', activeCls: 'bg-slate-400/20 border-slate-300 text-slate-200', dotCls: 'bg-gradient-to-tr from-slate-400 via-white to-slate-500 border-white/50' },
+                    { id: 'rosegold', label: 'Rosé Gold', activeCls: 'bg-rose-500/20 border-rose-400 text-rose-200', dotCls: 'bg-gradient-to-tr from-rose-600 via-rose-300 to-pink-700 border-rose-300/40' },
+                    { id: 'black', label: 'Preto Fosco', activeCls: 'bg-zinc-800 border-zinc-500 text-zinc-100', dotCls: 'bg-gradient-to-tr from-zinc-950 via-zinc-700 to-black border-zinc-600' },
+                    { id: 'white', label: 'Branco Esmalte', activeCls: 'bg-slate-200/20 border-slate-200 text-white', dotCls: 'bg-white border-slate-300' },
+                    { id: 'bronze', label: 'Bronze Nobre', activeCls: 'bg-amber-800/30 border-amber-600 text-amber-200', dotCls: 'bg-gradient-to-tr from-amber-900 via-amber-600 to-yellow-800 border-amber-500/40' }
+                  ] as const).map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setWireoFinish(item.id);
+                        if (mockupSubject === 'cover') {
+                          updateCover(prev => ({
+                            ...prev,
+                            spine: { ...prev.spine, enabled: false },
+                            wireO: { ...prev.wireO, showWireO: true, wireColor: item.id }
+                          }));
+                        }
+                      }}
+                      className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        wireoFinish === item.id ? item.activeCls : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span className={`w-5 h-5 rounded-full shadow-sm border shrink-0 ${item.dotCls}`}></span>
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
 
                   <button
-                    onClick={() => setWireoFinish('silver')}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                      wireoFinish === 'silver' ? 'bg-slate-400/20 border-slate-300 text-slate-200' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-slate-400 via-white to-slate-500 shadow-sm border border-white/50 shrink-0"></span>
-                    <span>Prata Cromada</span>
-                  </button>
-
-                  <button
-                    onClick={() => setWireoFinish('rosegold')}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                      wireoFinish === 'rosegold' ? 'bg-rose-500/20 border-rose-400 text-rose-200' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-rose-600 via-rose-300 to-pink-700 shadow-sm border border-rose-300/40 shrink-0"></span>
-                    <span>Rosé Gold</span>
-                  </button>
-
-                  <button
-                    onClick={() => setWireoFinish('black')}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                      wireoFinish === 'black' ? 'bg-zinc-800 border-zinc-500 text-zinc-100' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-zinc-950 via-zinc-700 to-black shadow-sm border border-zinc-600 shrink-0"></span>
-                    <span>Preto Fosco</span>
-                  </button>
-
-                  <button
-                    onClick={() => setWireoFinish('white')}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                      wireoFinish === 'white' ? 'bg-slate-200/20 border-slate-200 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded-full bg-white shadow-sm border border-slate-300 shrink-0"></span>
-                    <span>Branco Esmalte</span>
-                  </button>
-
-                  <button
-                    onClick={() => setWireoFinish('bronze')}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                      wireoFinish === 'bronze' ? 'bg-amber-800/30 border-amber-600 text-amber-200' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-900 via-amber-600 to-yellow-800 shadow-sm border border-amber-500/40 shrink-0"></span>
-                    <span>Bronze Nobre</span>
-                  </button>
-
-                  <button
-                    onClick={() => setWireoFinish('none')}
+                    onClick={() => {
+                      setWireoFinish('none');
+                      if (mockupSubject === 'cover') {
+                        updateCover(prev => ({
+                          ...prev,
+                          wireO: { ...prev.wireO, showWireO: false }
+                        }));
+                      }
+                    }}
                     className={`col-span-2 flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                       wireoFinish === 'none' ? 'bg-indigo-600/30 border-indigo-400 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
-                    <span>Lombada de Livro Costurado (Sem Espiral)</span>
+                    <span>Lombada Costurada / Brochura (Sem Espiral)</span>
                   </button>
                 </div>
               </div>
 
+              {mockupSubject === 'cover' && wireoFinish !== 'none' && (
+                <div className="p-3.5 bg-slate-950/70 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200">Passo e Formato do Furo</span>
+                    <div className="flex items-center gap-1">
+                      {(['2:1', '3:1'] as const).map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => updateCover(prev => ({ ...prev, wireO: { ...prev.wireO, pitch: p } }))}
+                          className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                            effectiveCover.wireO.pitch === p ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                      {(['square', 'round'] as const).map((sh) => (
+                        <button
+                          key={sh}
+                          onClick={() => updateCover(prev => ({ ...prev, wireO: { ...prev.wireO, shape: sh } }))}
+                          className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                            effectiveCover.wireO.shape === sh ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {sh === 'square' ? 'Quadrado' : 'Redondo'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1">
+                      <span>Centro dos furos (da borda do papelão):</span>
+                      <span className="font-mono font-bold text-amber-300">{effectiveCover.wireO.marginMm ?? 5} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="3"
+                      max="15"
+                      step="0.5"
+                      value={effectiveCover.wireO.marginMm ?? 5}
+                      onChange={(e) =>
+                        updateCover(prev => ({
+                          ...prev,
+                          wireO: { ...prev.wireO, marginMm: parseFloat(e.target.value) }
+                        }))
+                      }
+                      className="w-full accent-amber-500 cursor-pointer"
+                    />
+                    {(effectiveCover.wireO.marginMm ?? 5) !== 5 && (
+                      <button
+                        onClick={() => updateCover(prev => ({ ...prev, wireO: { ...prev.wireO, marginMm: 5 } }))}
+                        className="mt-1.5 w-full py-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-colors cursor-pointer"
+                      >
+                        Centralizar no 1º cm (5 mm da borda do papelão)
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="p-3.5 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
-                <span className="text-xs font-semibold text-amber-300 block">💡 Wire-o Tradicional de Gráfica:</span>
+                <span className="text-xs font-semibold text-amber-300 block">Furação Fiel à Cartonagem:</span>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Reproduz o arame duplo contínuo passo 2:1 com arco metálico, brilho especular e furação quadrada padrão de encadernadora, eliminando qualquer aspecto de disco.
+                  Na capa dura, a furação do Wire-o fica centralizada no primeiro centímetro (5 mm) a partir da borda do papelão cinza, reproduzindo exatamente o gabarito de encadernadora.
                 </p>
               </div>
             </div>
@@ -2200,6 +3242,27 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
             </button>
           </div>
 
+          {/* Live Proportional Scale Readout Pill (Outside capture surface) */}
+          <button
+            type="button"
+            onClick={() => {
+              handleSwitchSubject('cover');
+              setActiveSettingsTab('pages');
+            }}
+            title="Clique para ajustar a medida personalizada do papelão"
+            className="no-print absolute top-4 right-4 z-20 hidden sm:flex items-center gap-2 bg-slate-900/85 hover:bg-slate-900 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 hover:border-amber-500/50 shadow-xl text-[11px] text-slate-300 transition-colors cursor-pointer"
+          >
+            <Ruler className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>
+              Papelão: <strong className="font-mono text-white">{formatMmLabel(cbWidthMm)} × {formatMmLabel(cbHeightMm)} mm</strong>{' '}
+              <span className="text-slate-400">({formatCmLabel(cbWidthMm)} × {formatCmLabel(cbHeightMm)} cm)</span>
+            </span>
+            <span className="text-slate-600">•</span>
+            <span className="text-slate-400">
+              Miolo: <span className="font-mono text-slate-200">{formatMmLabel(PAGE_WIDTH_MM)} × {formatMmLabel(PAGE_HEIGHT_MM)} mm</span>
+            </span>
+          </button>
+
           {/* THE MOCKUP RENDER STAGE (Captured by html2canvas) */}
           <div className="flex-1 overflow-auto flex items-center justify-center p-6 md:p-12 custom-scrollbar">
             <div 
@@ -2246,16 +3309,547 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                   />
 
                   {/* ============================================================ */}
+                  {/* 0. HARDCOVER 3D MOCKUP SCENES (CAPAS DURAS & CARTONAGEM)     */}
+                  {/* ============================================================ */}
+                  {mockupSubject === 'cover' && (
+                    <div className="relative flex items-center justify-center mockup-cover-stage">
+                      
+                      {/* SCENE 1: CAPA FECHADA 3D (HERO HARDCOVER) */}
+                      {coverViewMode === 'front_closed' && (() => {
+                        const pageDepthPx = coverThickness === 'thick' ? 14 : coverThickness === 'medium' ? 10 : 6;
+                        const spineWPx = Math.max(14, Math.round((effectiveCover.spine.calculatedSpineWidthMm || 15) * heroPxPerMm));
+                        const mioloWMm = Math.min(cbWidthMm, PAGE_WIDTH_MM);
+                        const mioloHMm = Math.min(cbHeightMm, PAGE_HEIGHT_MM);
+                        const overhangRightPx = Math.max(0, Math.round((cbWidthMm - mioloWMm) * heroPxPerMm * 0.65));
+                        const overhangVertPx = Math.max(0, Math.round(((cbHeightMm - mioloHMm) / 2) * heroPxPerMm * 0.75));
+                        const paperTopPx = Math.max(3, overhangVertPx + 2);
+                        const paperLeftPx = Math.max(4, Math.round(3 * heroPxPerMm));
+                        const paperRightOffsetPx = overhangRightPx - pageDepthPx;
+                        const paperBottomOffsetPx = overhangVertPx - pageDepthPx;
+
+                        return (
+                          <div className="relative flex items-center">
+                            {/* Optional Panoramic Hardcover Spine on Left */}
+                            {effectiveCover.spine.enabled && (
+                              <div
+                                className="relative overflow-hidden rounded-l-md shrink-0"
+                                style={{
+                                  width: `${spineWPx}px`,
+                                  height: `${COVER_HERO_H_PX}px`,
+                                  transformOrigin: 'right center',
+                                  transform: 'rotateY(-28deg)',
+                                  boxShadow: 'inset -4px 0 8px rgba(0,0,0,0.28), -6px 10px 20px rgba(0,0,0,0.25)'
+                                }}
+                              >
+                                {renderSpineBoardFace(spineWPx, COVER_HERO_H_PX)}
+                                {renderLaminationOverlay('spine_closed')}
+                              </div>
+                            )}
+
+                            {/* Main Closed Hardcover Assembly */}
+                            <div
+                              className="relative"
+                              style={{
+                                width: `${COVER_HERO_W_PX}px`,
+                                height: `${COVER_HERO_H_PX}px`
+                              }}
+                            >
+                              {/* Bottom Contracapa Board Edge Peeking Beneath Miolo Stack */}
+                              <div
+                                className="absolute inset-0 rounded-[4px] pointer-events-none"
+                                style={{
+                                  transform: `translate(${pageDepthPx + 2}px, ${pageDepthPx + 2}px)`,
+                                  backgroundColor: backCoverData?.backgroundColor || frontCoverData?.backgroundColor || '#cbd5e1',
+                                  boxShadow: '6px 14px 28px rgba(0,0,0,0.34), inset 0 0 0 1px rgba(0,0,0,0.18)'
+                                }}
+                              />
+
+                              {/* Realistic Layered Miolo Fore-Edge Paper Block (Proportional to Miolo vs Cardboard Overhang) */}
+                              <div
+                                className="absolute rounded-[3px] pointer-events-none"
+                                style={{
+                                  top: `${paperTopPx}px`,
+                                  left: `${paperLeftPx}px`,
+                                  right: `${paperRightOffsetPx}px`,
+                                  bottom: `${paperBottomOffsetPx}px`,
+                                  background:
+                                    'repeating-linear-gradient(135deg, #fafaf9 0px, #fafaf9 1.5px, #e7e5e4 1.5px, #e7e5e4 2.6px)',
+                                  borderRight: '1px solid #d6d3d1',
+                                  borderBottom: '1px solid #d6d3d1',
+                                  boxShadow: '2px 4px 10px rgba(0,0,0,0.18)'
+                                }}
+                              />
+
+                              {/* Satin Ribbon Tail Peeking at Bottom */}
+                              {showRibbon && (
+                                <div
+                                  className="absolute pointer-events-none z-0"
+                                  style={{
+                                    bottom: `-${pageDepthPx + 22}px`,
+                                    left: '44%',
+                                    width: '13px',
+                                    height: '28px',
+                                    backgroundColor: ribbonColor,
+                                    clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)',
+                                    boxShadow: '2px 5px 8px rgba(0,0,0,0.28)'
+                                  }}
+                                />
+                              )}
+
+                              {/* Top Front Hardcover Board (Exact Cardboard Size, Bleed Wrapped Around) */}
+                              <div
+                                className={`relative w-full h-full overflow-hidden ${
+                                  effectiveCover.spine.enabled ? 'rounded-r-[5px]' : 'rounded-[5px]'
+                                }`}
+                                style={{
+                                  boxShadow:
+                                    '0 8px 22px rgba(0,0,0,0.26), 2px 2px 0px rgba(15,23,42,0.14), inset 0 0 0 1px rgba(255,255,255,0.28)'
+                                }}
+                              >
+                                {renderFrontBoardFace(COVER_HERO_W_PX, COVER_HERO_H_PX)}
+                                {renderLaminationOverlay('front_closed')}
+
+                                {/* French Hinge Groove (Coifa / Canaleta) when Spine is enabled */}
+                                {effectiveCover.spine.enabled && (
+                                  <div
+                                    className="absolute top-0 bottom-0 pointer-events-none z-25"
+                                    style={{
+                                      left: `${Math.round(effectiveCover.spine.hingeGapMm * heroPxPerMm)}px`,
+                                      width: '5px',
+                                      background:
+                                        'linear-gradient(90deg, rgba(0,0,0,0.24) 0%, rgba(255,255,255,0.25) 60%, rgba(0,0,0,0.06) 100%)'
+                                    }}
+                                  />
+                                )}
+
+                                {renderCornerProtectors('right', 'front_closed', COVER_HERO_W_PX)}
+                              </div>
+
+                              {/* Elastic Band & Clasp Over Front Cover */}
+                              {renderFrontElasticOverlay(COVER_HERO_W_PX)}
+
+                              {/* Wire-o Centered in 1st cm from Left Cardboard Border */}
+                              {renderHardcoverWireO('left', COVER_HERO_W_PX, COVER_HERO_H_PX, 'front_closed')}
+
+                              {/* Top Gold Paperclip Prop */}
+                              {showPaperclip && (
+                                <div
+                                  className="absolute -top-4 right-14 w-5 h-12 rounded-full border-2 border-amber-400 pointer-events-none z-40"
+                                  style={{ boxShadow: '1px 3px 6px rgba(0,0,0,0.28)' }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* SCENE 2: DUPLA FRENTE + CONTRACAPA EXTERNA */}
+                      {coverViewMode === 'duo_front_back' && (() => {
+                        const pageDepthPx = coverThickness === 'thick' ? 10 : coverThickness === 'medium' ? 7 : 5;
+                        const mioloWMm = Math.min(cbWidthMm, PAGE_WIDTH_MM);
+                        const mioloHMm = Math.min(cbHeightMm, PAGE_HEIGHT_MM);
+                        const duoOverhangOuterPx = Math.max(0, Math.round((cbWidthMm - mioloWMm) * duoPxPerMm * 0.55));
+                        const duoOverhangVertPx = Math.max(0, Math.round(((cbHeightMm - mioloHMm) / 2) * duoPxPerMm * 0.65));
+
+                        return (
+                          <div className="relative flex items-center gap-10">
+                            {/* LEFT ITEM: CAPA FRENTE */}
+                            <div className="relative flex flex-col items-center">
+                              <div
+                                className="relative"
+                                style={{ width: `${COVER_DUO_W_PX}px`, height: `${COVER_DUO_H_PX}px` }}
+                              >
+                                <div
+                                  className="absolute rounded-[3px] pointer-events-none"
+                                  style={{
+                                    top: `${Math.max(3, duoOverhangVertPx + 2)}px`,
+                                    left: '5px',
+                                    right: `${duoOverhangOuterPx - pageDepthPx}px`,
+                                    bottom: `${duoOverhangVertPx - pageDepthPx}px`,
+                                    background:
+                                      'repeating-linear-gradient(135deg, #fafaf9 0px, #fafaf9 1.5px, #e5e5e5 1.5px, #e5e5e5 2.5px)',
+                                    boxShadow: '4px 10px 22px rgba(0,0,0,0.28)'
+                                  }}
+                                />
+                                <div
+                                  className="relative w-full h-full rounded-[5px] overflow-hidden"
+                                  style={{
+                                    boxShadow: '0 8px 20px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(255,255,255,0.28)'
+                                  }}
+                                >
+                                  {renderFrontBoardFace(COVER_DUO_W_PX, COVER_DUO_H_PX)}
+                                  {renderLaminationOverlay('duo_front')}
+                                  {renderCornerProtectors('right', 'duo_front', COVER_DUO_W_PX)}
+                                </div>
+                                {renderFrontElasticOverlay(COVER_DUO_W_PX)}
+                                {renderHardcoverWireO('left', COVER_DUO_W_PX, COVER_DUO_H_PX, 'duo_front')}
+                              </div>
+                            </div>
+
+                            {/* RIGHT ITEM: CONTRACAPA EXTERNA (WIRE-O ON RIGHT CARDBOARD BORDER, ILHÓS ON LEFT) */}
+                            <div className="relative flex flex-col items-center">
+                              <div
+                                className="relative"
+                                style={{ width: `${COVER_DUO_W_PX}px`, height: `${COVER_DUO_H_PX}px` }}
+                              >
+                                <div
+                                  className="absolute rounded-[3px] pointer-events-none"
+                                  style={{
+                                    top: `${Math.max(3, duoOverhangVertPx + 2)}px`,
+                                    right: '5px',
+                                    left: `${duoOverhangOuterPx - pageDepthPx}px`,
+                                    bottom: `${duoOverhangVertPx - pageDepthPx}px`,
+                                    background:
+                                      'repeating-linear-gradient(45deg, #fafaf9 0px, #fafaf9 1.5px, #e5e5e5 1.5px, #e5e5e5 2.5px)',
+                                    boxShadow: '-4px 10px 22px rgba(0,0,0,0.28)'
+                                  }}
+                                />
+                                <div
+                                  className="relative w-full h-full rounded-[5px] overflow-hidden"
+                                  style={{
+                                    boxShadow: '0 8px 20px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(255,255,255,0.28)'
+                                  }}
+                                >
+                                  {renderBackBoardFace(COVER_DUO_W_PX, COVER_DUO_H_PX)}
+                                  {renderLaminationOverlay('duo_back')}
+                                  {renderCornerProtectors('left', 'duo_back', COVER_DUO_W_PX)}
+                                  {renderBackEyeletsOverlay(COVER_DUO_W_PX, COVER_DUO_H_PX)}
+                                </div>
+                                {renderHardcoverWireO('right', COVER_DUO_W_PX, COVER_DUO_H_PX, 'duo_back')}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* SCENE 3: CAPA ABERTA (GUARDA DIANTEIRA + 1ª PÁGINA DO MIOLO) */}
+                      {coverViewMode === 'open_endsheet' && (() => {
+                        const openBoardW = Math.round(cbWidthMm * openPxPerMm);
+                        const openBoardH = Math.round(cbHeightMm * openPxPerMm);
+                        const turnInRimPx = Math.max(3, Math.round(Math.min(cbWidthMm * 0.04, 3.5) * openPxPerMm));
+                        const mioloW = Math.round(PAGE_WIDTH_MM * openPxPerMm);
+                        const mioloH = Math.round(PAGE_HEIGHT_MM * openPxPerMm);
+                        const mioloScale = mioloW / BASE_PAGE_W_PX;
+                        const gutterPx = effectiveCover.spine.enabled ? 8 : Math.max(12, Math.round(8.5 * openPxPerMm));
+
+                        return (
+                          <div className="relative flex items-center">
+                            {/* LEFT: INSIDE OF FRONT HARDCOVER WITH WRAPPED TURN-IN RIM + GUARDA DIANTEIRA */}
+                            <div
+                              className="relative rounded-l-[5px] overflow-hidden flex items-center justify-center"
+                              style={{
+                                width: `${openBoardW}px`,
+                                height: `${openBoardH}px`,
+                                backgroundColor: frontCoverData?.backgroundColor || '#e2e8f0',
+                                transformOrigin: 'right center',
+                                transform: 'rotateY(3deg)',
+                                boxShadow: '-6px 10px 24px rgba(0,0,0,0.26), inset -10px 0 18px -8px rgba(0,0,0,0.16)'
+                              }}
+                            >
+                              {/* Pasted Guarda Dianteira (Endsheet Front) inset inside the wrapped turn-in rim */}
+                              <div
+                                className="relative overflow-hidden rounded-[2px]"
+                                style={{
+                                  width: `${Math.max(20, openBoardW - turnInRimPx * 2)}px`,
+                                  height: `${Math.max(20, openBoardH - turnInRimPx * 2)}px`,
+                                  boxShadow: '0 0 0 1px rgba(0,0,0,0.06)'
+                                }}
+                              >
+                                {renderCroppedCoverRegion(
+                                  endsheetFrontData,
+                                  0,
+                                  0,
+                                  cbWidthMm,
+                                  cbHeightMm,
+                                  Math.max(20, openBoardW - turnInRimPx * 2),
+                                  Math.max(20, openBoardH - turnInRimPx * 2),
+                                  '#fafaf9'
+                                )}
+                              </div>
+                            </div>
+
+                            {/* CENTER SPINE / WIRE-O BRIDGE */}
+                            <div style={{ width: `${gutterPx}px`, height: `${openBoardH}px` }} className="relative shrink-0 z-30">
+                              {!effectiveCover.spine.enabled && effectiveCover.wireO.showWireO && wireoFinish !== 'none' && wireoStyles && (() => {
+                                const pxPerMm = openBoardW / cbWidthMm;
+                                const wireMarginMm = effectiveCover.wireO.marginMm ?? 5;
+                                const holeOffsetPx = wireMarginMm * pxPerMm;
+                                const wirePitchMm = effectiveCover.wireO.pitch === '3:1' ? 8.47 : 12.7;
+                                const holeWMm = effectiveCover.wireO.pitch === '3:1' ? 4.0 : 5.0;
+                                const holeHMm = effectiveCover.wireO.pitch === '3:1' ? 4.0 : 5.5;
+                                const holeWPx = Math.max(4.2, holeWMm * pxPerMm);
+                                const holeHPx = Math.max(4.2, holeHMm * pxPerMm);
+                                const holeCount = Math.max(3, Math.floor((cbHeightMm - 20) / wirePitchMm) + 1);
+                                const totalSpanMm = (holeCount - 1) * wirePitchMm;
+                                const firstOffsetMm = Math.max(6, (cbHeightMm - totalSpanMm) / 2);
+
+                                const spanReach = Math.ceil(holeOffsetPx + holeWPx + 8);
+                                const svgW = gutterPx + spanReach * 2;
+                                const leftHoleX = spanReach - holeOffsetPx;
+                                const rightHoleX = spanReach + gutterPx + holeOffsetPx;
+
+                                return (
+                                  <svg
+                                    className="absolute top-0 overflow-visible pointer-events-none"
+                                    style={{ left: `-${spanReach}px`, width: `${svgW}px`, height: `${openBoardH}px` }}
+                                    viewBox={`0 0 ${svgW} ${openBoardH}`}
+                                    fill="none"
+                                  >
+                                    <defs>
+                                      <linearGradient id="hcOpenSpreadWireGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stopColor={wireoStyles.wireShadow} />
+                                        <stop offset="28%" stopColor={wireoStyles.wireHighlight} />
+                                        <stop offset="52%" stopColor={wireoStyles.wireColor} />
+                                        <stop offset="76%" stopColor={wireoStyles.specularGlow} />
+                                        <stop offset="100%" stopColor={wireoStyles.wireShadow} />
+                                      </linearGradient>
+                                    </defs>
+                                    {Array.from({ length: holeCount }).map((_, idx) => {
+                                      const cy = (firstOffsetMm + idx * wirePitchMm) * pxPerMm;
+                                      const yT = cy - 1.5;
+                                      const yB = cy + 1.5;
+                                      return (
+                                        <g key={`open-wire-${idx}`}>
+                                          <rect x={leftHoleX - holeWPx / 2} y={cy - holeHPx / 2} width={holeWPx} height={holeHPx} rx="1" fill={wireoStyles.holeBg} />
+                                          <rect x={rightHoleX - holeWPx / 2} y={cy - holeHPx / 2} width={holeWPx} height={holeHPx} rx="1" fill={wireoStyles.holeBg} />
+                                          <path
+                                            d={`M ${leftHoleX},${yT} C ${leftHoleX + 8},${yT - 3.2} ${rightHoleX - 8},${yT - 3.2} ${rightHoleX},${yT}`}
+                                            stroke="url(#hcOpenSpreadWireGrad)"
+                                            strokeWidth="1.8"
+                                            strokeLinecap="round"
+                                          />
+                                          <path
+                                            d={`M ${leftHoleX},${yB} C ${leftHoleX + 8},${yB - 3.2} ${rightHoleX - 8},${yB - 3.2} ${rightHoleX},${yB}`}
+                                            stroke="url(#hcOpenSpreadWireGrad)"
+                                            strokeWidth="1.8"
+                                            strokeLinecap="round"
+                                          />
+                                        </g>
+                                      );
+                                    })}
+                                  </svg>
+                                );
+                              })()}
+                            </div>
+
+                            {/* RIGHT: BACK HARDCOVER BOARD + STACKED MIOLO + 1st MIOLO PAGE */}
+                            <div
+                              className="relative rounded-r-[5px] flex items-center justify-start overflow-visible"
+                              style={{
+                                width: `${openBoardW}px`,
+                                height: `${openBoardH}px`,
+                                backgroundColor: backCoverData?.backgroundColor || frontCoverData?.backgroundColor || '#cbd5e1',
+                                transformOrigin: 'left center',
+                                transform: 'rotateY(-3deg)',
+                                boxShadow: '8px 12px 26px rgba(0,0,0,0.28), inset 0 0 0 1px rgba(255,255,255,0.22)'
+                              }}
+                            >
+                              {/* Stacked Miolo Pages Resting on Contracapa (True Proportional Overhang) */}
+                              <div
+                                className="relative bg-white rounded-r-[3px] overflow-hidden shrink-0"
+                                style={{
+                                  width: `${mioloW}px`,
+                                  height: `${mioloH}px`,
+                                  boxShadow: '4px 4px 0 #f5f5f4, 7px 7px 0 #e7e5e4, 8px 10px 16px rgba(0,0,0,0.22)'
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: `${BASE_PAGE_W_PX}px`,
+                                    height: `${BASE_PAGE_H_PX}px`,
+                                    transform: `scale(${mioloScale})`,
+                                    transformOrigin: 'top left'
+                                  }}
+                                >
+                                  {firstMioloPageNode}
+                                </div>
+                                <div
+                                  className="absolute inset-0 pointer-events-none"
+                                  style={{
+                                    background: 'linear-gradient(90deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0) 12%)'
+                                  }}
+                                />
+                              </div>
+
+                              {/* Satin Ribbon Bookmark */}
+                              {showRibbon && (
+                                <div
+                                  className="absolute pointer-events-none z-20"
+                                  style={{
+                                    top: '0px',
+                                    left: '48%',
+                                    width: '11px',
+                                    height: `${openBoardH + 22}px`,
+                                    backgroundColor: ribbonColor,
+                                    clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 96%, 0 100%)',
+                                    boxShadow: '2px 4px 8px rgba(0,0,0,0.25)'
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* SCENE 4: VITRINE DUPLA 3/4 (HERO FRENTE + CONTRACAPA EM CAMADA) */}
+                      {coverViewMode === 'standing_hero' && (() => {
+                        const heroW = Math.round(cbWidthMm * standingPxPerMm);
+                        const heroH = Math.round(cbHeightMm * standingPxPerMm);
+                        const backW = Math.round(heroW * 0.928);
+                        const backH = Math.round(heroH * 0.928);
+                        const stageW = Math.round(heroW * 1.56);
+                        const stageH = Math.round(heroH + 36);
+                        const mioloWMm = Math.min(cbWidthMm, PAGE_WIDTH_MM);
+                        const mioloHMm = Math.min(cbHeightMm, PAGE_HEIGHT_MM);
+                        const standOverhangOuterPx = Math.max(0, Math.round((cbWidthMm - mioloWMm) * standingPxPerMm * 0.55));
+                        const standOverhangVertPx = Math.max(0, Math.round(((cbHeightMm - mioloHMm) / 2) * standingPxPerMm * 0.65));
+
+                        return (
+                          <div
+                            className="relative flex items-center justify-center"
+                            style={{ width: `${stageW}px`, height: `${stageH}px` }}
+                          >
+                            {/* Back Cover Standing Behind to the Right */}
+                            <div
+                              className="absolute"
+                              style={{
+                                right: '6px',
+                                top: '0px',
+                                width: `${backW}px`,
+                                height: `${backH}px`,
+                                transform: 'rotate(5deg)',
+                                zIndex: 10
+                              }}
+                            >
+                              <div
+                                className="relative w-full h-full rounded-[5px] overflow-hidden"
+                                style={{
+                                  boxShadow: '0 18px 36px rgba(0,0,0,0.34), inset 0 0 0 1px rgba(255,255,255,0.25)'
+                                }}
+                              >
+                                {renderBackBoardFace(backW, backH)}
+                                {renderLaminationOverlay('standing_back')}
+                                {renderCornerProtectors('left', 'standing_back', backW)}
+                                {renderBackEyeletsOverlay(backW, backH)}
+                              </div>
+                              {renderHardcoverWireO('right', backW, backH, 'standing_back')}
+                            </div>
+
+                            {/* Front Cover Hero in Foreground Left */}
+                            <div
+                              className="absolute"
+                              style={{
+                                left: '8px',
+                                bottom: '0px',
+                                width: `${heroW}px`,
+                                height: `${heroH}px`,
+                                transform: 'rotate(-3deg)',
+                                zIndex: 20
+                              }}
+                            >
+                              <div
+                                className="absolute rounded-[3px] pointer-events-none"
+                                style={{
+                                  top: `${Math.max(3, standOverhangVertPx + 2)}px`,
+                                  left: '6px',
+                                  right: `${standOverhangOuterPx - 9}px`,
+                                  bottom: `${standOverhangVertPx - 9}px`,
+                                  background:
+                                    'repeating-linear-gradient(135deg, #fafaf9 0px, #fafaf9 1.5px, #e5e5e5 1.5px, #e5e5e5 2.5px)',
+                                  boxShadow: '8px 18px 32px rgba(0,0,0,0.38)'
+                                }}
+                              />
+                              <div
+                                className="relative w-full h-full rounded-[5px] overflow-hidden"
+                                style={{
+                                  boxShadow: '0 14px 30px rgba(0,0,0,0.32), inset 0 0 0 1px rgba(255,255,255,0.3)'
+                                }}
+                              >
+                                {renderFrontBoardFace(heroW, heroH)}
+                                {renderLaminationOverlay('standing_front')}
+                                {renderCornerProtectors('right', 'standing_front', heroW)}
+                              </div>
+                              {renderFrontElasticOverlay(heroW)}
+                              {renderHardcoverWireO('left', heroW, heroH, 'standing_front')}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                    </div>
+                  )}
+
+                  {/* ============================================================ */}
                   {/* A. SPREAD / AGENDA ABERTA (DUAS PÁGINAS COM WIRE-O NO CENTRO) */}
                   {/* ============================================================ */}
-                  {mockupMode === 'spread' && (
+                  {mockupSubject === 'miolo' && mockupMode === 'spread' && (
                     <div className="relative flex items-center mockup-book-stage">
+
+                      {/* Proportional Hardcover Cardboard Backing ("Beiral") Behind Open Spread */}
+                      {showHardcoverBacking && (MIOLO_BOARD_W > DISPLAY_PAGE_W || MIOLO_BOARD_H > DISPLAY_PAGE_H) && (
+                        <>
+                          {/* Left Hardcover Board */}
+                          <div
+                            className="absolute rounded-l-[6px] overflow-hidden pointer-events-none"
+                            style={{
+                              right: '50%',
+                              top: '50%',
+                              width: `${MIOLO_BOARD_W}px`,
+                              height: `${MIOLO_BOARD_H}px`,
+                              transformOrigin: 'right center',
+                              transform: 'translateY(-50%) translateZ(-2px) rotateY(3deg)',
+                              backgroundColor: frontCoverData?.backgroundColor || '#e2e8f0',
+                              boxShadow: '-8px 12px 26px rgba(0,0,0,0.28), inset 0 0 0 1px rgba(255,255,255,0.28)',
+                              zIndex: 0
+                            }}
+                          >
+                            {frontCoverData && renderFrontBoardFace(MIOLO_BOARD_W, MIOLO_BOARD_H)}
+                            <div
+                              className="absolute rounded-[2px]"
+                              style={{
+                                inset: `${Math.max(3, Math.round(3.2 * mioloSpreadPxPerMm))}px`,
+                                backgroundColor: '#fafaf9',
+                                boxShadow: '0 0 0 1px rgba(15,23,42,0.08)'
+                              }}
+                            />
+                          </div>
+
+                          {/* Right Hardcover Board */}
+                          <div
+                            className="absolute rounded-r-[6px] overflow-hidden pointer-events-none"
+                            style={{
+                              left: '50%',
+                              top: '50%',
+                              width: `${MIOLO_BOARD_W}px`,
+                              height: `${MIOLO_BOARD_H}px`,
+                              transformOrigin: 'left center',
+                              transform: 'translateY(-50%) translateZ(-2px) rotateY(-3deg)',
+                              backgroundColor: backCoverData?.backgroundColor || frontCoverData?.backgroundColor || '#cbd5e1',
+                              boxShadow: '8px 12px 26px rgba(0,0,0,0.28), inset 0 0 0 1px rgba(255,255,255,0.28)',
+                              zIndex: 0
+                            }}
+                          >
+                            {(backCoverData || frontCoverData) && renderBackBoardFace(MIOLO_BOARD_W, MIOLO_BOARD_H)}
+                            <div
+                              className="absolute rounded-[2px]"
+                              style={{
+                                inset: `${Math.max(3, Math.round(3.2 * mioloSpreadPxPerMm))}px`,
+                                backgroundColor: '#fafaf9',
+                                boxShadow: '0 0 0 1px rgba(15,23,42,0.08)'
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
 
                       {/* Floating Previous Page Quick Button beside Left Page */}
                       <button
                         onClick={(e) => { e.stopPropagation(); triggerFlipPrev(); }}
                         disabled={leftPageNum <= 0 || !!flipState}
-                        className="no-print absolute -left-12 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
+                        style={{
+                          left: `-${48 + (showHardcoverBacking ? Math.max(0, MIOLO_BOARD_W - DISPLAY_PAGE_W) : 0)}px`
+                        }}
+                        className="no-print absolute top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
                         title="Folhear para a página anterior (Seta ←)"
                       >
                         <ChevronLeft className="w-5 h-5 text-amber-300" />
@@ -2264,7 +3858,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* --- LEFT PAGE (PÁGINA ESQUERDA) --- */}
                       <div 
                         onClick={() => { if (!flipState && leftPageNum > 0) triggerFlipPrev(); }}
-                        className={`relative bg-white rounded-l-xl overflow-hidden box-border group/leftpage ${
+                        className={`relative z-10 bg-white rounded-l-xl overflow-hidden box-border group/leftpage ${
                           !flipState && leftPageNum > 0 ? 'cursor-pointer' : ''
                         }`}
                         style={{
@@ -2342,7 +3936,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* --- RIGHT PAGE (PÁGINA DIREITA) --- */}
                       <div 
                         onClick={() => { if (!flipState && rightPageNum > 0 && rightPageNum < totalPages) triggerFlipNext(); }}
-                        className={`relative bg-white rounded-r-xl overflow-hidden box-border group/rightpage ${
+                        className={`relative z-10 bg-white rounded-r-xl overflow-hidden box-border group/rightpage ${
                           !flipState && rightPageNum > 0 && rightPageNum < totalPages ? 'cursor-pointer' : ''
                         }`}
                         style={{
@@ -2432,7 +4026,10 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       <button
                         onClick={(e) => { e.stopPropagation(); triggerFlipNext(); }}
                         disabled={rightPageNum <= 0 || rightPageNum >= totalPages || !!flipState}
-                        className="no-print absolute -right-12 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
+                        style={{
+                          right: `-${48 + (showHardcoverBacking ? Math.max(0, MIOLO_BOARD_W - DISPLAY_PAGE_W) : 0)}px`
+                        }}
+                        className="no-print absolute top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
                         title="Folhear para a próxima página (Seta →)"
                       >
                         <ChevronRight className="w-5 h-5 text-amber-300" />
@@ -2861,8 +4458,36 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                   {/* ============================================================ */}
                   {/* B. SINGLE PAGE / PÁGINA ÚNICA (FOCO INDIVIDUAL COM ENCADERNAÇÃO) */}
                   {/* ============================================================ */}
-                  {mockupMode === 'single' && (
+                  {mockupSubject === 'miolo' && mockupMode === 'single' && (
                     <div className="relative flex items-center mockup-book-stage">
+
+                      {/* Proportional Hardcover Board Backing Behind Single Page */}
+                      {showHardcoverBacking && (MIOLO_BOARD_W > DISPLAY_PAGE_W || MIOLO_BOARD_H > DISPLAY_PAGE_H) && (
+                        <div
+                          className="absolute rounded-[8px] overflow-hidden pointer-events-none"
+                          style={{
+                            left: '0px',
+                            top: '50%',
+                            width: `${Math.round(MIOLO_BOARD_W * 1.15)}px`,
+                            height: `${Math.round(MIOLO_BOARD_H * 1.15)}px`,
+                            transform: 'translateY(-50%) translateZ(-2px)',
+                            backgroundColor: backCoverData?.backgroundColor || frontCoverData?.backgroundColor || '#cbd5e1',
+                            boxShadow: '0 22px 44px -10px rgba(0,0,0,0.34), inset 0 0 0 1px rgba(255,255,255,0.28)',
+                            zIndex: 0
+                          }}
+                        >
+                          {(backCoverData || frontCoverData) &&
+                            renderBackBoardFace(Math.round(MIOLO_BOARD_W * 1.15), Math.round(MIOLO_BOARD_H * 1.15))}
+                          <div
+                            className="absolute rounded-[3px]"
+                            style={{
+                              inset: `${Math.max(4, Math.round(3.6 * mioloSpreadPxPerMm))}px`,
+                              backgroundColor: '#fafaf9',
+                              boxShadow: '0 0 0 1px rgba(15,23,42,0.08)'
+                            }}
+                          />
+                        </div>
+                      )}
 
                       {/* Floating Previous Page Quick Button beside Single Page */}
                       <button
@@ -2877,7 +4502,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* --- THE SINGLE PAGE CONTAINER --- */}
                       <div 
                         onClick={() => { if (!flipState && singlePageNum < totalPages) triggerFlipNext(); }}
-                        className={`relative bg-white rounded-xl overflow-hidden box-border group/singlepage ${
+                        className={`relative z-10 bg-white rounded-xl overflow-hidden box-border group/singlepage ${
                           !flipState && singlePageNum < totalPages ? 'cursor-pointer' : ''
                         }`}
                         style={{
@@ -2984,7 +4609,10 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       <button
                         onClick={(e) => { e.stopPropagation(); triggerFlipNext(); }}
                         disabled={singlePageNum >= totalPages || !!flipState}
-                        className="no-print absolute -right-12 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
+                        style={{
+                          right: `-${48 + (showHardcoverBacking ? Math.max(0, Math.round((MIOLO_BOARD_W - DISPLAY_PAGE_W) * 1.15)) : 0)}px`
+                        }}
+                        className="no-print absolute top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700/80 shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none cursor-pointer z-30"
                         title="Próxima página (Seta →)"
                       >
                         <ChevronRight className="w-5 h-5 text-amber-300" />
@@ -3175,22 +4803,48 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                     </div>
                   )}
 
-                  {/* --- STATIONERY PROP: LUXURY SLENDER PEN --- */}
-                  {showPen && (
-                    <div 
-                      className="absolute right-[-65px] top-[15%] w-3.5 h-[280px] rounded-full pointer-events-none z-40 transition-transform"
-                      style={{
-                        transform: 'rotate(-12deg) translateZ(25px)',
-                        background: 'linear-gradient(to right, #1e293b 0%, #475569 40%, #0f172a 70%, #334155 100%)',
-                        boxShadow: '12px 18px 24px rgba(0,0,0,0.4), inset 0 1px 2px rgba(255,255,255,0.4)'
-                      }}
-                    >
-                      {/* Metallic Gold Pen Tip & Clip */}
-                      <div className="absolute top-0 inset-x-0 h-6 bg-gradient-to-r from-amber-600 via-amber-300 to-amber-700 rounded-t-full" />
-                      <div className="absolute top-6 left-0.5 w-1 h-14 bg-amber-400 rounded-full shadow-sm" />
-                      <div className="absolute bottom-0 inset-x-0 h-5 bg-gradient-to-r from-amber-600 via-amber-300 to-amber-700 rounded-b-full" />
-                    </div>
-                  )}
+                  {/* --- STATIONERY PROP: LUXURY SLENDER PEN (140mm Physical Scale Reference) --- */}
+                  {showPen && (() => {
+                    const penHPx = Math.max(150, Math.round(140 * activeScenePxPerMm));
+                    const penWPx = Math.max(9, Math.round(6.8 * activeScenePxPerMm));
+                    const extraBoardOverhangPx =
+                      mockupSubject === 'miolo' && showHardcoverBacking
+                        ? Math.max(0, Math.round((MIOLO_BOARD_W - DISPLAY_PAGE_W) * (mockupMode === 'single' ? 1.15 : 1)))
+                        : 0;
+                    const penRightPx = Math.round(32 * activeScenePxPerMm) + extraBoardOverhangPx;
+
+                    return (
+                      <div
+                        className="absolute top-[15%] rounded-full pointer-events-none z-40 transition-all duration-300"
+                        style={{
+                          right: `-${penRightPx}px`,
+                          width: `${penWPx}px`,
+                          height: `${penHPx}px`,
+                          transform: 'rotate(-12deg) translateZ(25px)',
+                          background: 'linear-gradient(to right, #1e293b 0%, #475569 40%, #0f172a 70%, #334155 100%)',
+                          boxShadow: '12px 18px 24px rgba(0,0,0,0.4), inset 0 1px 2px rgba(255,255,255,0.4)'
+                        }}
+                      >
+                        {/* Metallic Gold Pen Tip & Clip */}
+                        <div
+                          className="absolute top-0 inset-x-0 bg-gradient-to-r from-amber-600 via-amber-300 to-amber-700 rounded-t-full"
+                          style={{ height: `${Math.max(14, Math.round(penHPx * 0.085))}px` }}
+                        />
+                        <div
+                          className="absolute left-0.5 bg-amber-400 rounded-full shadow-sm"
+                          style={{
+                            top: `${Math.max(14, Math.round(penHPx * 0.085))}px`,
+                            width: `${Math.max(3, Math.round(penWPx * 0.28))}px`,
+                            height: `${Math.max(28, Math.round(penHPx * 0.2))}px`
+                          }}
+                        />
+                        <div
+                          className="absolute bottom-0 inset-x-0 bg-gradient-to-r from-amber-600 via-amber-300 to-amber-700 rounded-b-full"
+                          style={{ height: `${Math.max(12, Math.round(penHPx * 0.07))}px` }}
+                        />
+                      </div>
+                    );
+                  })()}
 
                 </div>
               </div>

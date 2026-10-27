@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { localStorage } from './safeStorage';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -32,9 +33,28 @@ export const isTutorOrAllowedEmail = (emailStr: string): boolean => {
   );
 };
 
-// We use fallback placeholders here so the app never crashes during bundle or startup, 
-// even if of the user hasn't configured the keys in settings yet.
-export const supabase = createClient(
-  isSupabaseConfigured ? supabaseUrl : 'https://placeholder.supabase.co',
-  isSupabaseConfigured ? supabaseAnonKey : 'placeholder-key'
-);
+const resolvedUrl = isSupabaseConfigured ? supabaseUrl : 'https://placeholder.supabase.co';
+const resolvedKey = isSupabaseConfigured ? supabaseAnonKey : 'placeholder-key';
+
+// Main authenticated client with non-blocking lock (prevents Chrome/Safari navigator.locks infinite hangs)
+export const supabase = createClient(resolvedUrl, resolvedKey, {
+  auth: {
+    storage: localStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    lock: async (_name: string, _acquireTimeout: number, fn: () => Promise<any>) => {
+      return await fn();
+    },
+  },
+});
+
+// Stateless client for pre-login checks (never attaches expired/corrupt JWTs from localStorage)
+export const supabasePublic = createClient(resolvedUrl, resolvedKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    storageKey: 'agendamaster-public-stateless',
+  },
+});

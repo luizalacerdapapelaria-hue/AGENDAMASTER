@@ -154,6 +154,10 @@ export interface TextStyleConfig {
     fillColorStyleId?: string;
     characterStyleId?: string;
     paragraphStyleId?: string;
+    textStrokeWidth?: number; // Espessura do contorno individual de cada letra (px)
+    textStrokeColor?: string; // Cor do contorno individual das letras
+    textFillTransparent?: boolean; // Letras vazadas (apenas contorno, sem preenchimento)
+    textStrokeJoin?: 'miter' | 'round'; // Cantos do contorno das letras: reto ('miter') ou arredondado ('round')
 }
 
 export interface ColorStylePreset {
@@ -173,6 +177,10 @@ export interface CharacterStylePreset {
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize' | 'sentence';
     color?: string;
     colorStyleId?: string;
+    textStrokeWidth?: number;
+    textStrokeColor?: string;
+    textFillTransparent?: boolean;
+    textStrokeJoin?: 'miter' | 'round';
 }
 
 export interface ParagraphStylePreset {
@@ -220,6 +228,11 @@ export interface LayoutElement {
     backgroundColor?: string; // Preenchimento (Fill para vetores)
     fillColor?: string; // Alias para backgroundColor / preenchimento
     fontStyle?: 'normal' | 'italic'; // Novo
+    textStrokeWidth?: number; // Contorno individual das letras (px)
+    textStrokeColor?: string; // Cor do contorno das letras
+    textFillTransparent?: boolean; // Letras vazadas (só contorno)
+    textStrokeJoin?: 'miter' | 'round'; // Cantos do contorno ('miter' = reto, 'round' = arredondado)
+    showLeadingZero?: boolean;
     lineHeight?: number; // Novo
     title?: string;
     stepHour?: number;
@@ -439,6 +452,14 @@ export interface LayoutElement {
         fontSize?: number;
         fontWeight?: string;
         color?: string;
+        textStrokeWidth?: number;
+        textStrokeColor?: string;
+        textFillTransparent?: boolean;
+        textStrokeJoin?: 'miter' | 'round';
+        headerTextStrokeWidth?: number;
+        headerTextStrokeColor?: string;
+        headerTextFillTransparent?: boolean;
+        headerTextStrokeJoin?: 'miter' | 'round';
     };
     footerTracker?: FooterTrackerConfig;
   };
@@ -501,7 +522,8 @@ export interface CustomTemplateItem extends IntroPage {
     elementsWeeklyRight?: LayoutElement[];
     elementsWeeklyVersoLeft?: LayoutElement[];
     elementsWeeklyVersoRight?: LayoutElement[];
-    projectType?: 'agenda' | 'planner' | 'notebook' | 'devotional';
+    projectType?: ProjectType;
+    isPermanent?: boolean;
     createdAt?: string;
 }
 
@@ -515,7 +537,7 @@ export interface PageMargins {
 export type PageLayoutType = '1_per_page' | '2_per_page' | '1_per_page_weekend_shared' | 'weekly_vertical' | 'weekly_horizontal' | 'weekly_one_page_vertical' | 'weekly_one_page_horizontal' | 'notebook' | 'devotional';
 export type PageSize = 'A4' | 'A5' | 'Letter' | 'Custom';
 export type PageOrientation = 'portrait' | 'landscape';
-export type ProjectType = 'agenda' | 'planner' | 'notebook' | 'devotional';
+export type ProjectType = 'agenda' | 'planner' | 'notebook' | 'devotional' | 'cover';
 
 export interface MonthlyDividerStyle {
   layout?: 'classic' | 'modern' | 'minimalist' | 'geometric' | 'custom';
@@ -541,8 +563,9 @@ export interface MonthlyDividerStyle {
 export interface AgendaConfig {
   name?: string; // Nome do projeto
   projectType?: ProjectType; // Novo: Tipo de projeto
+  isPermanent?: boolean; // Se true, agenda permanente (não datada, sem feriados fixos e sem bloqueio de ano)
   year: number;
-  pageCount?: number; // Novo: Quantidade de páginas para cadernos/devocionais
+  pageCount?: number; // Quantidade de páginas/dias para cadernos, devocionais e agendas permanentes
   layoutType: PageLayoutType;
   pageSize: PageSize;
   customPageSize?: { width: number; height: number }; // In mm
@@ -593,12 +616,83 @@ export interface AgendaConfig {
   showPaddingDaysNumbers?: boolean; // Se true, exibe os números dos dias do mês anterior; se false, deixa as caixas em branco
   quoteCategory?: 'all' | 'feminine_strength' | 'faith' | 'motivational' | 'gratitude_mindfulness' | 'entrepreneurship_creativity' | 'self_care' | 'self_love' | 'success_habits' | string; // Categoria padrão de frases motivacionais
   quoteCustomList?: string[]; // Lista personalizada de frases motivacionais do projeto
+  cover?: CoverProjectConfig; // Studio de Capas & Gabaritos de Cartonagem
+}
+
+export interface CoverCardboardSize {
+  width: number;  // mm (ex: 155 para A5)
+  height: number; // mm (ex: 215 para A5)
+}
+
+export interface CoverSpineConfig {
+  enabled: boolean;
+  pageCount: number;      // ex: 200 folhas (400 páginas)
+  paperWeightGsm: number; // gramatura do miolo (75, 90, 120, etc.)
+  cardboardThicknessMm: number; // espessura do papelão (ex: 1.9mm ou 2.0mm)
+  calculatedSpineWidthMm: number; // calculada automaticamente
+  hingeGapMm: number;     // coifa / canaleta de abertura (geralmente 5mm a 8mm)
+}
+
+export interface CoverWireOConfig {
+  showWireO: boolean;
+  pitch: '2:1' | '3:1'; // Passo 2x1 (furos maiores) ou 3x1 (furos menores)
+  shape: 'square' | 'round';
+  position: 'left' | 'top';
+  marginMm: number;       // Distância da borda ao centro dos furos (geralmente 8mm a 10mm)
+  wireColor: 'white' | 'black' | 'gold' | 'bronze' | 'rosegold' | 'silver';
+}
+
+export interface CoverElasticConfig {
+  showElastic: boolean;
+  positionMm: number;     // Distância em mm da borda direita (geralmente 15mm a 20mm)
+  widthMm: number;        // Largura do elástico (ex: 7mm, 10mm, 15mm)
+  color: string;          // Cor do elástico
+  showEyelet: boolean;    // Mostrar furo/ilhós
+  eyeletColor: string;    // Cor do ilhós (dourado, prata, ouro velho, etc.)
+  showClasp: boolean;     // Mostrar passador decorativo de elástico
+  claspText?: string;     // Letra ou coração no passador
+}
+
+export interface CoverGuidesConfig {
+  showBleedLine: boolean;     // Linha externa de sangria / papel impresso
+  showCardboardLine: boolean; // Linha de dobra do papelão (onde o papelão é posicionado)
+  showSafeZoneLine: boolean;  // Linha de área segura interna (onde não corre risco de corte/dobra)
+  showWireOGuide: boolean;    // Furação do Wire-o
+  showElasticGuide: boolean;  // Passagem do elástico e ilhós
+  showSpineGuides: boolean;   // Guias de lombada e coifa (quando capa única)
+  showCornerMarks: boolean;   // Marcas nos 4 cantos para corte da ponta (fio de cabelo)
+}
+
+export interface CoverPage {
+  id: string; // 'cover_front' | 'cover_back' | 'endsheet_front' | 'endsheet_back' | 'cover_spread' | string
+  name: string; // "Capa Frente", "Contracapa", "Guarda Frente", "Guarda Verso", "Capa Panorâmica"
+  type: 'front' | 'back' | 'endsheet_front' | 'endsheet_back' | 'spread';
+  elements: LayoutElement[];
+  background?: BackgroundConfig;
+}
+
+export interface CoverProjectConfig {
+  cardboardSize: CoverCardboardSize; // Tamanho do papelão cinza em mm (ex: 155 x 215)
+  bleedMm: number;                   // Vira da capa dura em mm (geralmente 15mm ou 20mm)
+  safeMarginMm: number;              // Margem segura interna a partir da borda do papelão (geralmente 10mm)
+  formatPreset: 'A5' | 'A5_PLUS' | 'A4' | 'A6' | 'COLEGIAL' | 'SQUARE_15' | 'SQUARE_20' | 'SLIM' | 'colegial' | 'square_15' | 'square_20' | 'custom' | (string & {});
+  bindingType: 'wire_o' | 'spiral' | 'hardcover_spine' | 'glue_notebook';
+  guides: CoverGuidesConfig;
+  wireO: CoverWireOConfig;
+  elastic: CoverElasticConfig;
+  spine: CoverSpineConfig;
+  pages: CoverPage[];
+  activeCoverPageId: string;
 }
 
 export type PdfImportDestination = 
   | 'miolo_default'      // Layout de Miolo Principal (Páginas Diárias)
   | 'miolo_left'         // Layout de Miolo - Verso / Página Esquerda (Pares)
   | 'miolo_right'        // Layout de Miolo - Frente / Página Direita (Ímpares)
+  | 'cover_front'        // Capa Frente (Studio de Capas & Cartonagem)
+  | 'cover_back'         // Contracapa / Verso (Studio de Capas & Cartonagem)
+  | 'endsheet_front'     // Guarda Dianteira (Studio de Capas & Cartonagem)
+  | 'endsheet_back'      // Guarda Traseira (Studio de Capas & Cartonagem)
   | 'new_intro'          // Nova Página Inicial (Apresentação / Dados / etc.)
   | 'new_monthly_intro'  // Nova Página de Abertura Mensal
   | 'divider'            // Layout de Divisória Mensal (Frente / Capa)

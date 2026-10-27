@@ -43,20 +43,26 @@ Nós já configuramos os arquivos necessários para você:
 * Scripts no `package.json`: Comandos prontos para rodar em modo de desenvolvimento ou compilar para distribuição.
 
 ### 5. Compilar para Windows (.EXE)
-Para gerar o instalador nativo de Windows (`.exe`), basta rodar o comando abaixo no terminal do projeto:
+Para gerar o instalador nativo de Windows (`.exe`), basta rodar o comando abaixo no terminal do VS Code:
 
 ```bash
-npm run dist
+npm run dist:win
 ```
+*(ou simplesmente `npm run dist`)*
 
-> **Dica sobre publicação:**  
-> - Para compilar o arquivo `.exe` sem tentar enviar para o GitHub, utilize apenas `npm run dist`. O instalador será gerado diretamente na pasta `/dist-desktop`.  
-> - Se você quiser publicar a release automaticamente no GitHub com `npm run dist -- --publish always`, lembre-se de configurar a sua variável de ambiente `GH_TOKEN` no terminal (`$env:GH_TOKEN="seu_token"` no PowerShell).
+> **Dica sobre publicação e erros comuns:**  
+> - **Compilar localmente sem GitHub:** O comando já inclui `--publish never`, gerando o executável localmente na pasta `/dist-desktop` sem precisar de tokens ou login do GitHub.  
+> - **Se o PowerShell no VS Code der erro de script desabilitado (`npm.ps1 cannot be loaded`):**  
+>   Abra o PowerShell como Administrador e rode: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, ou no próprio terminal do VS Code mude o terminal de **PowerShell** para **Command Prompt (cmd)** ou **Git Bash**.  
+> - **Se acusar arquivo travado (`EBUSY` ou `resource locked`):**  
+>   Feche instâncias do Agenda Master abertas em segundo plano e apague a pasta `dist-desktop` antes de rodar novamente.
+> - **Se quiser publicar a release automaticamente no GitHub:**  
+>   Use `npm run dist:publish` configurando o seu token `GH_TOKEN` no terminal (`$env:GH_TOKEN="seu_token"` no PowerShell).
 
 Este comando vai:
 1. Compilar todo o projeto React para a pasta `/dist`.
 2. Empacotar a aplicação em um instalador de Windows otimizado na pasta `/dist-desktop`.
-3. Gerar o arquivo final em `/dist-desktop/Agenda Master Setup 2.0.1.exe`.
+3. Gerar o arquivo final em `/dist-desktop/Agenda.Master.Setup.2.0.3.exe`.
 
 ---
 

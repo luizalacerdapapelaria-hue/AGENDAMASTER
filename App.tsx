@@ -9,7 +9,7 @@ import { LandingPage } from './modules/landing/LandingPage';
 import { QuizPage } from './modules/quiz/QuizPage';
 import { UpdateNotifier } from './modules/editor/components/UpdateNotifier';
 import { User, AppState, AgendaConfig } from './types';
-import { supabase, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from './services/supabase';
+import { supabase, supabasePublic, isSupabaseConfigured, isDevelopmentEnvironment, isTutorOrAllowedEmail } from './services/supabase';
 import { Wrench, Sparkles, Layout, LogIn, ChevronDown, ChevronUp, UserCheck, Settings, Globe, HelpCircle, RotateCcw, Gift } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -18,13 +18,55 @@ const App: React.FC = () => {
     !!(window as any).electronAPI?.isElectron
   );
 
+  const VERIFIED_PROFILE_KEY = 'agendamaster_verified_profile';
+
+  const getCachedVerifiedProfile = (): User | null => {
+    try {
+      if (!localStorage) return null;
+      let hasSbToken = false;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+          const val = localStorage.getItem(key);
+          if (val && val.includes('access_token')) {
+            hasSbToken = true;
+            break;
+          }
+        }
+      }
+      if (!hasSbToken) return null;
+      const raw = localStorage.getItem(VERIFIED_PROFILE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.email === 'string' && parsed.email) {
+        return {
+          email: parsed.email,
+          name: parsed.name || parsed.email.split('@')[0],
+          plan: parsed.plan || 'pro',
+        };
+      }
+    } catch (_) {}
+    return null;
+  };
+
   const getInitialAppState = (): AppState => {
-    if (isElectron) return AppState.LOGIN;
+    const cachedProfile = getCachedVerifiedProfile();
+
+    if (isElectron) {
+      return cachedProfile ? AppState.INITIAL_SETUP : AppState.LOGIN;
+    }
     if (typeof window !== 'undefined') {
       const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
       const search = new URLSearchParams(window.location.search);
       const pageParam = (search.get('page') || '').toLowerCase();
-      const hash = (window.location.hash || '').toLowerCase().replace(/^#\/?/, '').replace(/\/+$/, '');
+      const rawHash = (window.location.hash || '').toLowerCase();
+      const hash = rawHash.replace(/^#\/?/, '').replace(/\/+$/, '');
+
+      if (rawHash.includes('type=recovery') || (search.get('type') || '').toLowerCase() === 'recovery') {
+        (window as any).__isPasswordRecoveryFlow = true;
+        (window as any).__isLinkRecovery = true;
+        return AppState.LOGIN;
+      }
 
       if (
         path === '/agendamaster' || 
@@ -61,6 +103,12 @@ const App: React.FC = () => {
       ) {
         return AppState.QUIZ;
       }
+      if (path === '/welcome' || pageParam === 'welcome' || hash === 'welcome') {
+        return AppState.WELCOME;
+      }
+      if (cachedProfile) {
+        return AppState.INITIAL_SETUP;
+      }
       if (
         path === '/acesso' || 
         path.endsWith('/acesso') || 
@@ -72,24 +120,22 @@ const App: React.FC = () => {
       ) {
         return AppState.LOGIN;
       }
-      if (path === '/welcome' || pageParam === 'welcome' || hash === 'welcome') {
-        return AppState.WELCOME;
-      }
     }
     return AppState.WELCOME;
   };
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(getCachedVerifiedProfile);
   const [appState, setAppState] = useState<AppState>(getInitialAppState);
   const [initialConfig, setInitialConfig] = useState<Partial<AgendaConfig> | undefined>(undefined);
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
+    const defaultExeUrl = 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/V2.0.3/Agenda.Master.Setup.2.0.3.exe';
     const saved = localStorage.getItem('agenda_master_exe_url');
-    if (saved && (saved.includes('v1.') || saved.includes('1.0.0') || saved.includes('1.0.1') || saved.includes('1.0.2') || saved.includes('2.0.0') || saved.includes('v2.0.1'))) {
+    if (saved && !saved.includes('2.0.3')) {
       localStorage.removeItem('agenda_master_exe_url');
-      return 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/V2.0.1/Agenda.Master.Setup.2.0.1.exe';
+      return defaultExeUrl;
     }
-    return saved || 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/V2.0.1/Agenda.Master.Setup.2.0.1.exe';
+    return saved || defaultExeUrl;
   });
 
   const verifiedEmailRef = React.useRef<string | null>(null);
@@ -173,12 +219,18 @@ const App: React.FC = () => {
     };
   }, [isElectron]);
 
-  // Global network error fallback interceptor to prevent "Failed to fetch" from bubbling up as uncaught rejections/exceptions
+  // Global network error fallback interceptor to prevent harmless network/HMR noise from crashing the app
   useEffect(() => {
+    const isDynamicChunkError = (lower: string) =>
+      lower.includes('dynamically imported module') ||
+      lower.includes('importing a module script failed') ||
+      lower.includes('chunkloaderror');
+
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
       const msg = reason?.message || String(reason || '');
       const lower = msg.toLowerCase();
+      if (isDynamicChunkError(lower)) return;
       if (
         lower.includes('[vite]') ||
         lower.includes('send was called before connect') ||
@@ -190,13 +242,14 @@ const App: React.FC = () => {
         lower.includes('load')
       ) {
         console.warn('[Global Rejection Handler]: Intercepted and handled a harmless network/HMR exception:', msg);
-        event.preventDefault(); // Prevents browser from treating this as an uncaught exception
+        event.preventDefault();
       }
     };
 
     const handleGlobalError = (event: ErrorEvent) => {
       const msg = event.message || '';
       const lower = msg.toLowerCase();
+      if (isDynamicChunkError(lower)) return;
       if (
         lower.includes('[vite]') ||
         lower.includes('send was called before connect') ||
@@ -208,7 +261,7 @@ const App: React.FC = () => {
         lower.includes('load')
       ) {
         console.warn('[Global Error Handler]: Intercepted and handled a harmless network/HMR error:', msg);
-        event.preventDefault(); // Prevents browser from treating this as a fatal crash
+        event.preventDefault();
       }
     };
 
@@ -221,58 +274,31 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Handle Supabase Auth State changes dynamically
+  // Handle Supabase Auth State changes dynamically (single authoritative listener — avoids token refresh races)
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      // If Supabase is not configured, we start as LOGIN to let the user see instructions
       return;
     }
 
     let isUnmounted = false;
 
-    // Pre-validate the current session's token integrity
-    const preValidateSession = async () => {
-      try {
-        console.log('[Auth] Pré-validando integridade da sessão local...');
-        const { error } = await supabase.auth.getSession();
-        if (error) {
-          console.warn('[Auth] Erro ao recuperar sessão inicial:', error.message);
-          const msg = error.message.toLowerCase();
-          if (
-            msg.includes('refresh_token') || 
-            msg.includes('refresh token') || 
-            msg.includes('not found') || 
-            msg.includes('invalid')
-          ) {
-            console.warn('[Auth] Token de atualização inválido ou inexistente detectado. Limpando dados do navegador...');
-            if (localStorage) {
-              const keysToRemove: string[] = [];
-              for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && (key.startsWith('sb-') || key.includes('supabase.auth') || key.includes('supabase-js'))) {
-                  keysToRemove.push(key);
-                }
-              }
-              keysToRemove.forEach(k => localStorage.removeItem(k));
-            }
-            try {
-              await supabase.auth.signOut();
-            } catch (signOutErr) {
-              console.warn('[Auth] Erro ao deslogar pós limpeza de tokens:', signOutErr);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[Auth] Erro de exceção na pré-validação de sessão:', err);
-      }
-    };
-
-    // Run async session check
-    preValidateSession();
-
-    // Listen to changes in auth state (login/logout/token refresh)
+    // Listen to changes in auth state (login/logout/token refresh/password recovery)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (isUnmounted) return;
+
+      if (event === 'PASSWORD_RECOVERY' || (typeof window !== 'undefined' && (window as any).__isPasswordRecoveryFlow)) {
+        if (event === 'PASSWORD_RECOVERY' && typeof window !== 'undefined') {
+          (window as any).__isPasswordRecoveryFlow = true;
+          (window as any).__isLinkRecovery = true;
+          (window as any).__recoveryEmail = session?.user?.email || '';
+          window.dispatchEvent(new CustomEvent('agendamaster-password-recovery', {
+            detail: { email: session?.user?.email || '' }
+          }));
+          setAppState(AppState.LOGIN);
+        }
+        return;
+      }
+
       if (session?.user) {
         const userEmail = session.user.email || '';
         const enteredEmail = userEmail.trim().toLowerCase();
@@ -285,74 +311,65 @@ const App: React.FC = () => {
         try {
           console.log('[AuthChange] Verificando acesso na mudança de estado de autenticação para:', enteredEmail);
 
-          const fetchPromise = (async () => {
-            // 1. Tentar busca exata por e-mail no banco
-            let { data: exactData, error: exactError } = await supabase
+          const queryAllowedByClient = async (dbClient: typeof supabase) => {
+            let { data: exactData, error: exactError } = await dbClient
               .from('allowed_users')
               .select('*')
               .eq('email', enteredEmail)
               .maybeSingle();
 
-            let allowedData = exactData;
+            let found = exactData;
+            if (exactError) {
+              const msg = (exactError.message || '').toLowerCase();
+              if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
+                throw exactError;
+              }
+            }
 
-             if (exactError) {
-               console.warn('[AuthChange] Erro na busca exata:', exactError);
-               const msg = (exactError.message || '').toLowerCase();
-               if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
-                 throw exactError;
-               }
-             } else if (allowedData) {
-               console.log('[AuthChange] Encontrado registro exato:', allowedData);
-             }
- 
-             // 2. Se não achar, tentar busca case-insensitive exata (ilike)
-             if (!allowedData) {
-               console.log('[AuthChange] Registro não encontrado de forma exata. Tentando case-insensitive (ilike)...');
-               const { data: fuzzyData, error: fuzzyError } = await supabase
-                 .from('allowed_users')
-                 .select('*')
-                 .ilike('email', enteredEmail)
-                 .maybeSingle();
- 
-               if (fuzzyError) {
-                 console.warn('[AuthChange] Erro no check case-insensitive:', fuzzyError);
-                 const msg = (fuzzyError.message || '').toLowerCase();
-                 if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
-                   throw fuzzyError;
-                 }
-               } else if (fuzzyData) {
-                 allowedData = fuzzyData;
-                 console.log('[AuthChange] Encontrado no case-insensitive:', allowedData);
-               }
-             }
- 
-             // 3. Se ainda não achar, tentar busca com similaridade wildcard + trim
-             if (!allowedData) {
-               console.log('[AuthChange] Registro não encontrado por ilike. Tentando wildcard...');
-               const { data: searchData, error: searchError } = await supabase
-                 .from('allowed_users')
-                 .select('*')
-                 .ilike('email', `%${enteredEmail}%`)
-                 .limit(10);
- 
-               if (searchError) {
-                 console.warn('[AuthChange] Erro no check de similaridade:', searchError);
-                 const msg = (searchError.message || '').toLowerCase();
-                 if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
-                   throw searchError;
-                 }
-               } else if (searchData && searchData.length > 0) {
-                const trimmedMatch = searchData.find(u => {
-                  const dbEmail = (u.email || '').trim().toLowerCase();
-                  return dbEmail === enteredEmail;
-                });
+            if (!found) {
+              const { data: fuzzyData, error: fuzzyError } = await dbClient
+                .from('allowed_users')
+                .select('*')
+                .ilike('email', enteredEmail)
+                .maybeSingle();
+
+              if (fuzzyError) {
+                const msg = (fuzzyError.message || '').toLowerCase();
+                if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
+                  throw fuzzyError;
+                }
+              } else if (fuzzyData) {
+                found = fuzzyData;
+              }
+            }
+
+            if (!found) {
+              const { data: searchData, error: searchError } = await dbClient
+                .from('allowed_users')
+                .select('*')
+                .ilike('email', `%${enteredEmail}%`)
+                .limit(10);
+
+              if (searchError) {
+                const msg = (searchError.message || '').toLowerCase();
+                if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load') || msg.includes('connect')) {
+                  throw searchError;
+                }
+              } else if (searchData && searchData.length > 0) {
+                const trimmedMatch = searchData.find(u => (u.email || '').trim().toLowerCase() === enteredEmail);
                 if (trimmedMatch) {
-                  allowedData = trimmedMatch;
-                  console.log('[AuthChange] Encontrado no wildcard + trim:', allowedData);
+                  found = trimmedMatch;
                 }
               }
             }
-            return allowedData;
+
+            return found;
+          };
+
+          const fetchPromise = (async () => {
+            const publicResult = await queryAllowedByClient(supabasePublic);
+            if (publicResult) return publicResult;
+            return await queryAllowedByClient(supabase);
           })();
 
           let allowedData: any = null;
@@ -378,43 +395,81 @@ const App: React.FC = () => {
           if (!allowedData || allowedData.active === false || allowedData.active === 'FALSE') {
             console.warn('[AuthChange] Acesso recusado ou inativo para o e-mail verificado.', allowedData);
             verifiedEmailRef.current = null;
+            try {
+              localStorage.removeItem(VERIFIED_PROFILE_KEY);
+            } catch (_) {}
             await supabase.auth.signOut();
             setCurrentUser(null);
             setAppState(AppState.LOGIN);
           } else {
             console.log('[AuthChange] Login autorizado com sucesso para:', enteredEmail);
             verifiedEmailRef.current = enteredEmail;
-            setCurrentUser({
+            const resolvedUser: User = {
               email: userEmail,
               name: session.user.user_metadata?.name || allowedData.plano || userEmail.split('@')[0] || 'Usuário',
               plan: allowedData.plan_tier || 'pro'
-            });
-            setAppState(AppState.INITIAL_SETUP);
+            };
+            try {
+              localStorage.setItem(VERIFIED_PROFILE_KEY, JSON.stringify(resolvedUser));
+              localStorage.setItem('agendamaster_saved_email', enteredEmail);
+            } catch (_) {}
+            setCurrentUser(resolvedUser);
+            setAppState(prev =>
+              prev === AppState.DASHBOARD || prev === AppState.LANDING || prev === AppState.QUIZ
+                ? prev
+                : AppState.INITIAL_SETUP
+            );
           }
         } catch (err: any) {
           console.error("Erro na verificação de acesso:", err);
-          verifiedEmailRef.current = null;
-          const isNetworkError = String(err?.message || '').toLowerCase().includes('fetch') || 
-                                 String(err?.message || '').toLowerCase().includes('network') ||
-                                 String(err?.message || '').toLowerCase().includes('failed');
-          
-          if (!isNetworkError) {
+          const errText = String(err?.message || '').toLowerCase();
+          const isNetworkError =
+            errText.includes('fetch') ||
+            errText.includes('network') ||
+            errText.includes('failed') ||
+            errText.includes('load') ||
+            errText.includes('connect');
+
+          if (isNetworkError) {
+            console.warn("[AuthChange] Oscilação temporária de rede detectada; mantendo sessão local ativa.");
+            const cached = getCachedVerifiedProfile();
+            if ((cached && cached.email.trim().toLowerCase() === enteredEmail) || isTutorOrAllowedEmail(enteredEmail)) {
+              const fallbackUser: User = cached || {
+                email: userEmail,
+                name: session.user.user_metadata?.name || userEmail.split('@')[0] || 'Usuário',
+                plan: 'pro'
+              };
+              verifiedEmailRef.current = enteredEmail;
+              setCurrentUser(fallbackUser);
+              setAppState(prev =>
+                prev === AppState.DASHBOARD || prev === AppState.LANDING || prev === AppState.QUIZ
+                  ? prev
+                  : AppState.INITIAL_SETUP
+              );
+              return;
+            }
+          } else {
+            verifiedEmailRef.current = null;
+            try {
+              localStorage.removeItem(VERIFIED_PROFILE_KEY);
+            } catch (_) {}
             try {
               await supabase.auth.signOut();
             } catch (signOutErr) {
               console.error("Erro ao deslogar após erro:", signOutErr);
             }
-          } else {
-            console.warn("[AuthChange] Ignorando chamada signOut devido a erro de conexão de rede.");
           }
           setCurrentUser(null);
           setAppState(AppState.LOGIN);
         }
       } else {
         verifiedEmailRef.current = null;
+        try {
+          localStorage.removeItem(VERIFIED_PROFILE_KEY);
+        } catch (_) {}
         setCurrentUser(null);
         setAppState(current => {
-          if (current === AppState.LANDING || current === AppState.WELCOME) {
+          if (current === AppState.LANDING || current === AppState.QUIZ || current === AppState.WELCOME) {
             return current;
           }
           return AppState.LOGIN;
@@ -429,6 +484,12 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogin = (user: User) => {
+    try {
+      localStorage.setItem(VERIFIED_PROFILE_KEY, JSON.stringify(user));
+      if (user.email) {
+        localStorage.setItem('agendamaster_saved_email', user.email.trim().toLowerCase());
+      }
+    } catch (_) {}
     setCurrentUser(user);
     setAppState(AppState.INITIAL_SETUP);
   };
@@ -446,6 +507,9 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    try {
+      localStorage.removeItem(VERIFIED_PROFILE_KEY);
+    } catch (_) {}
     if (isSupabaseConfigured) {
       supabase.auth.signOut().catch(err => {
         console.warn('[Logout] Erro ignorado ao tentar desautorizar Supabase:', err);
@@ -459,6 +523,9 @@ const App: React.FC = () => {
   // Helper method for the developer toolbar to force-jump between application screen flows
   const setDevState = (targetState: AppState) => {
     if (targetState === AppState.LOGIN || targetState === AppState.WELCOME) {
+      try {
+        localStorage.removeItem(VERIFIED_PROFILE_KEY);
+      } catch (_) {}
       if (isSupabaseConfigured) {
         supabase.auth.signOut().catch(err => {
           console.warn('[setDevState] Erro ignorado ao tentar desautorizar Supabase:', err);
@@ -759,7 +826,7 @@ const App: React.FC = () => {
           )}
         </div>
       )}
-      <UpdateNotifier />
+      <UpdateNotifier autoApply={appState !== AppState.DASHBOARD} />
     </>
   );
 };

@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BaseElementProps } from './types';
 import { getSpecialDateDisplaySample } from '../../../../core/logic/specialDates';
+import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
+import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
 const applyTextTransform = (text: string, transform?: string) => {
   if (!text) return text;
@@ -71,6 +73,12 @@ export const SpecialEventElement: React.FC<BaseElementProps> = ({
     return '💍 Faltam 50 dias para o Casamento';
   })();
 
+  useEffect(() => {
+    if (style?.fontFamily) {
+      ensureFontLoaded(style.fontFamily);
+    }
+  }, [style?.fontFamily]);
+
   const rawText = hasEventOnThisDay ? specialText : sampleEditorText;
 
   const textTransform = style.textTransform;
@@ -129,7 +137,7 @@ export const SpecialEventElement: React.FC<BaseElementProps> = ({
         style={{
           ...alignmentStyles,
           ...containerExtraStyles,
-          fontFamily: style.fontFamily || 'Inter',
+          fontFamily: getSafeFontFamily(style.fontFamily),
           fontSize: typeof style.fontSize === 'number' ? `${style.fontSize}px` : (style.fontSize || '11px'),
           fontWeight: style.fontWeight || '600',
           fontStyle: style.fontStyle || 'normal',
@@ -143,7 +151,14 @@ export const SpecialEventElement: React.FC<BaseElementProps> = ({
         }}
         title={hasEventOnThisDay ? displayText : 'Prévia no Editor: Informações Importantes / Contagem Regressiva'}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span
+          style={{
+            overflow: style?.textStrokeWidth ? 'visible' : 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            ...getTextStrokeCss({ ...style, color: effectiveTextColor }, effectiveTextColor),
+          }}
+        >
           {displayText}
         </span>
       </div>
