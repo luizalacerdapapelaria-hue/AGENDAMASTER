@@ -376,7 +376,7 @@ export const generatePlannerDays = (
         // When strict_first_day: box is strictly empty with dayOfMonth = 0 (no prior month dates)
         // When full_week: includes prior month dates if showPaddingDaysNumbers is true
         const padDayNum = isStrictFirstDay ? 0 : (showPaddingDaysNumbers ? padDate.getDate() : 0);
-        const padHoliday = isStrictFirstDay ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
+        const padHoliday = (isStrictFirstDay || !showPaddingDaysNumbers) ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
         const padMoon = isStrictFirstDay ? undefined : getMoonPhaseForDate(padDate);
 
         days.push({
@@ -420,7 +420,7 @@ export const generatePlannerDays = (
         padDate.setDate(padDate.getDate() + i);
 
         const padDayNum = isStrictFirstDay ? 0 : (showPaddingDaysNumbers ? padDate.getDate() : 0);
-        const padHoliday = isStrictFirstDay ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
+        const padHoliday = (isStrictFirstDay || !showPaddingDaysNumbers) ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
         const padMoon = isStrictFirstDay ? undefined : getMoonPhaseForDate(padDate);
 
         days.push({
@@ -442,14 +442,14 @@ export const generatePlannerDays = (
 
 export const generateGenericPages = (count: number): DayData[] => {
     const pages: DayData[] = [];
-    const dummyDate = new Date();
     for (let i = 0; i < count; i++) {
+        const seqDate = new Date(2025, 0, 1 + i);
         pages.push({
-            date: dummyDate,
-            dayOfWeek: 0,
-            dayOfMonth: 0,
-            month: 0,
-            year: 0
+            date: seqDate,
+            dayOfWeek: (i % 7),
+            dayOfMonth: i + 1,
+            month: seqDate.getMonth(),
+            year: seqDate.getFullYear()
         });
     }
     return pages;

@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { BaseElementProps } from './types';
+import { DayData } from '../../../../types';
 import { getMonthName, getDayName } from '../../../../core/backend/calendar';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
@@ -41,7 +42,15 @@ const getAlignmentStyles = (style: any): React.CSSProperties => {
 
 export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayData, style, isEditor, pageHeight, pageWidth }) => {
     const currentYear = new Date().getFullYear();
-    let d = { ...(dayData || { dayOfMonth: 1, month: 0, dayOfWeek: new Date(currentYear, 0, 1).getDay(), year: currentYear }) };
+    let d: DayData = {
+        date: new Date(currentYear, 0, 1),
+        dayOfMonth: 1,
+        month: 0,
+        dayOfWeek: new Date(currentYear, 0, 1).getDay(),
+        year: currentYear,
+        isPaddingDay: false,
+        ...(dayData || {})
+    };
     
     // Simular maior espaço apenas no editor durante o ajuste de layout, nunca na visualização ou impressão
     if (isEditor && style?.simulateMaxSpace) {
@@ -58,14 +67,22 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
         effectiveType = 'day_number';
     }
 
-    // No editor, nunca deixe elementos em branco para permitir ao usuário posicionar, arrastar e estilizar
-    if (isEditor && (!d.dayOfMonth || d.dayOfMonth === 0)) {
+    const isPaddingBlank = Boolean(d.isPaddingDay && (!d.dayOfMonth || d.dayOfMonth === 0));
+
+    // No editor, elementos sem dia definido recebem fallback apenas se NÃO forem dias intencionalmente vazios (padding)
+    if (isEditor && (!d.dayOfMonth || d.dayOfMonth === 0) && !d.isPaddingDay) {
         const fallbackDay = (element.style?.dayIndex !== undefined && element.style.dayIndex >= 0 && element.style.dayIndex <= 6)
             ? (element.style.dayIndex === 0 ? 7 : element.style.dayIndex)
             : ((d.dayOfWeek !== undefined && d.dayOfWeek >= 0 && d.dayOfWeek <= 6)
                 ? (d.dayOfWeek === 0 ? 7 : d.dayOfWeek)
                 : ((d as any).date ? (d as any).date.getDate() : 1));
         d.dayOfMonth = fallbackDay;
+    }
+
+    if (isPaddingBlank) {
+        if (effectiveType === 'day_number' || (effectiveType === 'date_placeholder' && (!style?.variant || style?.variant === 'day_number'))) {
+            return isEditor ? <div style={{ width: '100%', height: '100%' }} /> : null;
+        }
     }
 
     if (!isEditor && d.dayOfMonth === 0) {
@@ -99,6 +116,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
                     overflow: hasStroke ? 'visible' : 'hidden',
                     textOverflow: 'ellipsis',
                     textTransform: cssTransform as any,
+                    opacity: d.isPaddingDay ? 0.45 : (style?.opacity ?? 1),
                     ...strokeCss
                 }}
             >
@@ -108,7 +126,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
     };
 
     switch (effectiveType) {
-        case 'day_number': return renderContent(String(d.dayOfMonth).padStart(2, '0'));
+        case 'day_number': return renderContent(d.dayOfMonth > 0 ? String(d.dayOfMonth).padStart(2, '0') : '');
         case 'month_name': return renderContent(getMonthName(d.month, style?.nameFormat));
         case 'month_number': {
             const mVal = d.month >= 0 ? d.month + 1 : 1;
@@ -119,7 +137,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
         case 'date_placeholder': {
             const variant = style?.variant || 'day_number';
             switch (variant) {
-                case 'day_number': return renderContent(String(d.dayOfMonth).padStart(2, '0'));
+                case 'day_number': return renderContent(d.dayOfMonth > 0 ? String(d.dayOfMonth).padStart(2, '0') : '');
                 case 'day_name': return renderContent(getDayName(d.dayOfWeek, style?.nameFormat));
                 case 'month_name': return renderContent(getMonthName(d.month, style?.nameFormat));
                 case 'month_number': {
@@ -127,7 +145,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
                     return renderContent(String(mVal).padStart(2, '0'));
                 }
                 case 'year': return renderContent((d.year || currentYear) + (style?.yearOffset || 0));
-                default: return renderContent(String(d.dayOfMonth).padStart(2, '0'));
+                default: return renderContent(d.dayOfMonth > 0 ? String(d.dayOfMonth).padStart(2, '0') : '');
             }
         }
         default: return null;

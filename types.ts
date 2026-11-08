@@ -160,10 +160,45 @@ export interface TextStyleConfig {
     textStrokeJoin?: 'miter' | 'round'; // Cantos do contorno das letras: reto ('miter') ou arredondado ('round')
 }
 
+export interface ObjectStylePreset {
+    id: string;
+    name: string;
+    // Cor / Preenchimento
+    backgroundColor?: string;
+    fillColor?: string;
+    color?: string; // Cor principal / texto / traço
+    backgroundType?: 'solid' | 'gradient';
+    gradientType?: 'linear' | 'radial';
+    gradientColors?: [string, string];
+    gradientDirection?: number;
+    // Borda
+    borderColor?: string;
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove' | 'ridge';
+    borderRadius?: number;
+    // Transparência / Opacidade
+    opacity?: number;
+    fillOpacity?: number;
+    strokeOpacity?: number;
+    // Sombra / Efeitos
+    boxShadow?: 'none' | 'sm' | 'md' | 'lg';
+}
+
 export interface ColorStylePreset {
     id: string;
     name: string;
     color: string;
+    // Características extras de objeto herdadas da seleção (cor, borda e transparência)
+    backgroundColor?: string;
+    fillColor?: string;
+    borderColor?: string;
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove' | 'ridge';
+    borderRadius?: number;
+    opacity?: number;
+    fillOpacity?: number;
+    strokeOpacity?: number;
+    boxShadow?: 'none' | 'sm' | 'md' | 'lg';
 }
 
 export interface CharacterStylePreset {
@@ -197,6 +232,7 @@ export interface ParagraphStylePreset {
 }
 
 export interface ProjectStylesConfig {
+    objectStyles?: ObjectStylePreset[];
     colorStyles: ColorStylePreset[];
     characterStyles: CharacterStylePreset[];
     paragraphStyles: ParagraphStylePreset[];
@@ -214,7 +250,8 @@ export interface LayoutElement {
   h: number; // Altura em %
   zIndex: number;
   style: {
-    // Vínculos com Estilos Globais (Cor, Caractere e Parágrafo)
+    // Vínculos com Estilos Globais (Objeto, Cor, Caractere e Parágrafo)
+    objectStyleId?: string; // Estilo de objeto vinculado (aparência completa: cor, borda, transparência, sombra)
     colorStyleId?: string; // Estilo de cor vinculado à cor principal / texto / linhas
     fillColorStyleId?: string; // Estilo de cor vinculado ao fundo / preenchimento
     borderColorStyleId?: string; // Estilo de cor vinculado à borda / grade
@@ -440,6 +477,15 @@ export interface LayoutElement {
         strokeWidth?: number;
         strokeStyle?: 'solid' | 'dashed' | 'dotted';
         showMoonPhase?: boolean;
+        showHoliday?: boolean;
+        holidayFontFamily?: string;
+        holidayFontSize?: number;
+        holidayColor?: string;
+        holidayFontWeight?: string;
+        holidayTextStrokeWidth?: number;
+        holidayTextStrokeColor?: string;
+        holidayTextFillTransparent?: boolean;
+        holidayTextStrokeJoin?: 'miter' | 'round';
         startHour?: number;
         endHour?: number;
         timeInterval?: number;

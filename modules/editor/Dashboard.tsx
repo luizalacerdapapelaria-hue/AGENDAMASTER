@@ -26,6 +26,8 @@ import { FooterTrackerGalleryModal, FOOTER_TRACKER_PRESETS, FooterTrackerPreset 
 import { SpecialDatesModal } from './components/SpecialDatesModal';
 import { enrichDayDataWithSpecialDates, getSpecialInfoForDay, getSpecialDateDisplaySample } from '../../core/logic/specialDates';
 import { StylesManagerPanel, ElementQuickStylesBar, StyleTabType } from './components/StylesManagerPanel';
+import { FavoriteColorsModal } from './components/FavoriteColorsModal';
+import { FavoriteColorSwatches } from './components/FavoriteColorSwatches';
 import { getProjectStyles, applyColorStyleToElement } from '../../core/logic/styleSystem';
 import { applyHtml2CanvasTextStrokeFallback } from '../../core/logic/textStroke';
 import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBounds } from './components/elements/vectorShapesData';
@@ -40,7 +42,8 @@ import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
 import { LAYOUT_LIBRARY, resolveLayoutLibraryConfig } from './templates/layoutLibrary';
-import { buildStandardAgendaConfig } from './templates/standardAgendaTemplate';
+import { buildStandardAgendaConfig, STANDARD_HALF_PAGE_TOP_ELEMENTS, STANDARD_HALF_PAGE_BOTTOM_ELEMENTS, cloneElementWithNewId } from './templates/standardAgendaTemplate';
+import { PERMANENT_2DPP_TOP, PERMANENT_2DPP_BOTTOM } from './templates/dailyTemplates';
 import { 
   Calendar, LogOut, Moon, Type, CalendarRange,
   Trash2, Move, AlignLeft, AlignCenter, AlignRight, AlignJustify, Layout,
@@ -1073,8 +1076,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       } else if (initialConfig.layoutType === '1_per_page' || initialConfig.projectType === 'agenda') {
         setEditorViewMode('standard');
       }
+
+      // Se a usuária subiu um PDF como modelo direto pela tela de início
+      const initialPdf = (initialConfig as any)?.__initialPdfFile;
+      if (initialPdf && initialPdf instanceof File) {
+        setPdfImportInitialFile(initialPdf);
+        const isWeekly = initialConfig.layoutType?.startsWith('weekly') || initialConfig.projectType === 'planner';
+        setPdfImportInitialDestination(isWeekly ? 'miolo_left' : 'miolo_default');
+        setPdfImportModalOpen(true);
+      }
     }
   }, [initialConfig]);
+
+  // Auto-save contínuo do projeto no localStorage para que a usuária nunca perca o trabalho
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('agendamaster_autosave_project', JSON.stringify({
+          name: config.name || 'Último Projeto',
+          config
+        }));
+      } catch (_) {}
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [config]);
 
   const [history, setHistory] = useState<AgendaConfig[]>([]);
 
@@ -1321,6 +1346,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [alignmentReference, setAlignmentReference] = useState<'selection' | 'margins' | 'page'>('margins');
   const [showStylesPanel, setShowStylesPanel] = useState(false);
   const [stylesPanelTab, setStylesPanelTab] = useState<StyleTabType>('color');
+  const [showFavoriteColorsModal, setShowFavoriteColorsModal] = useState(false);
 
   // Interaction States
   const [isDragging, setIsDragging] = useState(false);
@@ -1910,6 +1936,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         monthlyDividerVersoContent: importedConfig.monthlyDividerVersoContent || 'blank'
       });
       setConfig(migratedConfig);
+      if (Array.isArray(migratedConfig.quoteCustomList) && migratedConfig.quoteCustomList.length > 0) {
+        setCustomQuotes(migratedConfig.quoteCustomList);
+        try {
+          localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(migratedConfig.quoteCustomList));
+        } catch (_) {}
+      }
       // Reset state based on new config
       setSelectedIds([]);
       if (importedConfig.projectType === 'cover') {
@@ -2169,10 +2201,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         if (confirm(`Deseja importar ${importedList.length} frase(s) nova(s)? Suas frases atuais serão substituídas.`)) {
-          setCustomQuotes(importedList);
-          localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(importedList));
-          setRenderedPreviewCount(prev => prev + 1);
-          alert(`${importedList.length} frase(s) motivacional(is) carregada(s) com sucesso!`);
+          applyCustomQuotesToProject(importedList);
         }
       } catch (err: any) {
         console.error('[Import Quotes] Erro ao ler:', err);
@@ -2184,12 +2213,169 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     reader.readAsText(file);
   };
 
+  const applyCustomQuotesToProject = (newQuotes: string[]) => {
+    pushHistory();
+    setCustomQuotes(newQuotes);
+    try {
+      localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(newQuotes));
+    } catch (e) {
+      console.error('Error saving custom quotes to localStorage', e);
+    }
+
+    const updateQuotesInList = (list?: LayoutElement[]) => list?.map(el => {
+      if (el.type === 'quote') {
+        return {
+          ...el,
+          style: {
+            ...el.style,
+            quoteCategory: 'custom' as QuoteCategory,
+            quoteDisplayMode: (el.style?.quoteDisplayMode === 'fixed' ? 'fixed' : 'daily_rotating') as ('fixed' | 'daily_rotating')
+          }
+        };
+      }
+      return el;
+    });
+
+    setConfig(prev => ({
+      ...prev,
+      quoteCategory: 'custom',
+      quoteCustomList: newQuotes,
+      includeQuotes: true,
+      elements: updateQuotesInList(prev.elements) || prev.elements,
+      elementsVerso: updateQuotesInList(prev.elementsVerso),
+      elementsTop: updateQuotesInList(prev.elementsTop),
+      elementsBottom: updateQuotesInList(prev.elementsBottom),
+      elementsSaturday: updateQuotesInList(prev.elementsSaturday),
+      elementsSunday: updateQuotesInList(prev.elementsSunday),
+      elementsWeeklyLeft: updateQuotesInList(prev.elementsWeeklyLeft),
+      elementsWeeklyRight: updateQuotesInList(prev.elementsWeeklyRight),
+      elementsWeeklyVersoLeft: updateQuotesInList(prev.elementsWeeklyVersoLeft),
+      elementsWeeklyVersoRight: updateQuotesInList(prev.elementsWeeklyVersoRight),
+      introPages: prev.introPages.map(page => ({
+        ...page,
+        elements: updateQuotesInList(page.elements) || page.elements
+      })),
+      monthlyIntroPages: prev.monthlyIntroPages?.map(page => ({
+        ...page,
+        elements: updateQuotesInList(page.elements) || page.elements
+      })),
+      monthlyDividerStyle: prev.monthlyDividerStyle ? {
+        ...prev.monthlyDividerStyle,
+        elements: updateQuotesInList(prev.monthlyDividerStyle.elements),
+        versoElements: updateQuotesInList(prev.monthlyDividerStyle.versoElements)
+      } : undefined
+    }));
+
+    updateActiveElements(prevList => updateQuotesInList(prevList) || prevList);
+    setRenderedPreviewCount(prev => prev + 1);
+    setToastMessage(`✨ ${newQuotes.length} frases próprias salvas e aplicadas a todas as páginas!`);
+  };
+
+  const applyQuotesCategoryToProject = (cat: QuoteCategory) => {
+    pushHistory();
+    const updateCategoryInList = (list?: LayoutElement[]) => list?.map(el => {
+      if (el.type === 'quote') {
+        return {
+          ...el,
+          style: {
+            ...el.style,
+            quoteCategory: cat,
+            quoteDisplayMode: (el.style?.quoteDisplayMode === 'fixed' ? 'fixed' : 'daily_rotating') as ('fixed' | 'daily_rotating')
+          }
+        };
+      }
+      return el;
+    });
+
+    setConfig(prev => ({
+      ...prev,
+      quoteCategory: cat,
+      quoteCustomList: cat === 'custom' ? (prev.quoteCustomList || customQuotes) : prev.quoteCustomList,
+      includeQuotes: true,
+      elements: updateCategoryInList(prev.elements) || prev.elements,
+      elementsVerso: updateCategoryInList(prev.elementsVerso),
+      elementsTop: updateCategoryInList(prev.elementsTop),
+      elementsBottom: updateCategoryInList(prev.elementsBottom),
+      elementsSaturday: updateCategoryInList(prev.elementsSaturday),
+      elementsSunday: updateCategoryInList(prev.elementsSunday),
+      elementsWeeklyLeft: updateCategoryInList(prev.elementsWeeklyLeft),
+      elementsWeeklyRight: updateCategoryInList(prev.elementsWeeklyRight),
+      elementsWeeklyVersoLeft: updateCategoryInList(prev.elementsWeeklyVersoLeft),
+      elementsWeeklyVersoRight: updateCategoryInList(prev.elementsWeeklyVersoRight),
+      introPages: prev.introPages.map(page => ({
+        ...page,
+        elements: updateCategoryInList(page.elements) || page.elements
+      })),
+      monthlyIntroPages: prev.monthlyIntroPages?.map(page => ({
+        ...page,
+        elements: updateCategoryInList(page.elements) || page.elements
+      })),
+      monthlyDividerStyle: prev.monthlyDividerStyle ? {
+        ...prev.monthlyDividerStyle,
+        elements: updateCategoryInList(prev.monthlyDividerStyle.elements),
+        versoElements: updateCategoryInList(prev.monthlyDividerStyle.versoElements)
+      } : undefined
+    }));
+
+    updateActiveElements(prevList => updateCategoryInList(prevList) || prevList);
+    setRenderedPreviewCount(prev => prev + 1);
+    const catName = cat === 'custom' ? 'Frases Próprias' : (QUOTE_CATEGORIES_METADATA.find(c => c.id === cat)?.name || cat);
+    setToastMessage(`✓ Tema de frases ativado: ${catName}!`);
+  };
+
   const clearCustomQuotes = () => {
     if (confirm('Deseja excluir todas as suas frases motivacionais personalizadas e voltar às frases padrões do sistema?')) {
+      pushHistory();
       setCustomQuotes([]);
-      localStorage.removeItem('agendamaster_custom_quotes');
+      try {
+        localStorage.removeItem('agendamaster_custom_quotes');
+      } catch (_) {}
+
+      const revertQuotesInList = (list?: LayoutElement[]) => list?.map(el => {
+        if (el.type === 'quote' && el.style?.quoteCategory === 'custom') {
+          return {
+            ...el,
+            style: {
+              ...el.style,
+              quoteCategory: 'feminine_strength' as QuoteCategory
+            }
+          };
+        }
+        return el;
+      });
+
+      setConfig(prev => ({
+        ...prev,
+        quoteCategory: prev.quoteCategory === 'custom' ? 'feminine_strength' : prev.quoteCategory,
+        quoteCustomList: undefined,
+        elements: revertQuotesInList(prev.elements) || prev.elements,
+        elementsVerso: revertQuotesInList(prev.elementsVerso),
+        elementsTop: revertQuotesInList(prev.elementsTop),
+        elementsBottom: revertQuotesInList(prev.elementsBottom),
+        elementsSaturday: revertQuotesInList(prev.elementsSaturday),
+        elementsSunday: revertQuotesInList(prev.elementsSunday),
+        elementsWeeklyLeft: revertQuotesInList(prev.elementsWeeklyLeft),
+        elementsWeeklyRight: revertQuotesInList(prev.elementsWeeklyRight),
+        elementsWeeklyVersoLeft: revertQuotesInList(prev.elementsWeeklyVersoLeft),
+        elementsWeeklyVersoRight: revertQuotesInList(prev.elementsWeeklyVersoRight),
+        introPages: prev.introPages.map(page => ({
+          ...page,
+          elements: revertQuotesInList(page.elements) || page.elements
+        })),
+        monthlyIntroPages: prev.monthlyIntroPages?.map(page => ({
+          ...page,
+          elements: revertQuotesInList(page.elements) || page.elements
+        })),
+        monthlyDividerStyle: prev.monthlyDividerStyle ? {
+          ...prev.monthlyDividerStyle,
+          elements: revertQuotesInList(prev.monthlyDividerStyle.elements),
+          versoElements: revertQuotesInList(prev.monthlyDividerStyle.versoElements)
+        } : undefined
+      }));
+
+      updateActiveElements(prevList => revertQuotesInList(prevList) || prevList);
       setRenderedPreviewCount(prev => prev + 1);
-      alert('Frases motivacionais personalizadas excluídas com sucesso. O sistema voltou às frases padrões.');
+      setToastMessage('Frases personalizadas removidas. O projeto voltou às frases padrão.');
     }
   };
 
@@ -2202,22 +2388,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       .split(/\r?\n/)
       .map(line => {
         let clean = line.trim();
-        if (clean.startsWith('"') && clean.endsWith('"')) {
-          clean = clean.slice(1, -1);
+        clean = clean.replace(/^\d+[\.\-\)\t]\s*/, '');
+        if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith('“') && clean.endsWith('”')) || (clean.startsWith('\'') && clean.endsWith('\''))) {
+          clean = clean.slice(1, -1).trim();
         }
-        return clean.replace(/\t/g, ' - ');
+        clean = clean.replace(/""/g, '"');
+        return clean.replace(/\t/g, ' - ').trim();
       })
-      .filter(Boolean);
+      .filter(l => l.length >= 2);
       
     if (lines.length === 0) {
       alert('Nenhuma frase válida encontrada.');
       return;
     }
 
-    setCustomQuotes(lines);
-    localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(lines));
-    setRenderedPreviewCount(prev => prev + 1);
-    alert(`${lines.length} frase(s) motivacional(is) salvas com sucesso!`);
+    applyCustomQuotesToProject(lines);
   };
 
   const handleInsertQuoteElement = (options: {
@@ -2245,6 +2430,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         case 'gratitude_mindfulness': return 'Frase: Gratidão & Calma';
         case 'entrepreneurship_creativity': return 'Frase: Ateliê & Criação';
         case 'success_habits': return 'Frase: Hábitos & Sucesso';
+        case 'custom': return 'Frase: Minhas Frases';
         default: return 'Frase Motivacional';
       }
     };
@@ -2275,10 +2461,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
     };
 
-    setConfig(prev => ({
-      ...prev,
-      includeQuotes: true
-    }));
+    setConfig(prev => {
+      const isCustomCat = options.category === 'custom';
+      const nextState: AgendaConfig = {
+        ...prev,
+        includeQuotes: true,
+        quoteCategory: isCustomCat ? 'custom' : (prev.quoteCategory || options.category),
+        quoteCustomList: isCustomCat ? (prev.quoteCustomList || customQuotes) : prev.quoteCustomList
+      };
+
+      if (prev.layoutType === '2_per_page' && (editorViewMode === 'standard' || editorViewMode === 'top')) {
+        if (prev.elementsBottom && prev.elementsBottom.length > 0 && !prev.elementsBottom.some(e => e.type === 'quote')) {
+          const bottomCopy: LayoutElement = {
+            ...newElement,
+            id: `quote_btm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+          };
+          nextState.elementsBottom = [...prev.elementsBottom, bottomCopy];
+        }
+      }
+
+      return nextState;
+    });
     updateActiveElements(prevList => [...prevList, newElement]);
     setSelectedIds([newElement.id]);
     setShowProperties(true);
@@ -3048,8 +3251,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               if (editorViewMode === 'sunday') return config.elementsSunday || config.elements;
           }
           if (config.layoutType === '2_per_page') {
-              if (editorViewMode === 'top') return config.elementsTop || config.elements;
-              if (editorViewMode === 'bottom') return config.elementsBottom || config.elements;
+              if (editorViewMode === 'bottom') return (config.elementsBottom && config.elementsBottom.length > 0) ? config.elementsBottom : config.elements;
+              return (config.elementsTop && config.elementsTop.length > 0) ? config.elementsTop : config.elements;
+          }
+
+          if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal' || config.projectType === 'planner' || config.layoutType.startsWith('weekly')) {
+              return config.elements;
           }
 
           const filtered = config.elements.filter(el => el.type !== 'planner_day_box');
@@ -3208,14 +3415,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               }
           }
           if (config.layoutType === '2_per_page') {
-              if (editorViewMode === 'top') {
-                  setter(prev => ({ ...prev, elementsTop: getNew(prev.elementsTop || prev.elements) }));
-                  return;
-              }
               if (editorViewMode === 'bottom') {
                   setter(prev => ({ ...prev, elementsBottom: getNew(prev.elementsBottom || prev.elements) }));
                   return;
               }
+              setter(prev => ({
+                  ...prev,
+                  elementsTop: getNew(prev.elementsTop || prev.elements),
+                  elements: getNew(prev.elementsTop || prev.elements)
+              }));
+              return;
           }
           setter(prev => ({ ...prev, elements: getNew(prev.elements) }));
       } else if (editMode === 'intro') {
@@ -4090,8 +4299,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               elementsVerso: isBlank ? [] : (resolved.elementsVerso !== undefined ? resolved.elementsVerso : prev.elementsVerso),
               elementsSaturday: isBlank ? [] : (resolved.elementsSaturday !== undefined ? resolved.elementsSaturday : prev.elementsSaturday),
               elementsSunday: isBlank ? [] : (resolved.elementsSunday !== undefined ? resolved.elementsSunday : prev.elementsSunday),
-              elementsTop: isBlank ? [] : (resolved.elementsTop !== undefined ? resolved.elementsTop : prev.elementsTop),
-              elementsBottom: isBlank ? [] : (resolved.elementsBottom !== undefined ? resolved.elementsBottom : prev.elementsBottom),
+              elementsTop: isBlank ? [] : (resolved.elementsTop !== undefined ? resolved.elementsTop : (prev.layoutType === '2_per_page' && resolved.elements ? resolved.elements : prev.elementsTop)),
+              elementsBottom: isBlank ? [] : (resolved.elementsBottom !== undefined ? resolved.elementsBottom : (prev.layoutType === '2_per_page' && resolved.elements ? resolved.elements : prev.elementsBottom)),
               elementsWeeklyLeft: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (isTargetWeekly ? (resolved.elementsWeeklyLeft || []) : undefined),
               elementsWeeklyRight: isBlank ? (prev.layoutType?.startsWith('weekly') ? [] : undefined) : (isTargetWeekly ? (resolved.elementsWeeklyRight || []) : undefined),
           }));
@@ -4131,13 +4340,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           return;
       }
 
-      setConfig(prev => ({
-          ...prev,
-          ...resolved,
-          elementsWeeklyLeft: resolved.layoutType?.startsWith('weekly') ? (resolved.elementsWeeklyLeft || []) : undefined,
-          elementsWeeklyRight: resolved.layoutType?.startsWith('weekly') ? (resolved.elementsWeeklyRight || []) : undefined,
-          year: prev.year,
-      }));
+      setConfig(prev => {
+          const isTargetTwoPerPage = (resolved.layoutType || prev.layoutType) === '2_per_page';
+          const resolvedTop = isTargetTwoPerPage ? (resolved.elementsTop || resolved.elements || prev.elementsTop) : resolved.elementsTop;
+          const resolvedBottom = isTargetTwoPerPage ? (resolved.elementsBottom || resolved.elements || prev.elementsBottom) : resolved.elementsBottom;
+          return {
+              ...prev,
+              ...resolved,
+              elementsTop: resolvedTop !== undefined ? resolvedTop : prev.elementsTop,
+              elementsBottom: resolvedBottom !== undefined ? resolvedBottom : prev.elementsBottom,
+              elementsWeeklyLeft: resolved.layoutType?.startsWith('weekly') ? (resolved.elementsWeeklyLeft || []) : undefined,
+              elementsWeeklyRight: resolved.layoutType?.startsWith('weekly') ? (resolved.elementsWeeklyRight || []) : undefined,
+              year: prev.year,
+          };
+      });
       setEditMode('daily');
       setEditorViewMode('standard');
       if (resolved.introPages && resolved.introPages.length > 0) {
@@ -4481,6 +4697,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       case 'miolo_default':
       case 'miolo_left':
       case 'miolo_right': {
+        const isTwoPageWeekly = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
+        const isOnePageWeekly = config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal';
+        const isWeeklyLayout = isTwoPageWeekly || isOnePageWeekly || config.layoutType?.startsWith('weekly') || config.projectType === 'planner';
+
         if (metadata.batchPages && metadata.batchPages.length > 1) {
           let frontElements: LayoutElement[] | undefined = undefined;
           let frontBg: BackgroundConfig | undefined = undefined;
@@ -4530,6 +4750,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
             currentRules.miolo = miolo;
 
+            if (isTwoPageWeekly) {
+              return {
+                ...prev,
+                ...dimensionUpdates,
+                customVerso: prev.customVerso,
+                elements: versoElements !== undefined ? versoElements : (frontElements !== undefined ? frontElements : prev.elements),
+                elementsWeeklyLeft: versoElements !== undefined ? versoElements : prev.elementsWeeklyLeft,
+                elementsWeeklyRight: frontElements !== undefined ? frontElements : prev.elementsWeeklyRight,
+                backgroundRules: currentRules
+              };
+            }
+
             return {
               ...prev,
               ...dimensionUpdates,
@@ -4543,9 +4775,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           });
 
           setEditMode('daily');
-          setEditorViewMode('standard');
+          setEditorViewMode(isWeeklyLayout ? 'weekly_left' : 'standard');
           setActiveTab('editor');
-          setToastMessage(`Miolo Frente e Verso importados com sucesso do PDF!${dimensionNote}`);
+          setToastMessage(isWeeklyLayout 
+            ? `Planner semanal (Página Esquerda e Direita) importado com sucesso do PDF!${dimensionNote}`
+            : `Miolo Frente e Verso importados com sucesso do PDF!${dimensionNote}`
+          );
           break;
         }
 
@@ -4562,6 +4797,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
             currentRules.miolo = miolo;
 
+            if (isTwoPageWeekly) {
+              const targetSide = editorViewMode === 'weekly_right' ? 'right' : 'left';
+              return {
+                ...prev,
+                ...dimensionUpdates,
+                elements: processedElements,
+                elementsWeeklyLeft: targetSide === 'left' ? processedElements : prev.elementsWeeklyLeft,
+                elementsWeeklyRight: targetSide === 'right' ? processedElements : prev.elementsWeeklyRight,
+                background: newBgConfig || (metadata.clearBackground ? undefined : prev.background),
+                backgroundRules: currentRules
+              };
+            }
+
+            if (isOnePageWeekly) {
+              return {
+                ...prev,
+                ...dimensionUpdates,
+                elements: processedElements,
+                elementsWeeklyLeft: undefined,
+                elementsWeeklyRight: undefined,
+                background: newBgConfig || (metadata.clearBackground ? undefined : prev.background),
+                backgroundRules: currentRules
+              };
+            }
+
             return {
               ...prev,
               ...dimensionUpdates,
@@ -4571,10 +4831,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             };
           });
           setEditMode('daily');
-          setEditorViewMode('standard');
+          if (isTwoPageWeekly) {
+            setEditorViewMode(editorViewMode === 'weekly_right' ? 'weekly_right' : 'weekly_left');
+          } else {
+            setEditorViewMode('standard');
+          }
           setSelectedIds(processedElements.map(e => e.id));
           setActiveTab('editor');
-          setToastMessage(`Layout do Miolo Diário atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+          setToastMessage(isTwoPageWeekly 
+            ? `Página ${editorViewMode === 'weekly_right' ? 'Direita' : 'Esquerda'} do Planner atualizada com ${processedElements.length} elementos editáveis!${dimensionNote}`
+            : `Layout do Miolo Diário atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`
+          );
         } else if (destination === 'miolo_left') {
           setConfig(prev => {
             const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
@@ -4586,20 +4853,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
             currentRules.miolo = miolo;
 
+            if (isTwoPageWeekly) {
+              return {
+                ...prev,
+                ...dimensionUpdates,
+                elements: processedElements,
+                elementsWeeklyLeft: processedElements,
+                backgroundRules: currentRules
+              };
+            }
+
             return {
               ...prev,
               ...dimensionUpdates,
-              customVerso: true,
-              elementsVerso: processedElements,
+              customVerso: isWeeklyLayout ? prev.customVerso : true,
+              elements: isWeeklyLayout ? processedElements : prev.elements,
+              elementsVerso: isWeeklyLayout ? prev.elementsVerso : processedElements,
               elementsWeeklyLeft: processedElements,
               backgroundRules: currentRules
             };
           });
           setEditMode('daily');
-          setEditorViewMode(isWeekly ? 'weekly_left' : 'verso');
+          setEditorViewMode(isWeeklyLayout ? 'weekly_left' : 'verso');
           setSelectedIds(processedElements.map(e => e.id));
           setActiveTab('editor');
-          setToastMessage(`Layout do Miolo (Verso / Página Esquerda) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+          setToastMessage(isWeeklyLayout 
+            ? `Página Esquerda do Planner atualizada com ${processedElements.length} elementos editáveis!${dimensionNote}`
+            : `Layout do Miolo (Verso / Página Esquerda) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`
+          );
         } else {
           setConfig(prev => {
             const currentRules = prev.backgroundRules ? { ...prev.backgroundRules } : {};
@@ -4620,10 +4901,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             };
           });
           setEditMode('daily');
-          setEditorViewMode(isWeekly ? 'weekly_right' : 'standard');
+          setEditorViewMode(isWeeklyLayout ? 'weekly_right' : 'standard');
           setSelectedIds(processedElements.map(e => e.id));
           setActiveTab('editor');
-          setToastMessage(`Layout do Miolo (Frente / Página Direita) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`);
+          setToastMessage(isWeeklyLayout
+            ? `Página Direita do Planner atualizada com ${processedElements.length} elementos editáveis!${dimensionNote}`
+            : `Layout do Miolo (Frente / Página Direita) atualizado com ${processedElements.length} elementos editáveis!${dimensionNote}`
+          );
         }
         break;
       }
@@ -5775,8 +6059,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const isDayNumber = type === 'day_number' || isDatePlaceholderNumber;
     const isDayName = type === 'day_name' || isDatePlaceholderName;
     const isDayBox = type === 'planner_day_box';
+    const isHoliday = type === 'holiday';
 
-    if ((isDayNumber || isDayName || isDayBox) && styleOverride.dayIndex === undefined) {
+    if ((isDayNumber || isDayName || isDayBox || isHoliday) && styleOverride.dayIndex === undefined) {
         if (config.layoutType.startsWith('weekly')) {
             const isRight = editorViewMode === 'weekly_right';
             const startDay = config.startOfWeekDay ?? 1;
@@ -5809,6 +6094,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     .map(el => el.style.plannerDayBox?.dayIndex ?? el.style.dayIndex)
                     .filter((idx): idx is number => idx !== undefined)
             );
+            const existingHolidayDays = new Set(
+                activeList
+                    .filter(el => el.type === 'holiday')
+                    .map(el => el.style.dayIndex)
+                    .filter((idx): idx is number => idx !== undefined)
+            );
 
             let chosenDay: number;
             if (isDayNumber) {
@@ -5831,6 +6122,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     const unused = pageDays.find(d => !existingNameDays.has(d));
                     chosenDay = unused !== undefined ? unused : pageDays[existingNameDays.size % pageDays.length];
                 }
+            } else if (isHoliday) {
+                const candidate = pageDays.find(d => existingNumberDays.has(d) && !existingHolidayDays.has(d));
+                chosenDay = candidate !== undefined ? candidate : (pageDays.find(d => !existingHolidayDays.has(d)) ?? pageDays[existingHolidayDays.size % pageDays.length]);
             } else {
                 const unused = pageDays.find(d => !existingBoxDays.has(d));
                 chosenDay = unused !== undefined ? unused : pageDays[existingBoxDays.size % pageDays.length];
@@ -6453,7 +6747,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const cloned: LayoutElement = JSON.parse(JSON.stringify(element));
 
         // Se for elemento de data em layout semanal, avançar para o próximo dia na sequência
-        const isDateElem = ['day_number', 'day_name', 'planner_day_box'].includes(element.type) ||
+        const isDateElem = ['day_number', 'day_name', 'planner_day_box', 'holiday'].includes(element.type) ||
                            (element.type === 'date_placeholder' && ['day_number', 'day_name'].includes(element.style.variant || 'day_number'));
         
         if (isDateElem && config.layoutType.startsWith('weekly')) {
@@ -7470,12 +7764,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }));
     }
 
-    if (isTwoPerPage && (!config.elementsTop || config.elementsTop.length === 0 || !config.elementsBottom || config.elementsBottom.length === 0)) {
-        setConfig(prev => ({
-            ...prev,
-            elementsTop: (prev.elementsTop && prev.elementsTop.length > 0) ? prev.elementsTop : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-            elementsBottom: (prev.elementsBottom && prev.elementsBottom.length > 0) ? prev.elementsBottom : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
-        }));
+    if (isTwoPerPage) {
+        const needsInit = !config.elementsTop || config.elementsTop.length === 0 || !config.elementsBottom || config.elementsBottom.length === 0;
+        const hasLegacyBarebones = Boolean(config.elementsTop && config.elementsTop.length <= 9 && !config.elementsTop.some(el => el.type === 'mini_calendar' || el.type === 'footer_tracker' || el.type === 'quote'));
+        
+        if (needsInit || hasLegacyBarebones) {
+            const topTemplate = config.isPermanent ? PERMANENT_2DPP_TOP : STANDARD_HALF_PAGE_TOP_ELEMENTS;
+            const botTemplate = config.isPermanent ? PERMANENT_2DPP_BOTTOM : STANDARD_HALF_PAGE_BOTTOM_ELEMENTS;
+            setConfig(prev => {
+                const newTop = (prev.elementsTop && prev.elementsTop.length > 9 && !hasLegacyBarebones)
+                    ? prev.elementsTop
+                    : topTemplate.map(el => cloneElementWithNewId(el, prev.year));
+                const newBot = (prev.elementsBottom && prev.elementsBottom.length > 7 && !hasLegacyBarebones)
+                    ? prev.elementsBottom
+                    : botTemplate.map(el => cloneElementWithNewId(el, prev.year));
+                return {
+                    ...prev,
+                    elementsTop: newTop,
+                    elementsBottom: newBot,
+                    elements: (prev.elements && prev.elements.length > 9 && !hasLegacyBarebones) ? prev.elements : newTop
+                };
+            });
+        }
     }
 
     if (isSharedWeekend && (!config.elementsSaturday || config.elementsSaturday.length === 0 || !config.elementsSunday || config.elementsSunday.length === 0)) {
@@ -7486,6 +7796,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }));
     }
   }, [config.layoutType]);
+
+  // Copiar o layout inferior no layout superior (e vice-versa) para 2DPP e Fim de Semana Dividido
+  const copy2DppBottomToTop = useCallback(() => {
+    pushHistory();
+    const source = (config.elementsBottom && config.elementsBottom.length > 0) ? config.elementsBottom : config.elements;
+    const cloned = source.map(el => cloneElementWithNewId(el, config.year));
+    setConfig(prev => ({
+      ...prev,
+      elementsTop: cloned,
+      elements: cloned
+    }));
+    setSelectedIds([]);
+    setToastMessage("Layout da Parte Inferior copiado para a Parte Superior!");
+  }, [config.elementsBottom, config.elements, config.year, pushHistory]);
+
+  const copy2DppTopToBottom = useCallback(() => {
+    pushHistory();
+    const source = (config.elementsTop && config.elementsTop.length > 0) ? config.elementsTop : config.elements;
+    const cloned = source.map(el => cloneElementWithNewId(el, config.year));
+    setConfig(prev => ({
+      ...prev,
+      elementsBottom: cloned
+    }));
+    setSelectedIds([]);
+    setToastMessage("Layout da Parte Superior copiado para a Parte Inferior!");
+  }, [config.elementsTop, config.elements, config.year, pushHistory]);
+
+  const copyWeekendBottomToTop = useCallback(() => {
+    pushHistory();
+    const source = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+    const cloned = source.map(el => cloneElementWithNewId(el, config.year));
+    setConfig(prev => ({
+      ...prev,
+      elementsSaturday: cloned
+    }));
+    setSelectedIds([]);
+    setToastMessage("Layout inferior (Domingo) copiado para o layout superior (Sábado)!");
+  }, [config.elementsSunday, config.elements, config.year, pushHistory]);
+
+  const copyWeekendTopToBottom = useCallback(() => {
+    pushHistory();
+    const source = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+    const cloned = source.map(el => cloneElementWithNewId(el, config.year));
+    setConfig(prev => ({
+      ...prev,
+      elementsSunday: cloned
+    }));
+    setSelectedIds([]);
+    setToastMessage("Layout superior (Sábado) copiado para o layout inferior (Domingo)!");
+  }, [config.elementsSaturday, config.elements, config.year, pushHistory]);
 
   const startMarqueeSelection = useCallback((e: React.MouseEvent | MouseEvent) => {
     // Apenas botão esquerdo
@@ -8770,12 +9130,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const year = config.year || new Date().getFullYear();
     const month = config.startMonth ?? 0;
     const date = new Date(year, month, 1 + offset);
+    const holidayFound = checkIsHoliday(date.getFullYear(), date.getMonth(), date.getDate(), config.municipalHolidays);
+    const holidayText = (offset === 0 && !holidayFound) ? 'Confraternização Universal' : holidayFound;
     const baseDay: DayData = {
       dayOfMonth: date.getDate(),
       month: date.getMonth(),
       year: date.getFullYear(),
       dayOfWeek: date.getDay(),
-      holiday: checkIsHoliday(date.getFullYear(), date.getMonth(), date.getDate(), config.municipalHolidays),
+      holiday: holidayText,
       moonPhase: 'Lua nova',
       date
     };
@@ -8783,6 +9145,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       ? enrichDayDataWithSpecialDates(baseDay, config.specialDates)
       : baseDay;
   }, [config.isPermanent, config.year, config.startMonth, config.municipalHolidays, config.specialDates]);
+
+  const getProjectFirstWeek = useCallback((weekOffset: number = 0): DayData[] => {
+    // 1. Se os dados reais do projeto já estiverem gerados, usar a primeira semana real do projeto (início no Dia 01)
+    if (generatedData && generatedData.length >= (weekOffset + 1) * 7) {
+      const sliceStart = weekOffset * 7;
+      return generatedData.slice(sliceStart, sliceStart + 7);
+    }
+
+    // 2. Se ainda não foram gerados no state, gerar a semana inicial real de acordo com as regras do planner
+    const year = config.year || new Date().getFullYear();
+    const startMonth = config.startMonth ?? 0;
+    const startOfWeekDay = config.startOfWeekDay ?? 1;
+
+    const rawDays = generatePlannerDays(
+      year,
+      config.includeHolidays !== false,
+      config.municipalHolidays || [],
+      startMonth,
+      1,
+      config.weeklyStartMode ?? 'full_week',
+      startOfWeekDay,
+      config.showPaddingDaysNumbers !== false
+    );
+
+    const sliceStart = weekOffset * 7;
+    const weekSlice = rawDays.slice(sliceStart, sliceStart + 7);
+    if (weekSlice.length === 7) {
+      return (config.specialDates && config.specialDates.length > 0)
+        ? weekSlice.map(d => enrichDayDataWithSpecialDates(d, config.specialDates))
+        : weekSlice;
+    }
+
+    // 3. Fallback determinístico garantindo o Dia 01, dias do mês anterior e feriado
+    const firstDayOfMonth = new Date(year, startMonth, 1);
+    const startDiff = (firstDayOfMonth.getDay() - startOfWeekDay + 7) % 7;
+    const weekStartDate = new Date(year, startMonth, 1 - startDiff + (weekOffset * 7));
+
+    const fallbackWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStartDate);
+      d.setDate(weekStartDate.getDate() + i);
+      const isPadding = d.getMonth() !== startMonth || d.getFullYear() !== year;
+      const isStrict = config.weeklyStartMode === 'strict_first_day';
+      const dayNum = isPadding ? (isStrict ? 0 : ((config.showPaddingDaysNumbers !== false) ? d.getDate() : 0)) : d.getDate();
+      const holiday = checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays);
+      
+      const base: DayData = {
+        dayOfMonth: dayNum,
+        month: startMonth,
+        year: year,
+        dayOfWeek: d.getDay(),
+        holiday: (d.getDate() === 1 && d.getMonth() === startMonth) ? (holiday || 'Confraternização Universal') : holiday,
+        moonPhase: 'Lua nova',
+        date: d,
+        isPaddingDay: isPadding
+      };
+      return config.specialDates && config.specialDates.length > 0
+        ? enrichDayDataWithSpecialDates(base, config.specialDates)
+        : base;
+    });
+
+    return fallbackWeek;
+  }, [generatedData, config.year, config.startMonth, config.startOfWeekDay, config.includeHolidays, config.municipalHolidays, config.weeklyStartMode, config.showPaddingDaysNumbers, config.specialDates]);
 
   const renderTemplate = (
     elements: LayoutElement[], 
@@ -8856,6 +9280,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         };
     });
 
+    const isNotebookOrDevotional = config.projectType === 'notebook' || config.layoutType === 'notebook' || config.projectType === 'devotional';
+
     const getDayOfYear = (date: Date) => {
         const start = new Date(date.getFullYear(), 0, 0);
         const diff = date.getTime() - start.getTime();
@@ -8864,9 +9290,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     };
     
     const dayOfYear = d.date ? getDayOfYear(new Date(d.date)) : 0;
-    const currentVerse = getVerseForDay(dayOfYear);
+    
+    // Para cadernos, blocos ou projetos onde a rotação deve avançar página a página
+    const quoteIndex = isNotebookOrDevotional
+        ? (pageNumber !== undefined && pageNumber > 0 ? (pageNumber - 1) : (d.dayOfMonth && d.dayOfMonth > 0 ? d.dayOfMonth - 1 : dayOfYear))
+        : (pageNumber !== undefined && (config.isPermanent || !d.date) ? (pageNumber - 1) : dayOfYear);
+
+    const currentVerse = getVerseForDay(quoteIndex);
     const defaultQuote = getQuoteForDay(
-        dayOfYear,
+        quoteIndex,
         d.month,
         config.quoteCategory || 'all',
         config.quoteCustomList || customQuotes
@@ -8966,7 +9398,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               : (el.content && el.style?.quoteDisplayMode === 'fixed')
               ? el.content
               : getQuoteForDay(
-                  dayOfYear,
+                  quoteIndex,
                   d.month,
                   el.style?.quoteCategory || config.quoteCategory || 'all',
                   config.quoteCustomList || customQuotes
@@ -9630,36 +10062,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const mockDay1: DayData = getProjectFirstDay(0);
         const mockDay2: DayData = getProjectFirstDay(1);
 
-        if (editorViewMode === 'standard') {
-            return wrapWithRuler(
-                <div className={containerClass} style={containerStyle}>
-                    {renderBackgroundsForPage('daily', editorPageNum)}
-                    <div className={`${usefulAreaClass} flex flex-col`}>
-                        <div className="flex-1 border-b border-dashed border-indigo-200 relative overflow-visible">
-                            {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockDay1, isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
-                        </div>
-                        <div className="flex-1 relative overflow-visible">
-                            {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockDay2, isInteractiveInEditor, false, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'standard')}
-                        </div>
-                    </div>
-                </div>
-            );
-        }
+        const elementsTop = (config.elementsTop && config.elementsTop.length > 0) ? config.elementsTop : config.elements;
+        const elementsBottom = (config.elementsBottom && config.elementsBottom.length > 0) ? config.elementsBottom : config.elements;
 
-        const elementsTop = config.elementsTop || config.elements;
-        const elementsBottom = config.elementsBottom || config.elements;
+        const isViewingTop = editorViewMode === 'top';
+        const isViewingBottom = editorViewMode === 'bottom';
+        const isViewingStandard = editorViewMode === 'standard';
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={`${usefulAreaClass} flex flex-col`}>
-                    <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${editorViewMode === 'bottom' ? 'opacity-40 bg-gray-50' : ''}`}>
-                        {renderTemplate(elementsTop, mockDay1, true, editorViewMode === 'top', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'top')}
-                        {editorViewMode === 'bottom' && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('top')} />}
+                    <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${isViewingBottom ? 'opacity-40 bg-gray-50' : ''}`}>
+                        {renderTemplate(
+                            shouldMirrorInEditor ? getMirroredElements(elementsTop) : elementsTop,
+                            mockDay1,
+                            isInteractiveInEditor && (isViewingTop || isViewingStandard),
+                            isViewingTop || isViewingStandard,
+                            undefined,
+                            EDITOR_WIDTH_PX,
+                            EDITOR_HEIGHT_PX / 2,
+                            'top'
+                        )}
+                        {isViewingBottom && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('top')} />}
                     </div>
-                    <div className={`flex-1 relative overflow-visible ${editorViewMode === 'top' ? 'opacity-40 bg-gray-50' : ''}`}>
-                        {renderTemplate(elementsBottom, mockDay2, true, editorViewMode === 'bottom', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'bottom')}
-                        {editorViewMode === 'top' && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('bottom')} />}
+                    <div className={`flex-1 relative overflow-visible ${isViewingTop ? 'opacity-40 bg-gray-50' : ''}`}>
+                        {renderTemplate(
+                            shouldMirrorInEditor ? getMirroredElements(elementsBottom) : elementsBottom,
+                            mockDay2,
+                            isInteractiveInEditor && (isViewingBottom || isViewingStandard),
+                            isViewingBottom,
+                            undefined,
+                            EDITOR_WIDTH_PX,
+                            EDITOR_HEIGHT_PX / 2,
+                            'bottom'
+                        )}
+                        {isViewingTop && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('bottom')} />}
                     </div>
                 </div>
             </div>
@@ -9726,30 +10164,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
-        const startYear = config.year;
-        const startMonth = config.startMonth ?? 0;
-        const startOfWeek = config.startOfWeekDay ?? 1;
-
-        // No editor (design de layout), usamos uma semana de amostra 100% preenchida no meio do mês
-        // para que todos os dias da semana (Segunda a Domingo) tenham números reais (ex: 12 a 18) e nunca fiquem em branco
-        const midMonthRef = new Date(startYear, startMonth, 12);
-        const midDiff = (midMonthRef.getDay() - startOfWeek + 7) % 7;
-        const sampleWeekStart = new Date(startYear, startMonth, 12 - midDiff);
-
-        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(sampleWeekStart);
-            d.setDate(sampleWeekStart.getDate() + i);
-            return {
-                dayOfMonth: d.getDate(),
-                month: startMonth,
-                year: startYear,
-                dayOfWeek: d.getDay(),
-                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
-                moonPhase: 'Lua nova',
-                date: d,
-                isPaddingDay: false
-            };
-        });
+        const mockWeek: DayData[] = getProjectFirstWeek(0);
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
@@ -9762,42 +10177,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
-        const startYear = config.year;
-        const startMonth = config.startMonth ?? 0;
-        const startOfWeek = config.startOfWeekDay ?? 1;
-
         const isVersoSpread = config.customVerso && (
             editorViewMode === 'weekly_verso_left' || 
             editorViewMode === 'weekly_verso_right' || 
             editorViewMode === 'verso'
         );
 
-        // No editor (design de layout), usamos uma semana de amostra 100% preenchida no meio do mês
-        // para que todos os dias da semana (Segunda a Domingo) tenham números reais (ex: 12 a 18) e nunca fiquem em branco
-        const midMonthRef = new Date(startYear, startMonth, 12);
-        const midDiff = (midMonthRef.getDay() - startOfWeek + 7) % 7;
-        let sampleWeekStart = new Date(startYear, startMonth, 12 - midDiff);
-
-        // Se estiver visualizando o Verso da semana e avança sequência:
-        if (isVersoSpread && config.versoAdvancesSequence !== false) {
-            sampleWeekStart = new Date(sampleWeekStart);
-            sampleWeekStart.setDate(sampleWeekStart.getDate() + 7);
-        }
-
-        const mockWeek: DayData[] = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(sampleWeekStart);
-            d.setDate(sampleWeekStart.getDate() + i);
-            return {
-                dayOfMonth: d.getDate(),
-                month: startMonth,
-                year: startYear,
-                dayOfWeek: d.getDay(),
-                holiday: checkIsHoliday(d.getFullYear(), d.getMonth(), d.getDate(), config.municipalHolidays),
-                moonPhase: 'Lua nova',
-                date: d,
-                isPaddingDay: false
-            };
-        });
+        const weekOffset = (isVersoSpread && config.versoAdvancesSequence !== false) ? 1 : 0;
+        const mockWeek: DayData[] = getProjectFirstWeek(weekOffset);
 
         const elementsLeft = isVersoSpread
             ? (config.elementsWeeklyVersoLeft ?? (config.elementsWeeklyLeft ?? config.elements))
@@ -11759,7 +12146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                       <div className="flex-1 flex items-center justify-center p-6 bg-slate-950/40 relative overflow-hidden">
                                           {currentPageNode ? (
                                               <div 
-                                                  className="relative shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] border border-white/15 rounded-lg overflow-hidden bg-white transition-all duration-300"
+                                                  className="relative shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] border border-white/15 rounded-lg overflow-hidden bg-white transition-shadow duration-150"
                                                   style={{
                                                       width: `${PAGE_WIDTH_MM * 1.6}px`,
                                                       height: `${PAGE_HEIGHT_MM * 1.6}px`,
@@ -12530,21 +12917,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         onClose={() => setQuotesModalOpen(false)}
         currentCategory={config.quoteCategory || 'feminine_strength'}
         initialTab={quotesModalInitialTab}
-        onSetProjectCategory={(cat) => {
-          pushHistory();
-          setConfig(prev => ({ ...prev, quoteCategory: cat }));
-          setRenderedPreviewCount(prev => prev + 1);
-        }}
+        onSetProjectCategory={applyQuotesCategoryToProject}
         onInsertQuoteElement={(options) => handleInsertQuoteElement(options)}
         customQuotes={customQuotes}
-        onSaveCustomQuotes={(newQuotes) => {
-          pushHistory();
-          setCustomQuotes(newQuotes);
-          localStorage.setItem('agendamaster_custom_quotes', JSON.stringify(newQuotes));
-          setConfig(prev => ({ ...prev, quoteCustomList: newQuotes }));
-          setRenderedPreviewCount(prev => prev + 1);
-          setToastMessage(`${newQuotes.length} frases motivacionais salvas com sucesso!`);
-        }}
+        onSaveCustomQuotes={applyCustomQuotesToProject}
         onClearCustomQuotes={clearCustomQuotes}
       />
 
@@ -12584,6 +12960,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           currentPageTitle={currentPageTitle}
           initialFile={pdfImportInitialFile}
           initialDestination={pdfImportInitialDestination}
+          projectType={config.projectType}
+          layoutType={config.layoutType}
+          isWeekly={config.layoutType?.startsWith('weekly') || config.projectType === 'planner'}
+          currentViewMode={editorViewMode}
       />
 
       <VectorShapeGalleryModal
@@ -12616,6 +12996,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           onInsertSpecialElement={handleInsertSpecialElement}
           showSpecialDateBadges={config.showSpecialDateBadges !== false}
           onToggleShowBadges={(show) => setConfig(prev => ({ ...prev, showSpecialDateBadges: show }))}
+      />
+
+      <FavoriteColorsModal
+          isOpen={showFavoriteColorsModal}
+          onClose={() => setShowFavoriteColorsModal(false)}
+          config={config}
+          selectedElements={activeList.filter(el => selectedIds.includes(el.id))}
+          onApplyColorToSelected={(colorHex, role) => {
+            pushHistory();
+            updateActiveElements(prev => prev.map(el => {
+              if (selectedIds.includes(el.id)) {
+                return {
+                  ...el,
+                  style: {
+                    ...el.style,
+                    ...(role === 'color' ? { color: colorHex } : {}),
+                    ...(role === 'fill' ? { backgroundColor: colorHex, fillColor: colorHex } : {}),
+                    ...(role === 'border' ? { borderColor: colorHex } : {}),
+                  }
+                };
+              }
+              return el;
+            }));
+            setToastMessage(`Cor ${colorHex.toUpperCase()} aplicada!`);
+          }}
+          onToast={(msg) => setToastMessage(msg)}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden no-print min-w-0">
@@ -13183,10 +13589,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 }
 
                                                 const cleanElements = config.elements.filter(el => el.type !== 'planner_day_box');
+                                                const isTwo = newType === '2_per_page';
+                                                const topTpl = config.isPermanent ? PERMANENT_2DPP_TOP : STANDARD_HALF_PAGE_TOP_ELEMENTS;
+                                                const botTpl = config.isPermanent ? PERMANENT_2DPP_BOTTOM : STANDARD_HALF_PAGE_BOTTOM_ELEMENTS;
                                                 setConfig(prev => ({
                                                     ...prev,
                                                     layoutType: newType,
-                                                    elements: cleanElements.length > 0 ? cleanElements : getDefaultElements(),
+                                                    elements: isTwo
+                                                        ? ((prev.elementsTop && prev.elementsTop.length > 9) ? prev.elementsTop : topTpl.map(el => cloneElementWithNewId(el, prev.year)))
+                                                        : (cleanElements.length > 0 ? cleanElements : getDefaultElements()),
+                                                    elementsTop: isTwo
+                                                        ? ((prev.elementsTop && prev.elementsTop.length > 9) ? prev.elementsTop : topTpl.map(el => cloneElementWithNewId(el, prev.year)))
+                                                        : prev.elementsTop,
+                                                    elementsBottom: isTwo
+                                                        ? ((prev.elementsBottom && prev.elementsBottom.length > 7) ? prev.elementsBottom : botTpl.map(el => cloneElementWithNewId(el, prev.year)))
+                                                        : prev.elementsBottom,
                                                     elementsWeeklyLeft: undefined,
                                                     elementsWeeklyRight: undefined,
                                                     elementsWeeklyVersoLeft: undefined,
@@ -14355,6 +14772,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 <span>Estilos</span>
                             </button>
 
+                            <button
+                                type="button"
+                                onClick={() => setShowFavoriteColorsModal(true)}
+                                className="px-3 py-1 rounded-xl text-[10px] font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer border bg-gradient-to-r from-amber-50 to-rose-50 text-[#9f3d4a] border-[#eedad5] hover:border-[#b84a56]/50 hover:bg-[#fdeeed] shadow-2xs"
+                                title="Abrir Minhas Cores Preferidas (Salvas no Computador)"
+                            >
+                                <icons.Palette className="w-3.5 h-3.5 text-[#b84a56]" />
+                                <span>Minhas Cores</span>
+                                <span className="flex gap-0.5 items-center">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#b84a56]" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#b38728]" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#5a7d68]" />
+                                </span>
+                            </button>
+
                             {editMode === 'daily' && (
                                 <>
                                     <div className="w-px h-4 bg-[#eedad5] mx-1 shrink-0"></div>
@@ -14372,47 +14804,122 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         </div>
 
                         {config.layoutType === '1_per_page_weekend_shared' && editMode === 'daily' && (
-                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex space-x-1 z-10">
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100 flex-wrap gap-y-1.5">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Fim de Semana:</span>
                                 <button 
-                                    onClick={() => setEditorViewMode('standard')} 
-                                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('standard'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    Dias da Semana
+                                    <span>📅 Dias da Semana (Seg-Sex)</span>
                                 </button>
                                 <button 
-                                    onClick={() => setEditorViewMode('saturday')} 
-                                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'saturday' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('saturday'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'saturday' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    Sábado
+                                    <span>⬆️ Sábado (Superior)</span>
                                 </button>
                                 <button 
-                                    onClick={() => setEditorViewMode('sunday')} 
-                                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'sunday' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('sunday'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'sunday' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    Domingo
+                                    <span>⬇️ Domingo (Inferior)</span>
+                                </button>
+
+                                <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+
+                                <button
+                                    type="button"
+                                    title="Copiar layout inferior (Domingo) e colar substituindo o layout superior (Sábado)"
+                                    onClick={copyWeekendBottomToTop}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                >
+                                    <icons.ArrowUpToLine className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Copiar Inferior (Dom) no Superior (Sáb)</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    title="Copiar layout superior (Sábado) e colar substituindo o layout inferior (Domingo)"
+                                    onClick={copyWeekendTopToBottom}
+                                    className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                >
+                                    <icons.ArrowDownToLine className="w-3.5 h-3.5 text-slate-500" />
+                                    <span>Copiar Superior (Sáb) no Inferior (Dom)</span>
                                 </button>
                             </div>
                         )}
 
                         {config.layoutType === '2_per_page' && editMode === 'daily' && (
-                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex space-x-1 z-10">
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100 flex-wrap gap-y-1.5">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Visualização 2 DPP:</span>
                                 <button 
-                                    onClick={() => setEditorViewMode('standard')} 
-                                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('standard'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    Padrão
+                                    <span>📄 Página Completa</span>
                                 </button>
                                 <button 
-                                    onClick={() => setEditorViewMode('top')} 
-                                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'top' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('top'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'top' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    Parte Superior
+                                    <span>⬆️ Parte Superior (Dia 1)</span>
                                 </button>
                                 <button 
-                                    onClick={() => setEditorViewMode('bottom')} 
-                                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${editorViewMode === 'bottom' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('bottom'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'bottom' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    Parte Inferior
+                                    <span>⬇️ Parte Inferior (Dia 2)</span>
+                                </button>
+
+                                <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
+
+                                <button
+                                    type="button"
+                                    title="Copiar layout da Parte Inferior (Dia 2) e colar substituindo a Parte Superior (Dia 1)"
+                                    onClick={copy2DppBottomToTop}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                >
+                                    <icons.ArrowUpToLine className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Copiar Inferior no Superior</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    title="Copiar layout da Parte Superior (Dia 1) e colar substituindo a Parte Inferior (Dia 2)"
+                                    onClick={copy2DppTopToBottom}
+                                    className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                >
+                                    <icons.ArrowDownToLine className="w-3.5 h-3.5 text-slate-500" />
+                                    <span>Copiar Superior no Inferior</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    title="Sincronizar e restaurar todos os elementos completos do modelo (Mini Calendário, Prioridades, Horários, Tarefas, Frase e Rastreadores) para as metades superior e inferior"
+                                    onClick={() => {
+                                        const topTemplate = config.isPermanent ? PERMANENT_2DPP_TOP : STANDARD_HALF_PAGE_TOP_ELEMENTS;
+                                        const botTemplate = config.isPermanent ? PERMANENT_2DPP_BOTTOM : STANDARD_HALF_PAGE_BOTTOM_ELEMENTS;
+                                        const newTop = topTemplate.map(el => cloneElementWithNewId(el, config.year));
+                                        const newBot = botTemplate.map(el => cloneElementWithNewId(el, config.year));
+                                        setConfig(prev => ({
+                                            ...prev,
+                                            elementsTop: newTop,
+                                            elementsBottom: newBot,
+                                            elements: newTop
+                                        }));
+                                        setSelectedIds([]);
+                                        setToastMessage("Modelo Completo 2 Dias por Página sincronizado com sucesso no Topo e na Base!");
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                                >
+                                    <Sparkles className="w-3 h-3 text-emerald-600" />
+                                    <span>Restaurar Modelo Completo 2 DPP</span>
                                 </button>
                             </div>
                         )}
@@ -14885,6 +15392,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             onClose={() => setShowStylesPanel(false)}
                                             onToast={(msg) => setToastMessage(msg)}
                                             onHeaderPointerDown={!isMobile ? (e) => stylesDragControls.start(e) : undefined}
+                                            onOpenFavoriteColorsModal={() => setShowFavoriteColorsModal(true)}
                                         />
                                     </motion.div>
                                 )}
@@ -16278,7 +16786,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                              </label>
                                                          </div>
 
-                                                         {['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year'].includes(selectedElement.type) && (
+                                                         {['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'holiday'].includes(selectedElement.type) && (
                                                             <div className="pt-3 border-t border-gray-100">
                                                                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
                                                                     {config.layoutType.startsWith('weekly') ? 'Vínculo com o Dia' : 'Sequência do Dia'}
@@ -16646,33 +17154,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="grid grid-cols-3 gap-2">
-                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                    <div className="grid grid-cols-4 gap-1.5">
+                                                                        <label className="flex items-center gap-1 cursor-pointer">
                                                                             <input 
                                                                                 type="checkbox" 
                                                                                 checked={selectedElement.style.plannerDayBox?.showDayNumber !== false} 
                                                                                 onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showDayNumber: e.target.checked } })} 
                                                                                 className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
                                                                             />
-                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Nº</span>
+                                                                            <span className="text-[9px] font-bold text-gray-500 uppercase">Nº</span>
                                                                         </label>
-                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                        <label className="flex items-center gap-1 cursor-pointer">
                                                                             <input 
                                                                                 type="checkbox" 
                                                                                 checked={selectedElement.style.plannerDayBox?.showDayName !== false} 
                                                                                 onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showDayName: e.target.checked } })} 
                                                                                 className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
                                                                             />
-                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Nome</span>
+                                                                            <span className="text-[9px] font-bold text-gray-500 uppercase">Nome</span>
                                                                         </label>
-                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                        <label className="flex items-center gap-1 cursor-pointer">
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                checked={selectedElement.style.plannerDayBox?.showHoliday !== false} 
+                                                                                onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showHoliday: e.target.checked } })} 
+                                                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                                                            />
+                                                                            <span className="text-[9px] font-bold text-gray-500 uppercase">Feriado</span>
+                                                                        </label>
+                                                                        <label className="flex items-center gap-1 cursor-pointer">
                                                                             <input 
                                                                                 type="checkbox" 
                                                                                 checked={selectedElement.style.plannerDayBox?.showMoonPhase === true} 
                                                                                 onChange={(e) => updateElementStyle(selectedElement.id, { plannerDayBox: { ...selectedElement.style.plannerDayBox, showMoonPhase: e.target.checked } })} 
                                                                                 className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
                                                                             />
-                                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Lua</span>
+                                                                            <span className="text-[9px] font-bold text-gray-500 uppercase">Lua</span>
                                                                         </label>
                                                                     </div>
 
@@ -16865,6 +17382,51 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                     <option value="dashed">Tracejada</option>
                                                                                     <option value="dotted">Pontilhada</option>
                                                                                 </select>
+                                                                            </div>
+                                                                        )}
+                                                                        {selectedElement.style.plannerDayBox?.showHoliday !== false && (
+                                                                            <div className="p-2.5 rounded-lg border border-red-100 bg-red-50/40 space-y-2 mt-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <span className="text-[10px] font-bold text-red-900 uppercase tracking-tight">Feriado Embutido no Bloco</span>
+                                                                                    <input 
+                                                                                        type="color" 
+                                                                                        value={selectedElement.style.plannerDayBox?.holidayColor || '#ef4444'} 
+                                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
+                                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, holidayColor: e.target.value } 
+                                                                                        })} 
+                                                                                        className="w-6 h-5 p-0 border-0 cursor-pointer rounded" 
+                                                                                        title="Cor do feriado"
+                                                                                    />
+                                                                                </div>
+                                                                                <div className="grid grid-cols-2 gap-2">
+                                                                                    <div className="space-y-1">
+                                                                                        <label className="block text-[9px] font-bold text-gray-500 uppercase">Tamanho</label>
+                                                                                        <input
+                                                                                            type="number"
+                                                                                            min="5"
+                                                                                            max="20"
+                                                                                            value={selectedElement.style.plannerDayBox?.holidayFontSize || 7.5}
+                                                                                            onChange={(e) => updateElementStyle(selectedElement.id, {
+                                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, holidayFontSize: parseFloat(e.target.value) || 7.5 }
+                                                                                            })}
+                                                                                            className="w-full text-xs p-1 border rounded bg-white"
+                                                                                        />
+                                                                                    </div>
+                                                                                    <div className="space-y-1">
+                                                                                        <label className="block text-[9px] font-bold text-gray-500 uppercase">Fonte</label>
+                                                                                        <select
+                                                                                            value={selectedElement.style.plannerDayBox?.holidayFontFamily || selectedElement.style.plannerDayBox?.headerFontFamily || 'Inter'}
+                                                                                            onChange={(e) => updateElementStyle(selectedElement.id, {
+                                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, holidayFontFamily: e.target.value }
+                                                                                            })}
+                                                                                            className="w-full text-xs p-1 border rounded bg-white"
+                                                                                        >
+                                                                                            {AVAILABLE_FONTS.map(font => (
+                                                                                                <option key={font} value={font}>{font}</option>
+                                                                                            ))}
+                                                                                        </select>
+                                                                                    </div>
+                                                                                </div>
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -19023,6 +19585,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                              </div>
                                                          );
                                                      })()}
+                                                    {selectedElement.type === 'holiday' && (
+                                                        <div className="p-3 bg-purple-50/80 border border-purple-200/80 rounded-xl space-y-2.5 mb-3">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex items-center gap-1.5 text-purple-900 font-bold text-[10px] uppercase tracking-wide">
+                                                                    <Flag className="w-3.5 h-3.5 text-purple-600" />
+                                                                    <span>Elemento de Feriado</span>
+                                                                </div>
+                                                                {selectedElement.style.dayIndex !== undefined && (
+                                                                    <span className="text-[9px] font-bold text-purple-700 bg-white px-2 py-0.5 rounded-full border border-purple-200">
+                                                                        {['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][selectedElement.style.dayIndex] || `Dia ${selectedElement.style.dayIndex}`}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-[10px] text-purple-950 leading-relaxed font-medium">
+                                                                Exibe o feriado ou celebração da data. Nos dias sem feriado ou dias de preenchimento, o espaço fica em branco automaticamente.
+                                                            </p>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const { fontFamily, fontSize, fontWeight, fontStyle, color, textAlign, textStrokeWidth, textStrokeColor, textStrokeJoin, textFillTransparent, letterSpacing } = selectedElement.style;
+                                                                    updateActiveElements(prev => prev.map(el => {
+                                                                        if (el.type === 'holiday') {
+                                                                            return {
+                                                                                ...el,
+                                                                                style: {
+                                                                                    ...el.style,
+                                                                                    ...(fontFamily ? { fontFamily } : {}),
+                                                                                    ...(fontSize ? { fontSize } : {}),
+                                                                                    ...(fontWeight ? { fontWeight } : {}),
+                                                                                    ...(fontStyle ? { fontStyle } : {}),
+                                                                                    ...(color ? { color } : {}),
+                                                                                    ...(textAlign ? { textAlign } : {}),
+                                                                                    ...(letterSpacing !== undefined ? { letterSpacing } : {}),
+                                                                                    ...(textStrokeWidth !== undefined ? { textStrokeWidth } : {}),
+                                                                                    ...(textStrokeColor !== undefined ? { textStrokeColor } : {}),
+                                                                                    ...(textStrokeJoin ? { textStrokeJoin } : {}),
+                                                                                    ...(textFillTransparent !== undefined ? { textFillTransparent } : {}),
+                                                                                }
+                                                                            };
+                                                                        }
+                                                                        return el;
+                                                                    }));
+                                                                }}
+                                                                className="w-full py-1.5 px-2.5 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+                                                                title="Copia a fonte, tamanho, cor e contorno deste feriado para todos os feriados da página"
+                                                            >
+                                                                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                                                <span>Aplicar Estilo a Todos os Feriados</span>
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                     {selectedElement.type === 'date_placeholder' && (
                                                         <div className="space-y-1 mb-2">
                                                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Informação da Data</label>
@@ -19563,7 +20176,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                             setQuotesModalOpen(true);
                                                                         }
                                                                         if (selectedElement.style.quoteDisplayMode === 'fixed') {
-                                                                            const sample = getRandomQuote(newCat, customQuotes);
+                                                                            const sample = getRandomQuote(newCat, config.quoteCustomList || customQuotes);
                                                                             updateElementStyle(selectedElement.id, { quoteFixedText: sample });
                                                                             updateElementContent(selectedElement.id, sample);
                                                                         }
@@ -19601,7 +20214,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         type="button"
                                                                         onClick={() => {
                                                                             const currentCat = selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength';
-                                                                            const text = selectedElement.style.quoteFixedText || selectedElement.content || getRandomQuote(currentCat);
+                                                                            const text = selectedElement.style.quoteFixedText || selectedElement.content || getRandomQuote(currentCat, config.quoteCustomList || customQuotes);
                                                                             updateElementStyle(selectedElement.id, { quoteDisplayMode: 'fixed', quoteFixedText: text });
                                                                             updateElementContent(selectedElement.id, text);
                                                                         }}
@@ -19626,7 +20239,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                             type="button"
                                                                             onClick={() => {
                                                                                 const currentCat = selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength';
-                                                                                const randomQ = getRandomQuote(currentCat);
+                                                                                const randomQ = getRandomQuote(currentCat, config.quoteCustomList || customQuotes);
                                                                                 updateElementStyle(selectedElement.id, { quoteFixedText: randomQ });
                                                                                 updateElementContent(selectedElement.id, randomQ);
                                                                             }}
@@ -20377,6 +20990,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             </div>
                                                         );
                                                     })()}
+                                                    {/* Paleta de Cores Preferidas Salvas no Computador */}
+                                                    <div className="p-2.5 bg-rose-50/50 rounded-xl border border-rose-100">
+                                                        <FavoriteColorSwatches
+                                                            currentColor={selectedElement.style.color || selectedElement.style.backgroundColor || selectedElement.style.borderColor}
+                                                            onSelectColor={(hex) => {
+                                                                if (selectedElement.type === 'text' || selectedElement.type === 'permanent_day_header' || selectedElement.type === 'day_number' || selectedElement.type === 'day_name' || selectedElement.type === 'quote' || selectedElement.type === 'verse' || selectedElement.type === 'icon') {
+                                                                    updateElementStyle(selectedElement.id, { color: hex });
+                                                                } else {
+                                                                    updateElementStyle(selectedElement.id, { backgroundColor: hex, color: hex });
+                                                                }
+                                                            }}
+                                                            onOpenFullModal={() => setShowFavoriteColorsModal(true)}
+                                                            compact
+                                                            label="Cores Preferidas (Computador)"
+                                                        />
+                                                    </div>
+
                                                     <div className="space-y-4">
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Tipo de Fundo</label>
@@ -20916,77 +21546,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
 
 
-                        {/* Controles de Zoom */}
-                        {!isMobile && (
-                            <div className={`fixed bottom-4 sm:bottom-6 flex items-center bg-white/95 backdrop-blur-md rounded-full shadow-[0_10px_30px_rgba(184,74,86,0.12)] border border-[#eedad5] px-3 sm:px-4 py-1.5 sm:py-2 gap-2 sm:gap-3 z-[60] no-print animate-in slide-in-from-bottom-4 duration-300 transition-all duration-300 max-w-[calc(100vw-32px)] overflow-x-auto no-scrollbar ${showProperties && activeTab === 'editor' ? 'right-4 lg:right-[304px]' : 'right-4 sm:right-6'}`}>
-                                {activeTab === 'editor' && (
-                                    <>
-                                        <div className="flex bg-[#fff5f5] p-0.5 rounded-full border border-[#eedad5] select-none">
-                                            <button
-                                                onClick={() => setPanMode(false)}
-                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${!panMode ? 'bg-[#b84a56] shadow-xs text-white' : 'text-slate-500 hover:text-[#9f3d4a]'}`}
-                                                title="Ferramenta Seleção (Atalho: V)"
-                                            >
-                                                <MousePointer2 className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => setPanMode(true)}
-                                                className={`p-1.5 rounded-full transition-all cursor-pointer ${panMode ? 'bg-[#b84a56] shadow-xs text-white' : 'text-slate-500 hover:text-[#9f3d4a]'}`}
-                                                title="Ferramenta Mão / Arrastar (Atalho: H ou Segurar Espaço)"
-                                            >
-                                                <Hand className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                        <div className="w-px h-6 bg-[#eedad5] mx-1"></div>
-                                    </>
-                                )}
-                                <button 
-                                    onClick={() => setZoom(Math.max(0.3, zoom - 0.1))} 
-                                    className="p-1.5 hover:bg-[#fff5f5] rounded-full transition-colors text-slate-500 hover:text-[#b84a56] disabled:opacity-30 cursor-pointer"
-                                    title="Diminuir Zoom"
-                                    disabled={zoom <= 0.3}
-                                >
-                                    <Minus className="w-4 h-4" />
-                                </button>
-                                <div className="flex flex-col items-center min-w-[50px] select-none">
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight leading-none mb-0.5">Zoom</span>
-                                    <span className="text-xs font-black text-[#9f3d4a] tabular-nums">{Math.round(zoom * 100)}%</span>
-                                </div>
-                                <button 
-                                    onClick={() => setZoom(Math.min(3, zoom + 0.1))} 
-                                    className="p-1.5 hover:bg-[#fff5f5] rounded-full transition-colors text-slate-500 hover:text-[#b84a56] disabled:opacity-30 cursor-pointer"
-                                    title="Aumentar Zoom"
-                                    disabled={zoom >= 3}
-                                >
-                                    <Plus className="w-4 h-4" />
-                                </button>
-                                <div className="w-px h-6 bg-[#eedad5] mx-1"></div>
-                                <button 
-                                    onClick={handleFitToScreen} 
-                                    className="px-2.5 py-1 text-[10px] font-bold text-[#9f3d4a] bg-[#fff5f5] hover:bg-[#fdeeed] rounded-full transition-colors flex items-center gap-1 border border-[#eedad5] cursor-pointer"
-                                    title="Ajustar à Tela (Tamanho ideal para seu monitor)"
-                                >
-                                    <Maximize2 className="w-3 h-3 text-[#b84a56]" />
-                                    <span>Ajustar</span>
-                                </button>
-                                <button 
-                                    onClick={() => setZoom(1)} 
-                                    className="text-[9px] font-bold text-slate-500 hover:text-[#b84a56] uppercase tracking-widest px-2 py-1 hover:bg-[#fff5f5] rounded transition-colors cursor-pointer"
-                                >
-                                    100%
-                                </button>
-                                <div className="w-px h-6 bg-[#eedad5] mx-1"></div>
-                                <button 
-                                    onClick={handlePrintRequest} 
-                                    disabled={printStatus !== 'idle'} 
-                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-full text-xs font-bold shadow-md shadow-[#b84a56]/20 cursor-pointer transition-all active:scale-95 shrink-0"
-                                    title="Baixar PDF do Miolo Pronto para Impressão"
-                                >
-                                    <FileDown className="w-3.5 h-3.5 text-white" />
-                                    <span>Baixar PDF</span>
-                                </button>
-                            </div>
-                        )}
+
                     </div>
                 )}
                 {activeTab === 'preview' && (

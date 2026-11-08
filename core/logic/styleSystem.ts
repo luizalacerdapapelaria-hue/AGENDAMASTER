@@ -3,11 +3,49 @@ import {
   CharacterStylePreset,
   ColorStylePreset,
   LayoutElement,
+  ObjectStylePreset,
   ParagraphStylePreset,
   ProjectStylesConfig,
 } from '../../types';
 
 export const DEFAULT_PROJECT_STYLES: ProjectStylesConfig = {
+  objectStyles: [
+    {
+      id: 'obj_card_soft',
+      name: 'Cartão Branco Suave',
+      backgroundColor: '#ffffff',
+      borderColor: '#e5e7eb',
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderRadius: 8,
+      opacity: 1,
+      boxShadow: 'sm',
+    },
+    {
+      id: 'obj_highlight_transp',
+      name: 'Destaque Translúcido',
+      backgroundColor: '#fff5f5',
+      borderColor: '#b84a56',
+      borderWidth: 1.5,
+      borderStyle: 'solid',
+      borderRadius: 10,
+      opacity: 0.9,
+      fillOpacity: 0.85,
+      strokeOpacity: 1,
+      boxShadow: 'none',
+    },
+    {
+      id: 'obj_dashed_box',
+      name: 'Caixa Pesponto / Tracejada',
+      backgroundColor: '#fafaf9',
+      borderColor: '#d1d5db',
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderRadius: 6,
+      opacity: 0.95,
+      boxShadow: 'none',
+    },
+  ],
   colorStyles: [
     { id: 'c_primary', name: 'Cor Principal', color: '#4f46e5' },
     { id: 'c_accent', name: 'Destaque / Acento', color: '#db2777' },
@@ -128,10 +166,77 @@ export function getProjectStyles(config: AgendaConfig): ProjectStylesConfig {
     return DEFAULT_PROJECT_STYLES;
   }
   return {
+    objectStyles: config.styles.objectStyles || DEFAULT_PROJECT_STYLES.objectStyles || [],
     colorStyles: config.styles.colorStyles || DEFAULT_PROJECT_STYLES.colorStyles,
     characterStyles: config.styles.characterStyles || DEFAULT_PROJECT_STYLES.characterStyles,
     paragraphStyles: config.styles.paragraphStyles || DEFAULT_PROJECT_STYLES.paragraphStyles,
   };
+}
+
+export function applyObjectStyleToElement(
+  el: LayoutElement,
+  objStyle: ObjectStylePreset
+): LayoutElement {
+  const newStyle: LayoutElement['style'] = {
+    ...el.style,
+    objectStyleId: objStyle.id,
+  };
+
+  // 1. Cor / Preenchimento
+  if (objStyle.backgroundColor !== undefined) newStyle.backgroundColor = objStyle.backgroundColor;
+  if (objStyle.fillColor !== undefined) newStyle.fillColor = objStyle.fillColor;
+  if (objStyle.color !== undefined) {
+    newStyle.color = objStyle.color;
+    if (el.type === 'lines' || el.type === 'note_grid') {
+      newStyle.color = objStyle.color;
+    }
+  }
+  if (objStyle.backgroundType !== undefined) newStyle.backgroundType = objStyle.backgroundType;
+  if (objStyle.gradientType !== undefined) newStyle.gradientType = objStyle.gradientType;
+  if (objStyle.gradientColors !== undefined) newStyle.gradientColors = [...objStyle.gradientColors];
+  if (objStyle.gradientDirection !== undefined) newStyle.gradientDirection = objStyle.gradientDirection;
+
+  // 2. Borda
+  if (objStyle.borderColor !== undefined) newStyle.borderColor = objStyle.borderColor;
+  if (objStyle.borderWidth !== undefined) newStyle.borderWidth = objStyle.borderWidth;
+  if (objStyle.borderStyle !== undefined) newStyle.borderStyle = objStyle.borderStyle;
+  if (objStyle.borderRadius !== undefined) newStyle.borderRadius = objStyle.borderRadius;
+
+  // 3. Transparência / Opacidade
+  if (objStyle.opacity !== undefined) newStyle.opacity = objStyle.opacity;
+  if (objStyle.fillOpacity !== undefined) newStyle.fillOpacity = objStyle.fillOpacity;
+  if (objStyle.strokeOpacity !== undefined) newStyle.strokeOpacity = objStyle.strokeOpacity;
+
+  // 4. Sombra
+  if (objStyle.boxShadow !== undefined) newStyle.boxShadow = objStyle.boxShadow;
+
+  // Ajustes de compatibilidade com elementos compostos
+  if (el.type === 'planner_day_box' && newStyle.plannerDayBox) {
+    newStyle.plannerDayBox = {
+      ...newStyle.plannerDayBox,
+      ...(objStyle.backgroundColor ? { headerBackgroundColor: objStyle.backgroundColor } : {}),
+      ...(objStyle.borderColor ? { strokeColor: objStyle.borderColor, headerBorderColor: objStyle.borderColor } : {}),
+      ...(objStyle.borderWidth !== undefined ? { strokeWidth: objStyle.borderWidth } : {}),
+    };
+  }
+  if (el.type === 'footer_tracker' && newStyle.footerTracker) {
+    newStyle.footerTracker = {
+      ...newStyle.footerTracker,
+      ...(objStyle.backgroundColor ? { boxBackgroundColor: objStyle.backgroundColor, fillColor: objStyle.backgroundColor } : {}),
+      ...(objStyle.borderColor ? { boxBorderColor: objStyle.borderColor, strokeColor: objStyle.borderColor } : {}),
+      ...(objStyle.borderWidth !== undefined ? { boxBorderWidth: objStyle.borderWidth } : {}),
+    };
+  }
+  if (el.type === 'table' && newStyle.table) {
+    newStyle.table = {
+      ...newStyle.table,
+      ...(objStyle.borderColor ? { borderColor: objStyle.borderColor } : {}),
+      ...(objStyle.borderWidth !== undefined ? { borderWidth: objStyle.borderWidth } : {}),
+      ...(objStyle.backgroundColor ? { zebraColor: objStyle.backgroundColor } : {}),
+    };
+  }
+
+  return { ...el, style: newStyle };
 }
 
 export function applyColorStyleToElement(
@@ -141,6 +246,15 @@ export function applyColorStyleToElement(
 ): LayoutElement {
   const hex = colorStyle.color;
   const newStyle: LayoutElement['style'] = { ...el.style };
+
+  // Se o estilo de cor foi criado com características de objeto (borda, transparência, etc.), aplica-as
+  if (colorStyle.borderWidth !== undefined) newStyle.borderWidth = colorStyle.borderWidth;
+  if (colorStyle.borderStyle !== undefined) newStyle.borderStyle = colorStyle.borderStyle;
+  if (colorStyle.borderRadius !== undefined) newStyle.borderRadius = colorStyle.borderRadius;
+  if (colorStyle.opacity !== undefined) newStyle.opacity = colorStyle.opacity;
+  if (colorStyle.fillOpacity !== undefined) newStyle.fillOpacity = colorStyle.fillOpacity;
+  if (colorStyle.strokeOpacity !== undefined) newStyle.strokeOpacity = colorStyle.strokeOpacity;
+  if (colorStyle.boxShadow !== undefined) newStyle.boxShadow = colorStyle.boxShadow;
 
   if (role === 'color') {
     newStyle.colorStyleId = colorStyle.id;
@@ -437,6 +551,14 @@ export function refreshElementWithStyles(
 ): LayoutElement {
   let current = el;
 
+  // 0. Object style (estilo completo de objeto: cor, borda, transparência, sombra)
+  if (current.style.objectStyleId && styles.objectStyles) {
+    const oStyle = styles.objectStyles.find(o => o.id === current.style.objectStyleId);
+    if (oStyle) {
+      current = applyObjectStyleToElement(current, oStyle);
+    }
+  }
+
   // 1. Paragraph style (which may also trigger its linked character style)
   if (current.style.paragraphStyleId) {
     const pStyle = styles.paragraphStyles.find(p => p.id === current.style.paragraphStyleId);
@@ -550,10 +672,12 @@ export function getAllElementsFromConfig(config: AgendaConfig): LayoutElement[] 
 }
 
 export function countStyleUsageInConfig(config: AgendaConfig): {
+  objectCounts: Record<string, number>;
   colorCounts: Record<string, number>;
   characterCounts: Record<string, number>;
   paragraphCounts: Record<string, number>;
 } {
+  const objectCounts: Record<string, number> = {};
   const colorCounts: Record<string, number> = {};
   const characterCounts: Record<string, number> = {};
   const paragraphCounts: Record<string, number> = {};
@@ -562,6 +686,11 @@ export function countStyleUsageInConfig(config: AgendaConfig): {
   for (const el of all) {
     const s = el.style;
     if (!s) continue;
+
+    if (s.objectStyleId) {
+      objectCounts[s.objectStyleId] = (objectCounts[s.objectStyleId] || 0) + 1;
+    }
+
     const usedColorIds = new Set<string>();
     if (s.colorStyleId) usedColorIds.add(s.colorStyleId);
     if (s.fillColorStyleId) usedColorIds.add(s.fillColorStyleId);
@@ -578,7 +707,7 @@ export function countStyleUsageInConfig(config: AgendaConfig): {
     }
   }
 
-  return { colorCounts, characterCounts, paragraphCounts };
+  return { objectCounts, colorCounts, characterCounts, paragraphCounts };
 }
 
 export function linkElementsByMatchingHexInConfig(

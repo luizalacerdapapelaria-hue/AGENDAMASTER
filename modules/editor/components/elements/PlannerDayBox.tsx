@@ -241,11 +241,12 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                         borderBottom: showHeaderBorder ? `${headerBorderWidth}px ${headerBorderStyle} ${headerBorderColor}` : 'none'
                     }}
                 >
-                    {showDayNumber && (d.dayOfMonth > 0 || isEditor) && (
+                    {showDayNumber && (d.dayOfMonth > 0 || (isEditor && !d.isPaddingDay)) && (
                         <span
                             className="font-bold text-lg"
                             style={{
                                 color: headerTextColor,
+                                opacity: d.isPaddingDay ? 0.45 : 1,
                                 fontSize: `${Math.max(6, 18 * scaleFactor)}px`,
                                 fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
                                 ...getTextStrokeCss(
@@ -260,14 +261,15 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                                 ),
                             }}
                         >
-                            {String(d.dayOfMonth > 0 ? d.dayOfMonth : (d.dayOfWeek === 0 ? 7 : (d.dayOfWeek || 1))).padStart(2, '0')}
+                            {d.dayOfMonth > 0 ? String(d.dayOfMonth).padStart(2, '0') : ''}
                         </span>
                     )}
                     {showDayName && (d.dayOfWeek !== undefined) && (
                         <span
-                            className="font-medium opacity-70"
+                            className="font-medium"
                             style={{
                                 color: headerTextColor,
+                                opacity: d.isPaddingDay ? 0.45 : 0.7,
                                 fontSize: `${Math.max(5, 10 * scaleFactor)}px`,
                                 fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
                                 ...getTextStrokeCss(
@@ -285,8 +287,26 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             {dayName}
                         </span>
                     )}
-                    {d.holiday && d.dayOfMonth > 0 && (
-                        <div className="ml-auto text-red-400 font-medium truncate max-w-[50%]" style={{ fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}>
+                    {plannerDayBox.showHoliday !== false && (showDayNumber || showDayName || plannerDayBox.showHoliday === true) && d.holiday && d.dayOfMonth > 0 && (
+                        <div 
+                            className="ml-auto font-semibold truncate max-w-[50%]" 
+                            style={{ 
+                                fontSize: plannerDayBox.holidayFontSize ? `${plannerDayBox.holidayFontSize * scaleFactor}px` : `${Math.max(4, 8 * scaleFactor)}px`,
+                                color: plannerDayBox.holidayColor || '#ef4444',
+                                fontFamily: plannerDayBox.holidayFontFamily || plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
+                                ...getTextStrokeCss(
+                                    {
+                                        textStrokeWidth: plannerDayBox.holidayTextStrokeWidth,
+                                        textStrokeColor: plannerDayBox.holidayTextStrokeColor,
+                                        textFillTransparent: plannerDayBox.holidayTextFillTransparent,
+                                        textStrokeJoin: plannerDayBox.holidayTextStrokeJoin,
+                                        color: plannerDayBox.holidayColor || '#ef4444',
+                                    },
+                                    plannerDayBox.holidayColor || '#ef4444'
+                                )
+                            }} 
+                            title={d.holiday}
+                        >
                             {d.holiday}
                         </div>
                     )}

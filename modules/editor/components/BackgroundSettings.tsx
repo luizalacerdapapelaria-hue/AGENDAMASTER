@@ -138,13 +138,22 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
         setTimeout(() => setApplySuccessMessage(false), 3000);
     };
 
-    // Renderizar prévia da página PDF no modal
+    // Renderizar prévia da página PDF no modal com cancelamento seguro de render anterior
+    const currentRenderTaskRef = useRef<any>(null);
+
     useEffect(() => {
         if (!pdfDoc || !showPdfModal) return;
         let active = true;
 
         const renderPage = async () => {
             try {
+                if (currentRenderTaskRef.current) {
+                    try {
+                        currentRenderTaskRef.current.cancel();
+                    } catch {}
+                    currentRenderTaskRef.current = null;
+                }
+
                 const page = await pdfDoc.getPage(pdfCurrentPage);
                 if (!active) return;
                 const canvas = pdfPreviewCanvasRef.current;
@@ -156,14 +165,26 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
 
-                await page.render({ canvasContext: context, viewport }).promise;
-            } catch (err) {
-                console.error('Erro ao renderizar prévia do PDF:', err);
+                const renderTask = page.render({ canvasContext: context, viewport });
+                currentRenderTaskRef.current = renderTask;
+                await renderTask.promise;
+            } catch (err: any) {
+                if (err?.name !== 'RenderingCancelledException') {
+                    console.warn('Aviso ao renderizar prévia do PDF:', err);
+                }
             }
         };
 
         renderPage();
-        return () => { active = false; };
+        return () => {
+            active = false;
+            if (currentRenderTaskRef.current) {
+                try {
+                    currentRenderTaskRef.current.cancel();
+                } catch {}
+                currentRenderTaskRef.current = null;
+            }
+        };
     }, [pdfDoc, pdfCurrentPage, showPdfModal]);
 
     const handlePdfUpload = (file: File) => {
@@ -176,14 +197,20 @@ export const BackgroundSettings: React.FC<BackgroundSettingsProps> = ({
             try {
                 const pdfjs = await loadPdfJs();
                 const arrayBuffer = reader.result as ArrayBuffer;
-                const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+                const loadingTask = pdfjs.getDocument({
+                    data: arrayBuffer,
+                    cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+                    cMapPacked: true,
+                    standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
+                });
+                const pdf = await loadingTask.promise;
                 setPdfDoc(pdf);
                 setPdfTotalPages(pdf.numPages);
                 setPdfCurrentPage(1);
                 setPdfLoading(false);
             } catch (error) {
                 console.error('Erro ao ler PDF:', error);
-                alert('Não foi possível ler este arquivo PDF.');
+                alert('Não foi possível ler este arquivo PDF. Verifique se o arquivo não está corrompido ou protegido por senha.');
                 setPdfLoading(false);
                 setShowPdfModal(false);
             }

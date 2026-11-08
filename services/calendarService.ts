@@ -107,14 +107,14 @@ export const generateCalendarYear = (year: number, includeHolidays: boolean): Da
 
 export const generateGenericPages = (count: number): DayData[] => {
     const pages: DayData[] = [];
-    const dummyDate = new Date();
     for (let i = 0; i < count; i++) {
+        const seqDate = new Date(2025, 0, 1 + i);
         pages.push({
-            date: dummyDate,
-            dayOfWeek: 0,
-            dayOfMonth: 0,
-            month: 0,
-            year: 0
+            date: seqDate,
+            dayOfWeek: (i % 7),
+            dayOfMonth: i + 1,
+            month: seqDate.getMonth(),
+            year: seqDate.getFullYear()
         });
     }
     return pages;

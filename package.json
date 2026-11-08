@@ -12,9 +12,10 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "electron:dev": "concurrently \"vite\" \"ELECTRON_DEV_URL=http://localhost:3000 electron .\"",
-    "dist": "vite build && electron-builder --publish never",
-    "dist:win": "vite build && electron-builder --win --publish never",
-    "dist:publish": "vite build && electron-builder --publish always"
+    "dist": "vite build && electron-builder --publish never && node scripts/generate-latest-yaml.cjs",
+    "dist:win": "vite build && electron-builder --win --publish never && node scripts/generate-latest-yaml.cjs",
+    "dist:publish": "vite build && electron-builder --publish always",
+    "generate:latest": "node scripts/generate-latest-yaml.cjs"
   },
   "build": {
     "appId": "com.agendamaster.app",

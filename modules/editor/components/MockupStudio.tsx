@@ -4040,13 +4040,15 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* ========================================================= */}
                       {flipState && flipState.direction === 'next' && (
                         <div 
-                          className="absolute top-0 z-25 pointer-events-none"
+                          className="absolute top-0 z-25 pointer-events-none mockup-turning-leaf"
                           style={{
                             left: `${DISPLAY_PAGE_W}px`,
                             width: `${DISPLAY_PAGE_W}px`,
                             height: `${DISPLAY_PAGE_H}px`,
                             transformOrigin: 'left center',
                             transformStyle: 'preserve-3d',
+                            WebkitTransformStyle: 'preserve-3d',
+                            willChange: 'transform',
                             animation: `flipNextLeaf ${flipDuration}ms cubic-bezier(0.25, 1, 0.5, 1) forwards`
                           }}
                         >
@@ -4055,7 +4057,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                             className="absolute inset-0 bg-white rounded-r-xl overflow-hidden box-border"
                             style={{
                               backfaceVisibility: 'hidden',
-                              transform: 'rotateY(0deg)',
+                              WebkitBackfaceVisibility: 'hidden',
+                              transform: 'rotateY(0deg) translateZ(0)',
+                              willChange: 'transform',
                               boxShadow: '-8px 12px 30px rgba(0,0,0,0.25)'
                             }}
                           >
@@ -4088,7 +4092,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                             className="absolute inset-0 bg-white rounded-l-xl overflow-hidden box-border"
                             style={{
                               backfaceVisibility: 'hidden',
-                              transform: 'rotateY(180deg)',
+                              WebkitBackfaceVisibility: 'hidden',
+                              transform: 'rotateY(180deg) translateZ(0)',
+                              willChange: 'transform',
                               boxShadow: '8px 12px 30px rgba(0,0,0,0.25)'
                             }}
                           >
@@ -4123,13 +4129,15 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* ========================================================= */}
                       {flipState && flipState.direction === 'prev' && (
                         <div 
-                          className="absolute top-0 z-25 pointer-events-none"
+                          className="absolute top-0 z-25 pointer-events-none mockup-turning-leaf"
                           style={{
                             left: 0,
                             width: `${DISPLAY_PAGE_W}px`,
                             height: `${DISPLAY_PAGE_H}px`,
                             transformOrigin: 'right center',
                             transformStyle: 'preserve-3d',
+                            WebkitTransformStyle: 'preserve-3d',
+                            willChange: 'transform',
                             animation: `flipPrevLeaf ${flipDuration}ms cubic-bezier(0.25, 1, 0.5, 1) forwards`
                           }}
                         >
@@ -4138,7 +4146,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                             className="absolute inset-0 bg-white rounded-l-xl overflow-hidden box-border"
                             style={{
                               backfaceVisibility: 'hidden',
-                              transform: 'rotateY(0deg)',
+                              WebkitBackfaceVisibility: 'hidden',
+                              transform: 'rotateY(0deg) translateZ(0)',
+                              willChange: 'transform',
                               boxShadow: '8px 12px 30px rgba(0,0,0,0.25)'
                             }}
                           >
@@ -4171,7 +4181,9 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                             className="absolute inset-0 bg-white rounded-r-xl overflow-hidden box-border"
                             style={{
                               backfaceVisibility: 'hidden',
-                              transform: 'rotateY(180deg)',
+                              WebkitBackfaceVisibility: 'hidden',
+                              transform: 'rotateY(180deg) translateZ(0)',
+                              willChange: 'transform',
                               boxShadow: '-8px 12px 30px rgba(0,0,0,0.25)'
                             }}
                           >
@@ -4559,12 +4571,14 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
                       {/* --- 3D TURNING LEAF OVERLAY IN SINGLE PAGE MODE --- */}
                       {flipState && (
                         <div 
-                          className="absolute inset-0 z-25 pointer-events-none"
+                          className="absolute inset-0 z-25 pointer-events-none mockup-turning-leaf"
                           style={{
                             width: `${DISPLAY_PAGE_W * 1.15}px`,
                             height: `${DISPLAY_PAGE_H * 1.15}px`,
                             transformOrigin: 'left center',
                             transformStyle: 'preserve-3d',
+                            WebkitTransformStyle: 'preserve-3d',
+                            willChange: 'transform',
                             animation: flipState.direction === 'next'
                               ? `singleFlipNext ${flipDuration}ms cubic-bezier(0.25, 1, 0.5, 1) forwards`
                               : `singleFlipPrev ${flipDuration}ms cubic-bezier(0.25, 1, 0.5, 1) forwards`
@@ -5261,84 +5275,96 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
             </div>
           )}
 
-          {/* 3D Page Flip Keyframe Animations */}
+          {/* 3D Page Flip Keyframe Animations - Hardware Accelerated & Zero Jitter */}
           <style>{`
             @keyframes flipNextLeaf {
               0% {
-                transform: rotateY(0deg);
+                transform: rotateY(-3deg) translateZ(0);
               }
-              30% {
-                transform: rotateY(-45deg) skewY(-2.5deg);
-              }
-              60% {
-                transform: rotateY(-125deg) skewY(2deg);
+              50% {
+                transform: rotateY(-90deg) translateZ(10px) scale(1.01);
               }
               100% {
-                transform: rotateY(-180deg);
+                transform: rotateY(-180deg) translateZ(0);
               }
             }
 
             @keyframes flipPrevLeaf {
               0% {
-                transform: rotateY(0deg);
+                transform: rotateY(3deg) translateZ(0);
               }
-              30% {
-                transform: rotateY(45deg) skewY(2.5deg);
-              }
-              60% {
-                transform: rotateY(125deg) skewY(-2deg);
+              50% {
+                transform: rotateY(90deg) translateZ(10px) scale(1.01);
               }
               100% {
-                transform: rotateY(180deg);
+                transform: rotateY(180deg) translateZ(0);
               }
             }
 
             @keyframes underShadowLift {
               0% { opacity: 0; }
-              30% { opacity: 0.24; }
-              70% { opacity: 0.12; }
+              30% { opacity: 0.22; }
+              70% { opacity: 0.1; }
               100% { opacity: 0; }
             }
 
             @keyframes landingShadowFall {
               0% { opacity: 0; }
               40% { opacity: 0.08; }
-              75% { opacity: 0.28; }
+              75% { opacity: 0.25; }
               100% { opacity: 0; }
             }
 
             @keyframes singleFlipNext {
               0% {
-                transform: rotateY(0deg);
+                transform: rotateY(0deg) translateZ(0);
                 opacity: 1;
               }
-              40% {
-                transform: rotateY(-60deg) skewY(-3deg);
-                opacity: 0.95;
+              50% {
+                transform: rotateY(-70deg) translateZ(8px);
+                opacity: 0.85;
               }
               100% {
-                transform: rotateY(-140deg) skewY(-4.5deg);
+                transform: rotateY(-140deg) translateZ(0);
                 opacity: 0;
               }
             }
 
             @keyframes singleFlipPrev {
               0% {
-                transform: rotateY(-140deg) skewY(-4.5deg);
+                transform: rotateY(-140deg) translateZ(0);
                 opacity: 0;
               }
-              40% {
-                transform: rotateY(-60deg) skewY(-3deg);
-                opacity: 0.95;
+              50% {
+                transform: rotateY(-70deg) translateZ(8px);
+                opacity: 0.85;
               }
               100% {
-                transform: rotateY(0deg);
+                transform: rotateY(0deg) translateZ(0);
                 opacity: 1;
               }
             }
 
             .mockup-book-stage {
               transform-style: preserve-3d;
+              -webkit-transform-style: preserve-3d;
+              perspective: 2000px;
+              -webkit-perspective: 2000px;
+            }
+
+            .mockup-turning-leaf {
+              will-change: transform;
+              transform-style: preserve-3d;
+              -webkit-transform-style: preserve-3d;
+              backface-visibility: hidden;
+              -webkit-backface-visibility: hidden;
+            }
+
+            .mockup-page-wrapper {
+              backface-visibility: hidden;
+              -webkit-backface-visibility: hidden;
+              transform: translateZ(0);
+              -webkit-font-smoothing: antialiased;
             }
           `}</style>
 

@@ -105,6 +105,12 @@ if (typeof window !== 'undefined') {
   // Auto-recuperação transparente quando sai um novo deploy e o navegador tenta abrir um chunk JS antigo
   const tryRecoverFromChunkMismatch = () => {
     try {
+      if (typeof window !== 'undefined') {
+        const isElectron = window.location.protocol === 'file:' ||
+          (navigator.userAgent && navigator.userAgent.toLowerCase().includes('electron')) ||
+          !!(window as any).electronAPI?.isElectron;
+        if (isElectron) return false;
+      }
       const lastAttempt = parseInt(sessionStorage.getItem('agendamaster_chunk_reload_ts') || '0', 10);
       if (Date.now() - lastAttempt < 20_000) return false;
       sessionStorage.setItem('agendamaster_chunk_reload_ts', String(Date.now()));
@@ -122,11 +128,18 @@ if (typeof window !== 'undefined') {
     tryRecoverFromChunkMismatch();
   });
 
-  const isChunkLoadFailure = (msg: string) =>
-    msg.includes('failed to fetch dynamically imported module') ||
-    msg.includes('importing a module script failed') ||
-    msg.includes('error loading dynamically imported module') ||
-    msg.includes('chunkloaderror');
+  const isChunkLoadFailure = (msg: string) => {
+    // Erros em workers do PDF.js, cmaps, fontes e canvas não são falha de bundle Vite e jamais devem recarregar a tela
+    if (msg.includes('pdf') || msg.includes('worker') || msg.includes('cmap') || msg.includes('font') || msg.includes('canvas')) {
+      return false;
+    }
+    return (
+      msg.includes('failed to fetch dynamically imported module') ||
+      msg.includes('importing a module script failed') ||
+      msg.includes('error loading dynamically imported module') ||
+      msg.includes('chunkloaderror')
+    );
+  };
 
   const isTrueRefreshTokenError = (msg: string) =>
     msg.includes('refresh_token_not_found') ||

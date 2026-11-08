@@ -9,7 +9,7 @@ import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WE
 import { DAILY_CLASSIC, DAILY_FINANCIAL, DAILY_APPOINTMENT_PRO, DAILY_PLANNER_COMMON, DAILY_PERMANENT, APPOINTMENT_2DPP_TOP, APPOINTMENT_2DPP_BOTTOM, PERMANENT_2DPP_TOP, PERMANENT_2DPP_BOTTOM } from './templates/dailyTemplates';
 import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
-import { buildStandardAgendaConfig } from './templates/standardAgendaTemplate';
+import { buildStandardAgendaConfig, STANDARD_HALF_PAGE_TOP_ELEMENTS, STANDARD_HALF_PAGE_BOTTOM_ELEMENTS, cloneElementWithNewId } from './templates/standardAgendaTemplate';
 import { LAYOUT_LIBRARY, LayoutLibraryItem, resolveLayoutLibraryConfig } from './templates/layoutLibrary';
 
 interface InitialSetupProps {
@@ -253,6 +253,19 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   const [includeMonthlyIntroPages, setIncludeMonthlyIntroPages] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.includeMonthlyIntroPages ?? false) : (defaultValues?.includeMonthlyIntroPages ?? true));
   const [fillerPageContent, setFillerPageContent] = useState<string>(defaultValues?.fillerPageContent ?? 'blank');
   const [monthlyDividerVersoContent, setMonthlyDividerVersoContent] = useState<string>(defaultValues?.monthlyDividerVersoContent ?? 'blank');
+
+  const storedCustomQuotes = React.useMemo<string[]>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = window.localStorage.getItem('agendamaster_custom_quotes');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }, []);
 
   useEffect(() => {
       if (defaultValues) {
@@ -552,6 +565,36 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
     if (!file) return;
     setImportErrorBanner(null);
 
+    // Se o usuário selecionou um PDF para usar como modelo (Canva, Corel, etc.)
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      const projectName = file.name.replace(/\.[^/.]+$/, '');
+      const isPlanner = projectType === 'planner';
+      const chosenLayout = isPlanner 
+        ? (layoutType && layoutType.startsWith('weekly') ? layoutType : 'weekly_vertical')
+        : (layoutType || '1_per_page');
+
+      onComplete({
+        name: projectName || (isPlanner ? 'Planner Modelo PDF' : 'Projeto Modelo PDF'),
+        projectType: isPlanner ? 'planner' : (projectType || 'agenda'),
+        year: year || 2027,
+        layoutType: chosenLayout,
+        pageSize: pageSize || 'A5',
+        orientation: orientation || 'portrait',
+        margins: margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+        includeHolidays: true,
+        includeMoonPhases: false,
+        includeQuotes: true,
+        includeVerses: true,
+        mirrorEvenPages: true,
+        elements: [],
+        elementsWeeklyLeft: isPlanner ? [] : undefined,
+        elementsWeeklyRight: isPlanner ? [] : undefined,
+        introPages: [],
+        __initialPdfFile: file,
+      } as any);
+      return;
+    }
+
     try {
       const result = await importProjectOrTemplates(file);
 
@@ -721,7 +764,8 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               includeHolidays: true,
               includeMoonPhases: true,
               includeQuotes: true,
-              quoteCategory: 'feminine_strength',
+              quoteCategory: defaultValues?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
+              quoteCustomList: defaultValues?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
               includeVerses: true,
               municipalHolidays,
               startMonthOnRightPage,
@@ -897,7 +941,8 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               includeHolidays: isPermanentAgenda ? false : true,
               includeMoonPhases: isPermanentAgenda ? false : (defaultValues?.includeMoonPhases ?? true),
               includeQuotes: true,
-              quoteCategory: defaultValues?.quoteCategory || 'feminine_strength',
+              quoteCategory: defaultValues?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
+              quoteCustomList: defaultValues?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
               includeVerses: true,
               municipalHolidays: isPermanentAgenda ? [] : municipalHolidays,
               elements: finalElements,
@@ -924,11 +969,15 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           return;
       }
 
-      if (isPermanent && layoutTypeChanged) {
+      if (layoutTypeChanged) {
           if (layoutType === '2_per_page') {
-              elements = PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+              elements = isPermanent
+                  ? PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+                  : STANDARD_HALF_PAGE_TOP_ELEMENTS.map(el => cloneElementWithNewId(el, year));
           } else if (layoutType === '1_per_page') {
-              elements = DAILY_PERMANENT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }));
+              elements = isPermanent
+                  ? DAILY_PERMANENT.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+                  : elements;
           }
       }
 
@@ -963,7 +1012,8 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           includeHolidays: isPermanent ? false : (defaultValues?.includeHolidays ?? true),
           includeMoonPhases: isPermanent ? false : (defaultValues?.includeMoonPhases ?? true),
           includeQuotes: defaultValues?.includeQuotes ?? true,
-          quoteCategory: defaultValues?.quoteCategory || 'feminine_strength',
+          quoteCategory: defaultValues?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
+          quoteCustomList: defaultValues?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
           includeVerses: defaultValues?.includeVerses ?? true,
           municipalHolidays: isPermanent ? [] : municipalHolidays,
           elements,
@@ -971,12 +1021,16 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               ? (defaultValues?.elementsTop && defaultValues.elementsTop.length > 0
                   ? defaultValues.elementsTop
                   : PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })))
-              : defaultValues?.elementsTop,
+              : (defaultValues?.elementsTop && defaultValues.elementsTop.length > 0
+                  ? defaultValues.elementsTop
+                  : (layoutType === '2_per_page' ? STANDARD_HALF_PAGE_TOP_ELEMENTS.map(el => cloneElementWithNewId(el, year)) : undefined)),
           elementsBottom: isPermanent
               ? (defaultValues?.elementsBottom && defaultValues.elementsBottom.length > 0
                   ? defaultValues.elementsBottom
                   : PERMANENT_2DPP_BOTTOM.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })))
-              : defaultValues?.elementsBottom,
+              : (defaultValues?.elementsBottom && defaultValues.elementsBottom.length > 0
+                  ? defaultValues.elementsBottom
+                  : (layoutType === '2_per_page' ? STANDARD_HALF_PAGE_BOTTOM_ELEMENTS.map(el => cloneElementWithNewId(el, year)) : undefined)),
           elementsWeeklyLeft,
           elementsWeeklyRight,
           elementsWeeklyVersoLeft: customVerso ? (elementsWeeklyLeft?.map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
@@ -1144,11 +1198,22 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
             <div className="flex flex-wrap justify-center items-center gap-3">
               <button 
                 onClick={handleImportClick}
-                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
+                className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
+                title="Subir arquivo de backup de projeto ou modelos (.json ou .pdf)"
               >
                 <Upload className="w-4 h-4 text-[#b84a56]" />
-                <span>IMPORTAR PROJETO OU MODELOS (.JSON)</span>
+                <span>IMPORTAR PROJETO (.JSON / .PDF)</span>
               </button>
+
+              <button 
+                onClick={handleImportClick}
+                className="flex items-center gap-2 px-5 py-3 bg-indigo-50 hover:bg-indigo-100 rounded-2xl text-xs font-bold text-indigo-800 transition-all border border-indigo-200 shadow-xs cursor-pointer"
+                title="Abrir arquivo PDF (do Canva, Corel ou Illustrator) para usar como modelo da agenda"
+              >
+                <FileText className="w-4 h-4 text-indigo-600" />
+                <span>USAR MODELO PDF (CANVA / COREL)</span>
+              </button>
+
               {autoSavedDraft && (
                 <button
                   onClick={handleRestoreAutoSave}
@@ -1163,7 +1228,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 type="file" 
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
-                accept=".json" 
+                accept=".json,.pdf,application/pdf" 
                 className="hidden" 
               />
             </div>
@@ -1294,13 +1359,13 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-[#faf5f3] rounded-2xl text-xs font-bold text-slate-700 hover:text-[#b84a56] transition-all border border-[#eedad5] hover:border-[#b84a56]/50 shadow-xs cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-[#b84a56]" />
-              <span>Importar Projeto ou Modelos (.json)</span>
+              <span>Importar Projeto ou Modelos (.json / .pdf)</span>
             </button>
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileChange}
-              accept=".json"
+              accept=".json,.pdf,application/pdf"
               className="hidden"
             />
             {importErrorBanner && (
@@ -1345,14 +1410,14 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                     onClick={handleImportClick}
                     className="mt-6 flex items-center gap-2 px-4 py-2.5 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-bold transition-colors border border-white/30 text-white shadow-sm cursor-pointer"
                   >
-                    <Upload className="w-4 h-4 text-white" /> Importar Projeto ou Modelos (.json)
+                    <Upload className="w-4 h-4 text-white" /> Importar Projeto ou Modelos (.json / .pdf)
                   </button>
                 )}
                 <input 
                   type="file" 
                   ref={fileInputRef} 
                   onChange={handleFileChange} 
-                  accept=".json" 
+                  accept=".json,.pdf,application/pdf" 
                   className="hidden" 
                 />
             </div>

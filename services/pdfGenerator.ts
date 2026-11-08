@@ -3,6 +3,7 @@ import { jsPDF } from "jspdf";
 import { AgendaConfig, DayData, LayoutElement, Holiday } from "../types";
 import { getMonthName, getDayName, checkIsHoliday } from "../core/backend/calendar";
 import { getVerseForDay } from "../core/constants/verses";
+import { getQuoteForDay } from "../core/constants/quotes";
 import { ImageManager } from "../modules/editor/utils/imageManager";
 
 const hexToRgb = (hex: string): { r: number, g: number, b: number } | null => {
@@ -104,8 +105,8 @@ const renderElementToPDF = (
 
     const rawDayIdx = el.style?.dayIndex ?? (el.type === 'planner_day_box' ? el.style?.plannerDayBox?.dayIndex : 0);
     const dayIdx = typeof rawDayIdx === 'number' ? rawDayIdx : 0;
-    const targetDay = (week && week[dayIdx])
-        ? week[dayIdx]
+    const targetDay = (week && week.length > 0)
+        ? (week.find(d => d.dayOfWeek === dayIdx) || week[dayIdx])
         : ((day && dayIdx > 0) ? getShiftedDayData(day, dayIdx, municipalHolidays || []) : day);
 
     let text = '';
@@ -113,15 +114,35 @@ const renderElementToPDF = (
 
     if (el.type === 'text') text = el.content || 'Texto';
     if ((el.type === 'day_number' || variant === 'day_number') && targetDay) {
-        text = style.showLeadingZero ? targetDay.dayOfMonth.toString().padStart(2, '0') : targetDay.dayOfMonth.toString();
+        if (targetDay.isPaddingDay && (!targetDay.dayOfMonth || targetDay.dayOfMonth === 0)) {
+            text = '';
+        } else if (targetDay.dayOfMonth > 0) {
+            text = style.showLeadingZero ? targetDay.dayOfMonth.toString().padStart(2, '0') : targetDay.dayOfMonth.toString();
+        } else {
+            text = '';
+        }
     }
     if ((el.type === 'day_name' || variant === 'day_name') && targetDay) text = getDayName(targetDay.dayOfWeek, style.nameFormat);
     if ((el.type === 'month_name' || variant === 'month_name') && targetDay) text = getMonthName(targetDay.month, style.nameFormat);
     if ((el.type === 'month_number' || variant === 'month_number') && targetDay) text = (targetDay.month + 1).toString().padStart(2, '0');
     if ((el.type === 'year' || variant === 'year') && targetDay) text = (targetDay.year + (style.yearOffset || 0)).toString();
-    if (el.type === 'quote') text = quote || '';
+    if (el.type === 'quote') {
+        if (el.style?.quoteDisplayMode === 'fixed' && el.style?.quoteFixedText) {
+            text = el.style.quoteFixedText;
+        } else if (el.content && el.style?.quoteDisplayMode === 'fixed') {
+            text = el.content;
+        } else {
+            text = quote || '';
+        }
+    }
     if (el.type === 'verse') text = verse || '';
-    if (el.type === 'holiday' && targetDay) text = targetDay.holiday || '';
+    if (el.type === 'holiday' && targetDay) {
+        if (targetDay.isPaddingDay && (!targetDay.dayOfMonth || targetDay.dayOfMonth === 0)) {
+            text = '';
+        } else {
+            text = targetDay.holiday || '';
+        }
+    }
     if (el.type === 'holiday_list') text = el.content || '';
 
     // --- RENDER LOGIC ---
@@ -313,7 +334,7 @@ const renderElementToPDF = (
                 }
             }
         } 
-        else if (el.type === 'text' || el.type === 'quote' || el.type === 'holiday_list' || el.type === 'verse') {
+        else if (el.type === 'text' || el.type === 'quote' || el.type === 'holiday_list' || el.type === 'verse' || el.type === 'holiday') {
             // Standard Single Column Text
             let tx = absX;
             let align: 'left' | 'center' | 'right' = 'left';
@@ -644,6 +665,32 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
         return Math.floor(diff / oneDay);
     };
 
+    const isNotebook = config.projectType === 'notebook' || config.layoutType === 'notebook' || config.projectType === 'devotional';
+    let effectiveQuotesList = config.quoteCustomList && config.quoteCustomList.length > 0 ? config.quoteCustomList : quotes;
+    if ((!effectiveQuotesList || effectiveQuotesList.length === 0) && typeof window !== 'undefined') {
+        try {
+            const saved = window.localStorage.getItem('agendamaster_custom_quotes');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    effectiveQuotesList = parsed;
+                }
+            }
+        } catch (_) {}
+    }
+
+    const getDayQuote = (targetDay: DayData, pageNum: number) => {
+        const quoteIdx = isNotebook
+            ? (pageNum - 1)
+            : (targetDay.date ? getDayOfYear(new Date(targetDay.date)) : (pageNum - 1));
+        return getQuoteForDay(
+            quoteIdx,
+            targetDay.month,
+            config.quoteCategory || 'all',
+            effectiveQuotesList
+        );
+    };
+
     let globalPageCount = 0;
     const isSinglePageType = config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.projectType === 'notebook' || config.projectType === 'devotional';
     const allConfigElements = [...config.elements, ...(config.elementsVerso || [])];
@@ -682,7 +729,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 let geo = getSafeGeometry(globalPageCount);
                 let elements = getElementsForPage(config.elements, globalPageCount, true);
                 let verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
-                let quote = day.month !== undefined && quotes ? quotes[day.month] : undefined;
+                let quote = getDayQuote(day, globalPageCount);
                 elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
 
                 // Verso Page (Even) with same date
@@ -705,7 +752,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 const geo = getSafeGeometry(globalPageCount);
                 const elements = getElementsForPage(config.elements, globalPageCount, true);
                 const verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
-                const quote = day.month !== undefined && quotes ? quotes[day.month] : undefined;
+                const quote = getDayQuote(day, globalPageCount);
                 elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
                 if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
             }
@@ -724,14 +771,16 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
             const elementsBottom = getElementsForPage(bottomSource, globalPageCount);
             
             const verse1 = getVerseForDay(getDayOfYear(new Date(day1.date)));
-            elementsTop.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day1, quotes[day1.month], verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+            const quote1 = getDayQuote(day1, globalPageCount);
+            elementsTop.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day1, quote1, verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
             
             if (day2) { 
                 const verse2 = getVerseForDay(getDayOfYear(new Date(day2.date)));
+                const quote2 = getDayQuote(day2, globalPageCount);
                 const bottomAlreadyOffset = elementsBottom.every(e => e.y >= 48);
                 elementsBottom.forEach(el => {
                     const halfH_El = bottomAlreadyOffset ? el : { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
-                    renderElementToPDF(doc, halfH_El, day2, quotes[day2.month], verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                    renderElementToPDF(doc, halfH_El, day2, quote2, verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
                 }); 
                 const midY = geo.marginTop + (geo.safeH / 2); 
                 doc.setDrawColor(200, 200, 200); 
@@ -752,13 +801,19 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
             const geo = getSafeGeometry(globalPageCount);
             const elements = getElementsForPage(config.elements, globalPageCount);
             const verse = getVerseForDay(getDayOfYear(new Date(day.date)));
+            const quote = getDayQuote(day, globalPageCount);
             
             if (isSaturday) {
-                elements.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quotes[day.month], verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+                const elementsSat = getElementsForPage(satSource, globalPageCount);
+                elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
                 const nextDay = generatedDays[i+1];
                 if (nextDay) { 
+                    const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                    const elementsSun = getElementsForPage(sunSource, globalPageCount);
                     const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
-                    elements.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, quotes[nextDay.month], nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                    const nextQuote = getDayQuote(nextDay, globalPageCount);
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
                     const midY = geo.marginTop + (geo.safeH / 2); 
                     doc.setDrawColor(200, 200, 200); 
                     (doc as any).setLineDash([2, 2], 0); 
@@ -767,7 +822,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 }
                 i += 2; 
             } else {
-                elements.forEach(el => renderElementToPDF(doc, el, day, quotes[day.month], verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
                 i += 1;
             }
             if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }

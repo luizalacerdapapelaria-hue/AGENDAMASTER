@@ -48,9 +48,17 @@
 
           // 3. Auto-recuperação imediata caso um pacote JS/CSS antigo tenha sido substituído num novo deploy
           window.addEventListener('error', function (ev) {
+            // Em Electron ou no protocolo file:, não há cache mismatch de deploy - nunca recarregar!
+            if (window.location.protocol === 'file:' || (navigator.userAgent && navigator.userAgent.toLowerCase().indexOf('electron') !== -1)) {
+              return;
+            }
             var target = ev && ev.target;
             if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
               var src = target.src || target.href || '';
+              // Ignorar workers, pdfjs, cmaps, fontes e blobs locais para não reiniciar a aplicação
+              if (src.indexOf('pdf') !== -1 || src.indexOf('blob:') === 0 || src.indexOf('worker') !== -1 || src.indexOf('cmap') !== -1 || src.indexOf('font') !== -1) {
+                return;
+              }
               if (src.indexOf(window.location.origin) === 0 || src.indexOf('/assets/') !== -1) {
                 try {
                   var lastTs = parseInt(window.sessionStorage.getItem('agendamaster_asset_heal_ts') || '0', 10);

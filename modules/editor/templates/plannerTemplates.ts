@@ -49,6 +49,7 @@ export const WEEKLY_VERTICAL_LEFT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -73,8 +74,15 @@ export const WEEKLY_VERTICAL_LEFT: LayoutElement[] = [
         id: 'pv-l-1-name',
         name: 'Nome Segunda',
         type: 'day_name',
-        x: 11, y: 11.2, w: 19, h: 4.5, zIndex: 2,
+        x: 11, y: 10.5, w: 19, h: 3.2, zIndex: 2,
         style: { dayIndex: 1, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#9d174d', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-l-1-holiday',
+        name: 'Feriado Segunda',
+        type: 'holiday',
+        x: 11, y: 13.8, w: 19.5, h: 3.2, zIndex: 2,
+        style: { dayIndex: 1, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#be185d' }
     },
 
     // Terça-feira (Card Lavanda Pastel)
@@ -94,6 +102,7 @@ export const WEEKLY_VERTICAL_LEFT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -118,8 +127,15 @@ export const WEEKLY_VERTICAL_LEFT: LayoutElement[] = [
         id: 'pv-l-2-name',
         name: 'Nome Terça',
         type: 'day_name',
-        x: 45, y: 11.2, w: 19, h: 4.5, zIndex: 2,
+        x: 45, y: 10.5, w: 19, h: 3.2, zIndex: 2,
         style: { dayIndex: 2, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#6b21a8', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-l-2-holiday',
+        name: 'Feriado Terça',
+        type: 'holiday',
+        x: 45, y: 13.8, w: 19.5, h: 3.2, zIndex: 2,
+        style: { dayIndex: 2, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#7e22ce' }
     },
 
     // Quarta-feira (Card Sálvia Pastel)
@@ -139,6 +155,7 @@ export const WEEKLY_VERTICAL_LEFT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -163,8 +180,15 @@ export const WEEKLY_VERTICAL_LEFT: LayoutElement[] = [
         id: 'pv-l-3-name',
         name: 'Nome Quarta',
         type: 'day_name',
-        x: 79, y: 11.2, w: 19, h: 4.5, zIndex: 2,
+        x: 79, y: 10.5, w: 19, h: 3.2, zIndex: 2,
         style: { dayIndex: 3, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#166534', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-l-3-holiday',
+        name: 'Feriado Quarta',
+        type: 'holiday',
+        x: 79, y: 13.8, w: 19.5, h: 3.2, zIndex: 2,
+        style: { dayIndex: 3, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#15803d' }
     },
 
     // Rodapé da Semana (Página Esquerda): Prioridades da Semana & Rastreador de Hábitos
@@ -248,6 +272,7 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#fffbeb',
                 headerBorderColor: '#fde68a',
@@ -272,8 +297,15 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
         id: 'pv-r-1-name',
         name: 'Nome Quinta',
         type: 'day_name',
-        x: 11, y: 11.2, w: 19, h: 4.5, zIndex: 2,
+        x: 11, y: 10.5, w: 19, h: 3.2, zIndex: 2,
         style: { dayIndex: 4, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#92400e', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-r-1-holiday',
+        name: 'Feriado Quinta',
+        type: 'holiday',
+        x: 11, y: 13.8, w: 19.5, h: 3.2, zIndex: 2,
+        style: { dayIndex: 4, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#b45309' }
     },
 
     // Sexta-feira (Card Rosé Pastel)
@@ -293,6 +325,7 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -317,8 +350,15 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
         id: 'pv-r-2-name',
         name: 'Nome Sexta',
         type: 'day_name',
-        x: 45, y: 11.2, w: 19, h: 4.5, zIndex: 2,
+        x: 45, y: 10.5, w: 19, h: 3.2, zIndex: 2,
         style: { dayIndex: 5, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#9d174d', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-r-2-holiday',
+        name: 'Feriado Sexta',
+        type: 'holiday',
+        x: 45, y: 13.8, w: 19.5, h: 3.2, zIndex: 2,
+        style: { dayIndex: 5, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#be185d' }
     },
 
     // Sábado (Card Lavanda Pastel)
@@ -338,6 +378,7 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -357,8 +398,15 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
         id: 'pv-r-3-name',
         name: 'Nome Sábado',
         type: 'day_name',
-        x: 79, y: 11, w: 19, h: 4.5, zIndex: 2,
+        x: 79, y: 10.2, w: 19, h: 3, zIndex: 2,
         style: { dayIndex: 6, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#6b21a8', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-r-3-holiday',
+        name: 'Feriado Sábado',
+        type: 'holiday',
+        x: 79, y: 13.4, w: 19.5, h: 3, zIndex: 2,
+        style: { dayIndex: 6, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#7e22ce' }
     },
 
     // Domingo (Card Sálvia Pastel)
@@ -378,6 +426,7 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -397,8 +446,15 @@ export const WEEKLY_VERTICAL_RIGHT: LayoutElement[] = [
         id: 'pv-r-4-name',
         name: 'Nome Domingo',
         type: 'day_name',
-        x: 79, y: 47.5, w: 19, h: 4.5, zIndex: 2,
+        x: 79, y: 46.7, w: 19, h: 3, zIndex: 2,
         style: { dayIndex: 0, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#166534', letterSpacing: 0.8 }
+    },
+    {
+        id: 'pv-r-4-holiday',
+        name: 'Feriado Domingo',
+        type: 'holiday',
+        x: 79, y: 49.9, w: 19.5, h: 3, zIndex: 2,
+        style: { dayIndex: 0, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'left', color: '#15803d' }
     },
 
     // Rodapé da Semana (Página Direita): Notas & Gratidão da Semana
@@ -490,6 +546,7 @@ export const WEEKLY_HORIZONTAL_LEFT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -509,8 +566,15 @@ export const WEEKLY_HORIZONTAL_LEFT: LayoutElement[] = [
         id: 'ph-l-1-name',
         name: 'Nome Segunda',
         type: 'day_name',
-        x: 10, y: 9.8, w: 30, h: 4.5, zIndex: 2,
+        x: 10, y: 9.8, w: 26, h: 4.5, zIndex: 2,
         style: { dayIndex: 1, fontSize: 8.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#9d174d', letterSpacing: 1 }
+    },
+    {
+        id: 'ph-l-1-holiday',
+        name: 'Feriado Segunda',
+        type: 'holiday',
+        x: 38, y: 9.8, w: 58, h: 4.5, zIndex: 2,
+        style: { dayIndex: 1, fontSize: 8, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#be185d' }
     },
 
     // Terça-feira (Lavanda Pastel)
@@ -530,6 +594,7 @@ export const WEEKLY_HORIZONTAL_LEFT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -549,8 +614,15 @@ export const WEEKLY_HORIZONTAL_LEFT: LayoutElement[] = [
         id: 'ph-l-2-name',
         name: 'Nome Terça',
         type: 'day_name',
-        x: 10, y: 40.3, w: 30, h: 4.5, zIndex: 2,
+        x: 10, y: 40.3, w: 26, h: 4.5, zIndex: 2,
         style: { dayIndex: 2, fontSize: 8.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#6b21a8', letterSpacing: 1 }
+    },
+    {
+        id: 'ph-l-2-holiday',
+        name: 'Feriado Terça',
+        type: 'holiday',
+        x: 38, y: 40.3, w: 58, h: 4.5, zIndex: 2,
+        style: { dayIndex: 2, fontSize: 8, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#7e22ce' }
     },
 
     // Quarta-feira (Sálvia Pastel)
@@ -570,6 +642,7 @@ export const WEEKLY_HORIZONTAL_LEFT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -589,8 +662,15 @@ export const WEEKLY_HORIZONTAL_LEFT: LayoutElement[] = [
         id: 'ph-l-3-name',
         name: 'Nome Quarta',
         type: 'day_name',
-        x: 10, y: 70.8, w: 30, h: 4.5, zIndex: 2,
+        x: 10, y: 70.8, w: 26, h: 4.5, zIndex: 2,
         style: { dayIndex: 3, fontSize: 8.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#166534', letterSpacing: 1 }
+    },
+    {
+        id: 'ph-l-3-holiday',
+        name: 'Feriado Quarta',
+        type: 'holiday',
+        x: 38, y: 70.8, w: 58, h: 4.5, zIndex: 2,
+        style: { dayIndex: 3, fontSize: 8, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#15803d' }
     }
 ];
 
@@ -612,6 +692,7 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 24,
                 headerBackgroundColor: '#fffbeb',
                 headerBorderColor: '#fde68a',
@@ -631,8 +712,15 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
         id: 'ph-r-4-name',
         name: 'Nome Quinta',
         type: 'day_name',
-        x: 10, y: 3.5, w: 30, h: 4, zIndex: 2,
+        x: 10, y: 3.5, w: 26, h: 4, zIndex: 2,
         style: { dayIndex: 4, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#92400e', letterSpacing: 1 }
+    },
+    {
+        id: 'ph-r-4-holiday',
+        name: 'Feriado Quinta',
+        type: 'holiday',
+        x: 38, y: 3.5, w: 58, h: 4, zIndex: 2,
+        style: { dayIndex: 4, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#b45309' }
     },
 
     // Sexta-feira (Rosé Pastel)
@@ -652,6 +740,7 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 24,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -671,8 +760,15 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
         id: 'ph-r-5-name',
         name: 'Nome Sexta',
         type: 'day_name',
-        x: 10, y: 27.5, w: 30, h: 4, zIndex: 2,
+        x: 10, y: 27.5, w: 26, h: 4, zIndex: 2,
         style: { dayIndex: 5, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#9d174d', letterSpacing: 1 }
+    },
+    {
+        id: 'ph-r-5-holiday',
+        name: 'Feriado Sexta',
+        type: 'holiday',
+        x: 38, y: 27.5, w: 58, h: 4, zIndex: 2,
+        style: { dayIndex: 5, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#be185d' }
     },
 
     // Sábado e Domingo Lado a Lado
@@ -692,6 +788,7 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 24,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -711,8 +808,15 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
         id: 'ph-r-6-name',
         name: 'Nome Sábado',
         type: 'day_name',
-        x: 10, y: 51.5, w: 25, h: 4, zIndex: 2,
+        x: 10, y: 51.5, w: 16, h: 4, zIndex: 2,
         style: { dayIndex: 6, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#6b21a8', letterSpacing: 0.8 }
+    },
+    {
+        id: 'ph-r-6-holiday',
+        name: 'Feriado Sábado',
+        type: 'holiday',
+        x: 26, y: 51.5, w: 21, h: 4, zIndex: 2,
+        style: { dayIndex: 6, fontSize: 7, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#7e22ce' }
     },
 
     {
@@ -731,6 +835,7 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 24,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -750,8 +855,15 @@ export const WEEKLY_HORIZONTAL_RIGHT: LayoutElement[] = [
         id: 'ph-r-7-name',
         name: 'Nome Domingo',
         type: 'day_name',
-        x: 61.5, y: 51.5, w: 25, h: 4, zIndex: 2,
+        x: 61.5, y: 51.5, w: 16, h: 4, zIndex: 2,
         style: { dayIndex: 0, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#166534', letterSpacing: 0.8 }
+    },
+    {
+        id: 'ph-r-7-holiday',
+        name: 'Feriado Domingo',
+        type: 'holiday',
+        x: 77.5, y: 51.5, w: 21, h: 4, zIndex: 2,
+        style: { dayIndex: 0, fontSize: 7, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#15803d' }
     },
 
     // Rodapé da Semana Horizontal: Prioridades & Hábitos (y: 75 a 98)
@@ -817,6 +929,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -827,14 +940,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-1-num',
         type: 'day_number',
-        x: 0.5, y: 1, w: 14.6, h: 6, zIndex: 2,
+        x: 0.5, y: 1, w: 14.6, h: 5.5, zIndex: 2,
         style: { dayIndex: 1, fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#881337' }
     },
     {
         id: 'p1v-1-name',
         type: 'day_name',
-        x: 0.5, y: 6.5, w: 14.6, h: 5, zIndex: 2,
+        x: 0.5, y: 6.2, w: 14.6, h: 3, zIndex: 2,
         style: { dayIndex: 1, fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#9d174d' }
+    },
+    {
+        id: 'p1v-1-holiday',
+        name: 'Feriado Segunda',
+        type: 'holiday',
+        x: 0.5, y: 9.2, w: 14.6, h: 2.8, zIndex: 2,
+        style: { dayIndex: 1, fontSize: 6, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#be185d' }
     },
     // Terça
     {
@@ -850,6 +970,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -860,14 +981,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-2-num',
         type: 'day_number',
-        x: 17.3, y: 1, w: 14.6, h: 6, zIndex: 2,
+        x: 17.3, y: 1, w: 14.6, h: 5.5, zIndex: 2,
         style: { dayIndex: 2, fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#4c1d95' }
     },
     {
         id: 'p1v-2-name',
         type: 'day_name',
-        x: 17.3, y: 6.5, w: 14.6, h: 5, zIndex: 2,
+        x: 17.3, y: 6.2, w: 14.6, h: 3, zIndex: 2,
         style: { dayIndex: 2, fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#6b21a8' }
+    },
+    {
+        id: 'p1v-2-holiday',
+        name: 'Feriado Terça',
+        type: 'holiday',
+        x: 17.3, y: 9.2, w: 14.6, h: 2.8, zIndex: 2,
+        style: { dayIndex: 2, fontSize: 6, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#7e22ce' }
     },
     // Quarta
     {
@@ -883,6 +1011,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -893,14 +1022,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-3-num',
         type: 'day_number',
-        x: 34.1, y: 1, w: 14.6, h: 6, zIndex: 2,
+        x: 34.1, y: 1, w: 14.6, h: 5.5, zIndex: 2,
         style: { dayIndex: 3, fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#14532d' }
     },
     {
         id: 'p1v-3-name',
         type: 'day_name',
-        x: 34.1, y: 6.5, w: 14.6, h: 5, zIndex: 2,
+        x: 34.1, y: 6.2, w: 14.6, h: 3, zIndex: 2,
         style: { dayIndex: 3, fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#166534' }
+    },
+    {
+        id: 'p1v-3-holiday',
+        name: 'Feriado Quarta',
+        type: 'holiday',
+        x: 34.1, y: 9.2, w: 14.6, h: 2.8, zIndex: 2,
+        style: { dayIndex: 3, fontSize: 6, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#15803d' }
     },
     // Quinta
     {
@@ -916,6 +1052,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#fffbeb',
                 headerBorderColor: '#fde68a',
@@ -926,14 +1063,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-4-num',
         type: 'day_number',
-        x: 50.9, y: 1, w: 14.6, h: 6, zIndex: 2,
+        x: 50.9, y: 1, w: 14.6, h: 5.5, zIndex: 2,
         style: { dayIndex: 4, fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#78350f' }
     },
     {
         id: 'p1v-4-name',
         type: 'day_name',
-        x: 50.9, y: 6.5, w: 14.6, h: 5, zIndex: 2,
+        x: 50.9, y: 6.2, w: 14.6, h: 3, zIndex: 2,
         style: { dayIndex: 4, fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#92400e' }
+    },
+    {
+        id: 'p1v-4-holiday',
+        name: 'Feriado Quinta',
+        type: 'holiday',
+        x: 50.9, y: 9.2, w: 14.6, h: 2.8, zIndex: 2,
+        style: { dayIndex: 4, fontSize: 6, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#b45309' }
     },
     // Sexta
     {
@@ -949,6 +1093,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 12,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -959,14 +1104,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-5-num',
         type: 'day_number',
-        x: 67.7, y: 1, w: 14.6, h: 6, zIndex: 2,
+        x: 67.7, y: 1, w: 14.6, h: 5.5, zIndex: 2,
         style: { dayIndex: 5, fontSize: 15, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#881337' }
     },
     {
         id: 'p1v-5-name',
         type: 'day_name',
-        x: 67.7, y: 6.5, w: 14.6, h: 5, zIndex: 2,
+        x: 67.7, y: 6.2, w: 14.6, h: 3, zIndex: 2,
         style: { dayIndex: 5, fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#9d174d' }
+    },
+    {
+        id: 'p1v-5-holiday',
+        name: 'Feriado Sexta',
+        type: 'holiday',
+        x: 67.7, y: 9.2, w: 14.6, h: 2.8, zIndex: 2,
+        style: { dayIndex: 5, fontSize: 6, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#be185d' }
     },
     // Sábado
     {
@@ -982,6 +1134,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -992,14 +1145,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-6-num',
         type: 'day_number',
-        x: 84.5, y: 1, w: 15.0, h: 5.5, zIndex: 2,
+        x: 84.5, y: 1, w: 15.0, h: 5, zIndex: 2,
         style: { dayIndex: 6, fontSize: 14, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#4c1d95' }
     },
     {
         id: 'p1v-6-name',
         type: 'day_name',
-        x: 84.5, y: 6, w: 15.0, h: 4.5, zIndex: 2,
+        x: 84.5, y: 5.8, w: 15.0, h: 3, zIndex: 2,
         style: { dayIndex: 6, fontSize: 7, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#6b21a8' }
+    },
+    {
+        id: 'p1v-6-holiday',
+        name: 'Feriado Sábado',
+        type: 'holiday',
+        x: 84.5, y: 8.8, w: 15.0, h: 2.5, zIndex: 2,
+        style: { dayIndex: 6, fontSize: 5.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#7e22ce' }
     },
     // Domingo
     {
@@ -1015,6 +1175,7 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 22,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -1025,14 +1186,21 @@ export const WEEKLY_ONE_PAGE_VERTICAL: LayoutElement[] = [
     {
         id: 'p1v-7-num',
         type: 'day_number',
-        x: 84.5, y: 51.8, w: 15.0, h: 5.5, zIndex: 2,
+        x: 84.5, y: 51.5, w: 15.0, h: 5, zIndex: 2,
         style: { dayIndex: 0, fontSize: 14, fontWeight: 'bold', fontFamily: 'Playfair Display', textAlign: 'center', color: '#14532d' }
     },
     {
         id: 'p1v-7-name',
         type: 'day_name',
-        x: 84.5, y: 56.8, w: 15.0, h: 4.5, zIndex: 2,
+        x: 84.5, y: 56.3, w: 15.0, h: 3, zIndex: 2,
         style: { dayIndex: 0, fontSize: 7, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'center', textTransform: 'uppercase', color: '#166534' }
+    },
+    {
+        id: 'p1v-7-holiday',
+        name: 'Feriado Domingo',
+        type: 'holiday',
+        x: 84.5, y: 59.3, w: 15.0, h: 2.5, zIndex: 2,
+        style: { dayIndex: 0, fontSize: 5.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'center', color: '#15803d' }
     }
 ];
 
@@ -1051,6 +1219,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -1070,6 +1239,13 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
         x: 10, y: 1, w: 28, h: 3.5, zIndex: 2,
         style: { dayIndex: 1, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#9d174d' }
     },
+    {
+        id: 'p1h-1-holiday',
+        name: 'Feriado Segunda',
+        type: 'holiday',
+        x: 40, y: 1, w: 58, h: 3.5, zIndex: 2,
+        style: { dayIndex: 1, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#be185d' }
+    },
     // Terça
     {
         id: 'p1h-2',
@@ -1084,6 +1260,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -1103,6 +1280,13 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
         x: 10, y: 18, w: 28, h: 3.5, zIndex: 2,
         style: { dayIndex: 2, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#6b21a8' }
     },
+    {
+        id: 'p1h-2-holiday',
+        name: 'Feriado Terça',
+        type: 'holiday',
+        x: 40, y: 18, w: 58, h: 3.5, zIndex: 2,
+        style: { dayIndex: 2, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#7e22ce' }
+    },
     // Quarta
     {
         id: 'p1h-3',
@@ -1117,6 +1301,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -1136,6 +1321,13 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
         x: 10, y: 35, w: 28, h: 3.5, zIndex: 2,
         style: { dayIndex: 3, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#166534' }
     },
+    {
+        id: 'p1h-3-holiday',
+        name: 'Feriado Quarta',
+        type: 'holiday',
+        x: 40, y: 35, w: 58, h: 3.5, zIndex: 2,
+        style: { dayIndex: 3, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#15803d' }
+    },
     // Quinta
     {
         id: 'p1h-4',
@@ -1150,6 +1342,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#fffbeb',
                 headerBorderColor: '#fde68a',
@@ -1169,6 +1362,13 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
         x: 10, y: 52, w: 28, h: 3.5, zIndex: 2,
         style: { dayIndex: 4, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#92400e' }
     },
+    {
+        id: 'p1h-4-holiday',
+        name: 'Feriado Quinta',
+        type: 'holiday',
+        x: 40, y: 52, w: 58, h: 3.5, zIndex: 2,
+        style: { dayIndex: 4, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#b45309' }
+    },
     // Sexta
     {
         id: 'p1h-5',
@@ -1183,6 +1383,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#fff1f2',
                 headerBorderColor: '#fbcfe8',
@@ -1202,6 +1403,13 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
         x: 10, y: 69, w: 28, h: 3.5, zIndex: 2,
         style: { dayIndex: 5, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#9d174d' }
     },
+    {
+        id: 'p1h-5-holiday',
+        name: 'Feriado Sexta',
+        type: 'holiday',
+        x: 40, y: 69, w: 58, h: 3.5, zIndex: 2,
+        style: { dayIndex: 5, fontSize: 7.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#be185d' }
+    },
     // Sábado
     {
         id: 'p1h-6',
@@ -1216,6 +1424,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#faf5ff',
                 headerBorderColor: '#e9d5ff',
@@ -1232,8 +1441,15 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
     {
         id: 'p1h-6-name',
         type: 'day_name',
-        x: 10, y: 86, w: 25, h: 3.5, zIndex: 2,
+        x: 10, y: 86, w: 20, h: 3.5, zIndex: 2,
         style: { dayIndex: 6, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#6b21a8' }
+    },
+    {
+        id: 'p1h-6-holiday',
+        name: 'Feriado Sábado',
+        type: 'holiday',
+        x: 30, y: 86, w: 18, h: 3.5, zIndex: 2,
+        style: { dayIndex: 6, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#7e22ce' }
     },
     // Domingo
     {
@@ -1249,6 +1465,7 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
                 lineSpacing: 16,
                 showDayNumber: false,
                 showDayName: false,
+                showHoliday: false,
                 headerHeight: 26,
                 headerBackgroundColor: '#f0fdf4',
                 headerBorderColor: '#bbf7d0',
@@ -1265,7 +1482,14 @@ export const WEEKLY_ONE_PAGE_HORIZONTAL: LayoutElement[] = [
     {
         id: 'p1h-7-name',
         type: 'day_name',
-        x: 61, y: 86, w: 25, h: 3.5, zIndex: 2,
+        x: 61, y: 86, w: 20, h: 3.5, zIndex: 2,
         style: { dayIndex: 0, fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', textAlign: 'left', textTransform: 'uppercase', color: '#166534' }
+    },
+    {
+        id: 'p1h-7-holiday',
+        name: 'Feriado Domingo',
+        type: 'holiday',
+        x: 81, y: 86, w: 18, h: 3.5, zIndex: 2,
+        style: { dayIndex: 0, fontSize: 6.5, fontWeight: 'normal', fontFamily: 'Montserrat', textAlign: 'right', color: '#15803d' }
     }
 ];

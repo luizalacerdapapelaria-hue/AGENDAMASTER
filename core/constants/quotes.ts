@@ -182,6 +182,21 @@ export const QUOTE_CATEGORIES_METADATA: QuoteCategoryMeta[] = [
     ]
   },
   {
+    id: 'custom',
+    name: 'Minhas Frases Importadas',
+    shortName: 'Minhas Frases',
+    icon: '📝',
+    tag: 'Personalizado',
+    description: 'Frases e citações personalizadas adicionadas ou importadas pelo usuário.',
+    badgeBg: '#ecfdf5',
+    badgeText: '#047857',
+    badgeBorder: '#a7f3d0',
+    themeColor: '#059669',
+    examples: [
+      'Suas próprias frases personalizadas alternando progressivamente a cada página do projeto.'
+    ]
+  },
+  {
     id: 'all',
     name: 'Misto / Todas as Categorias',
     shortName: 'Misto Completo',
@@ -226,7 +241,22 @@ export const MOTIVATIONAL_QUOTES = QUOTES_BY_CATEGORY.all;
 /**
  * Obtém a lista de frases para uma categoria específica
  */
-export function getQuotesByCategory(category?: QuoteCategory | string): string[] {
+export function getQuotesByCategory(category?: QuoteCategory | string, customQuotesList?: string[]): string[] {
+  if (category === 'custom') {
+    if (customQuotesList && Array.isArray(customQuotesList) && customQuotesList.length > 0) {
+      return customQuotesList;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const custom = window.localStorage.getItem('agendamaster_custom_quotes');
+        if (custom) {
+          const parsed = JSON.parse(custom);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
   const catKey = (category || 'all') as QuoteCategory;
   return QUOTES_BY_CATEGORY[catKey] || QUOTES_BY_CATEGORY.all;
 }
@@ -243,27 +273,17 @@ export function getQuoteForDay(
 ): string {
   const isCustom = category === 'custom';
 
-  // 1. Se houver frases customizadas enviadas diretamente
-  if (customQuotesList && Array.isArray(customQuotesList) && customQuotesList.length > 0) {
-    if (isCustom || category === 'all' || !category) {
-      if (month !== undefined && month >= 0 && month < 12 && dayOfYear === 0) {
-        return customQuotesList[month % customQuotesList.length];
-      }
+  // 1. Se a categoria for customizada ('custom')
+  if (isCustom) {
+    if (customQuotesList && Array.isArray(customQuotesList) && customQuotesList.length > 0) {
       return customQuotesList[Math.abs(dayOfYear) % customQuotesList.length];
     }
-  }
-
-  // 2. Se a categoria for custom ou se for all/padrão, verificar frases salvas no localStorage
-  if (isCustom || category === 'all' || !category) {
     try {
       if (typeof window !== 'undefined') {
         const custom = window.localStorage.getItem('agendamaster_custom_quotes');
         if (custom) {
           const parsed = JSON.parse(custom);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            if (month !== undefined && month >= 0 && month < 12 && dayOfYear === 0) {
-              return parsed[month % parsed.length];
-            }
             return parsed[Math.abs(dayOfYear) % parsed.length];
           }
         }
@@ -273,16 +293,20 @@ export function getQuoteForDay(
     }
   }
 
+  // 2. Se a categoria for all ou não especificada, mas customQuotesList tiver sido fornecida
+  // e o projeto estiver configurado com frases customizadas
+  if ((!category || category === 'all') && isCustom) {
+    if (customQuotesList && Array.isArray(customQuotesList) && customQuotesList.length > 0) {
+      return customQuotesList[Math.abs(dayOfYear) % customQuotesList.length];
+    }
+  }
+
   // 3. Obter a lista correspondente à categoria solicitada
   const catKey = (category && category !== 'custom' ? category : 'all') as QuoteCategory;
   const list = QUOTES_BY_CATEGORY[catKey] || QUOTES_BY_CATEGORY.all;
 
   if (!list || list.length === 0) {
     return "A persistência é o caminho do êxito.";
-  }
-
-  if (month !== undefined && month >= 0 && month < 12 && dayOfYear === 0) {
-    return list[month % list.length];
   }
 
   return list[Math.abs(dayOfYear) % list.length];
@@ -309,7 +333,10 @@ export function getRandomQuote(category?: QuoteCategory | string, customQuotesLi
     } catch (e) {}
   }
   const catKey = (category && category !== 'custom' ? category : 'all') as QuoteCategory;
-  const list = getQuotesByCategory(catKey);
+  const list = getQuotesByCategory(catKey, customQuotesList);
+  if (!list || list.length === 0) {
+    return "A persistência é o caminho do êxito.";
+  }
   const idx = Math.floor(Math.random() * list.length);
   return list[idx] || "A persistência é o caminho do êxito.";
 }

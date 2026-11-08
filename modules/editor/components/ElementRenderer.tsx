@@ -344,7 +344,7 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
               } else if (props.weekDays[dayIndex]) {
                   targetDay = props.weekDays[dayIndex];
               } else {
-                  targetDay = { dayOfMonth: props.isEditor ? (dayIndex === 0 ? 7 : dayIndex) : 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
+                  targetDay = { dayOfMonth: 0, month: -1, dayOfWeek: dayIndex, year: 0, date: new Date(0), isPaddingDay: true };
               }
           } else if (props.weekDays && props.weekDays[dayIndex]) {
               // Layout multi-dia (ex: 2 ou 3 dias na mesma página): pega diretamente pelo índice da sequência!

@@ -77,7 +77,7 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
   };
 
   const handleInsert = (positionPreset: 'top' | 'bottom' | 'card', fixedText?: string) => {
-    const categoryToUse = (activeTab === 'custom' ? 'all' : activeTab) as QuoteCategory;
+    const categoryToUse = (activeTab === 'custom' ? 'custom' : activeTab) as QuoteCategory;
     onInsertQuoteElement({
       category: categoryToUse,
       positionPreset,
@@ -91,8 +91,21 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
     }, 600);
   };
 
+  const cleanQuoteLine = (raw: string): string => {
+    let clean = raw.trim();
+    // Remove prefix like "1. ", "1 - ", "1) ", "1\t"
+    clean = clean.replace(/^\d+[\.\-\)\t]\s*/, '');
+    // Remove wrapping quotes from CSV or Excel copies
+    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith('“') && clean.endsWith('”')) || (clean.startsWith('\'') && clean.endsWith('\''))) {
+      clean = clean.slice(1, -1).trim();
+    }
+    clean = clean.replace(/""/g, '"');
+    clean = clean.replace(/\t/g, ' - ');
+    return clean.trim();
+  };
+
   const handleShufflePreview = () => {
-    const quote = getRandomQuote(activeTab === 'custom' ? 'all' : activeTab);
+    const quote = getRandomQuote(activeTab, customQuotes);
     setRandomPreviewQuote(quote);
   };
 
@@ -100,11 +113,14 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
     if (!pastedText.trim()) return;
     const lines = pastedText
       .split(/\r?\n/)
-      .map(l => l.trim())
-      .filter(l => l.length > 3);
+      .map(cleanQuoteLine)
+      .filter(l => l.length >= 2);
     if (lines.length > 0) {
       onSaveCustomQuotes(lines);
+      onSetProjectCategory('custom');
       setPastedText('');
+      setInsertedQuote(`${lines.length} frase(s) própria(s) salva(s) e ativada(s) no projeto!`);
+      setTimeout(() => setInsertedQuote(null), 3500);
     }
   };
 
@@ -118,12 +134,23 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
         let phrases: string[] = [];
         if (file.name.endsWith('.json')) {
           const parsed = JSON.parse(text);
-          if (Array.isArray(parsed)) phrases = parsed.map(String).map(s => s.trim()).filter(Boolean);
+          if (Array.isArray(parsed)) {
+            phrases = parsed.map(String).map(cleanQuoteLine).filter(l => l.length >= 2);
+          }
         } else {
-          phrases = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
+          const rawLines = text.split(/\r?\n/).map(cleanQuoteLine).filter(l => l.length >= 2);
+          const headerRegex = /^(frases?|quotes?|texto|mensagens?|mensage|frase_motivacional|citacao|citacoes)$/i;
+          if (rawLines.length > 1 && headerRegex.test(rawLines[0].toLowerCase())) {
+            phrases = rawLines.slice(1);
+          } else {
+            phrases = rawLines;
+          }
         }
         if (phrases.length > 0) {
           onSaveCustomQuotes(phrases);
+          onSetProjectCategory('custom');
+          setInsertedQuote(`${phrases.length} frase(s) importada(s) e ativada(s) no projeto!`);
+          setTimeout(() => setInsertedQuote(null), 3500);
         }
       } catch (err) {
         console.error('Erro ao importar frases:', err);
@@ -451,15 +478,76 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
               </div>
             </>
           ) : (
-            /* TAB: MINHAS FRASES (IMPORTAR / COLAR DO EXCEL) - IDÊNTICO AO MODAL DE VERSÍCULOS */
+            /* TAB: MINHAS FRASES (IMPORTAR / COLAR DO EXCEL) */
             <div className="space-y-5">
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 leading-relaxed space-y-1.5">
-                <p className="font-bold flex items-center gap-1.5 text-amber-950 text-sm">
-                  <Star className="w-4 h-4 text-amber-500 fill-amber-300 shrink-0" />
-                  <span>Quer usar suas próprias Frases ou Mensagens na sua agenda?</span>
+              {/* Custom Showcase Banner */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[#ecfdf5] via-[#f0fdf4] to-[#fef2f2] border border-emerald-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xs">
+                <div className="space-y-1.5 max-w-xl">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📝</span>
+                    <h3 className="text-base font-black text-slate-900">
+                      Minhas Frases Próprias (Personalizadas)
+                    </h3>
+                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-2xs">
+                      {customQuotes.length > 0 ? `${customQuotes.length} Frases Cadastradas` : 'Aguardando Importação'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                    {customQuotes.length > 0
+                      ? `Suas ${customQuotes.length} frases exclusivas estão prontas para alternar diariamente em todos os tipos de agenda (1 dia/pág, 2 dias/pág, semanais, cadernos e devocionais).`
+                      : 'Personalize todas as mensagens do miolo trazendo sua própria lista do Excel, Google Sheets ou arquivo de texto.'}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
+                  {customQuotes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSetProjectCategory('custom');
+                        setInsertedQuote('Frases Próprias ativadas no projeto!');
+                        setTimeout(() => setInsertedQuote(null), 2500);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                        currentCategory === 'custom'
+                          ? 'bg-emerald-600 text-white shadow-emerald-600/25 ring-2 ring-emerald-300'
+                          : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-300'
+                      }`}
+                      title="Ativa suas frases próprias para rotacionar ao longo de todo o ano"
+                    >
+                      {currentCategory === 'custom' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Tema Ativo na Agenda</span>
+                        </>
+                      ) : (
+                        <>
+                          <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-300" />
+                          <span>Ativar como Padrão do Ano</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleInsert('bottom')}
+                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-700/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                    title="Adiciona um elemento de frase no rodapé da página com suas frases próprias"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Inserir na Página</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 leading-relaxed space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-amber-950 text-xs">
+                  <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-300 shrink-0" />
+                  <span>Dica de Importação (Excel / Google Sheets / Bloco de Notas)</span>
                 </p>
-                <p className="text-amber-800 text-xs leading-relaxed">
-                  Agora você pode substituir todas as frases dos dias por uma lista personalizada do seu ateliê! É super simples trazer do seu <strong>Excel</strong> ou <strong>Google Sheets</strong>: basta colar as linhas na caixa de texto ou fazer upload de um arquivo.
+                <p className="text-amber-800 text-[11px] leading-relaxed">
+                  Basta selecionar a coluna com suas frases na planilha, dar <strong>Ctrl+C</strong> e colar na caixa de texto abaixo. O sistema remove aspas, numeração automática e espaços extras automaticamente!
                 </p>
               </div>
 
@@ -497,20 +585,35 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
                     <ol className="list-decimal list-inside text-[11px] text-slate-600 space-y-1 leading-relaxed">
                       <li>Abra sua planilha (Excel ou Google Sheets).</li>
                       <li>Selecione e <strong>Copie (Ctrl+C)</strong> a coluna de frases.</li>
-                      <li>Insira os dados na caixa ao lado e clique em salvar.</li>
+                      <li>Cole na caixa ao lado e clique em <strong>Salvar Frases Coladas</strong>.</li>
                     </ol>
                   </div>
 
                   <div className="p-4 rounded-2xl bg-[#faf6f4] border border-[#eedad5] space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-slate-700">Estado atual:</span>
-                      {customQuotes.length > 0 ? (
-                        <span className="bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full text-[10px] border border-emerald-300">
-                          Ativo (Frases Próprias)
+                      {currentCategory === 'custom' ? (
+                        <span className="bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full text-[10px] border border-emerald-300 flex items-center gap-1">
+                          <Check className="w-3 h-3 text-emerald-700" />
+                          <span>Ativo na Agenda (Frases Próprias)</span>
                         </span>
+                      ) : customQuotes.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSetProjectCategory('custom');
+                            setInsertedQuote('Frases Próprias ativadas no projeto!');
+                            setTimeout(() => setInsertedQuote(null), 2500);
+                          }}
+                          className="bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold px-2.5 py-0.5 rounded-full text-[10px] border border-emerald-300 flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Clique para ativar suas frases cadastradas nesta agenda"
+                        >
+                          <Star className="w-3 h-3 text-amber-500 fill-amber-300" />
+                          <span>{customQuotes.length} Salvas (Clique p/ Ativar)</span>
+                        </button>
                       ) : (
                         <span className="bg-slate-200 text-slate-700 font-bold px-2.5 py-0.5 rounded-full text-[10px]">
-                          Ativo (Frases Padrão do Sistema)
+                          Padrão do Sistema
                         </span>
                       )}
                     </div>

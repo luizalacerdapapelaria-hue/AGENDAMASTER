@@ -391,7 +391,7 @@ export const STANDARD_HALF_PAGE_TOP_ELEMENTS: LayoutElement[] = [
         id: 'std-top-card',
         name: 'Card Superior Pastel',
         type: 'box',
-        x: 5, y: 2.5, w: 90, h: 44.5,
+        x: 5, y: 3, w: 90, h: 94,
         zIndex: 0,
         style: {
             backgroundColor: '#fffbfc',
@@ -404,7 +404,7 @@ export const STANDARD_HALF_PAGE_TOP_ELEMENTS: LayoutElement[] = [
         id: 'std-top-badge',
         name: 'Badge Dia Superior',
         type: 'box',
-        x: 7, y: 4, w: 12, h: 7.5,
+        x: 7, y: 5.5, w: 13, h: 18,
         zIndex: 1,
         style: {
             backgroundColor: '#fff1f2',
@@ -417,58 +417,173 @@ export const STANDARD_HALF_PAGE_TOP_ELEMENTS: LayoutElement[] = [
         id: 'std-top-num',
         name: 'Número do Dia (Topo)',
         type: 'day_number',
-        x: 7, y: 4.2, w: 12, h: 7,
+        x: 7, y: 6, w: 13, h: 17,
         zIndex: 2,
-        style: { fontSize: 19, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#881337', textAlign: 'center' }
+        style: { fontSize: 19, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#881337', textAlign: 'center', verticalAlign: 'middle' }
     },
     {
         id: 'std-top-name',
         name: 'Dia da Semana (Topo)',
         type: 'day_name',
-        x: 20.5, y: 4.2, w: 28, h: 3.5,
+        x: 21.5, y: 5.5, w: 34, h: 5.5,
         zIndex: 2,
-        style: { fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#9d174d', textAlign: 'left', textTransform: 'uppercase', letterSpacing: 0.6 }
+        style: { fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#9d174d', textAlign: 'left', textTransform: 'uppercase', letterSpacing: 0.6 }
     },
     {
         id: 'std-top-month',
         name: 'Mês (Topo)',
         type: 'month_name',
-        x: 20.5, y: 7.6, w: 26, h: 3.5,
+        x: 21.5, y: 11, w: 26, h: 7,
         zIndex: 2,
         style: { fontSize: 10.5, fontWeight: 'normal', fontFamily: 'Dancing Script', color: '#be185d', textAlign: 'left', textTransform: 'capitalize' }
+    },
+    {
+        id: 'std-top-year',
+        name: 'Ano (Topo)',
+        type: 'year',
+        x: 48, y: 11.8, w: 12, h: 5.5,
+        zIndex: 2,
+        style: { fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#a1a1aa', textAlign: 'left', letterSpacing: 0.8 }
     },
     {
         id: 'std-top-holiday',
         name: 'Feriado (Topo)',
         type: 'holiday',
-        x: 50, y: 4.2, w: 43, h: 3,
+        x: 21.5, y: 18, w: 41, h: 5.5,
         zIndex: 2,
-        style: { fontSize: 6, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#be123c', textAlign: 'right', letterSpacing: 0.4 }
+        style: { fontSize: 5.8, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#be123c', textAlign: 'left', letterSpacing: 0.4 }
+    },
+    {
+        id: 'std-top-minical-bg',
+        name: 'Card Mini Calendário (Topo)',
+        type: 'box',
+        x: 64, y: 4.5, w: 29, h: 20,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#fffbfc',
+            borderColor: '#fce7f3',
+            borderWidth: 0.8,
+            borderRadius: 8
+        }
+    },
+    {
+        id: 'std-top-minical',
+        name: 'Mini Calendário (Topo)',
+        type: 'mini_calendar',
+        x: 64.5, y: 5, w: 28, h: 19,
+        zIndex: 2,
+        style: {
+            useGlobalStyle: false,
+            calendarOffset: 0,
+            fullCalendar: {
+                showYearInTitle: true,
+                title: { fontSize: 5.8, fontWeight: 'bold', textAlign: 'center', color: '#881337', fontFamily: 'Playfair Display', textTransform: 'uppercase', letterSpacing: 0.6 },
+                weekDays: { fontSize: 4.6, fontWeight: 'bold', textAlign: 'center', color: '#db2777', fontFamily: 'Montserrat' },
+                days: { fontSize: 4.8, fontWeight: 'normal', textAlign: 'center', color: '#52525b', fontFamily: 'Montserrat' },
+                grid: {
+                    borderColor: '#fbcfe8',
+                    borderWidth: 0.5,
+                    borderStyle: 'solid',
+                    cellBackgroundColor: 'transparent',
+                    headerBackgroundColor: '#fdf2f8',
+                    borders: { top: false, bottom: false, left: false, right: false, insideHorizontal: false, insideVertical: false, headerSeparator: true }
+                }
+            }
+        }
     },
     {
         id: 'std-top-prio-box',
-        name: 'Prioridades Topo',
+        name: 'Box Prioridades Pastel (Topo)',
         type: 'box',
-        x: 7, y: 12.5, w: 86, h: 6.5,
+        x: 7, y: 26, w: 86, h: 13,
         zIndex: 1,
         style: { backgroundColor: '#faf5ff', borderColor: '#e9d5ff', borderWidth: 0.8, borderRadius: 6 }
     },
     {
         id: 'std-top-prio-lbl',
-        name: 'Label Foco Topo',
+        name: 'Label Foco (Topo)',
         type: 'text',
-        content: '✦ FOCO:',
-        x: 8.5, y: 14.2, w: 14, h: 3,
+        content: '✦ FOCO DO DIA:',
+        x: 8.5, y: 27.2, w: 28, h: 4,
         zIndex: 2,
-        style: { fontSize: 6, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#6b21a8', letterSpacing: 0.8 }
+        style: { fontSize: 5.8, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#6b21a8', letterSpacing: 0.8 }
     },
     {
-        id: 'std-top-lines',
-        name: 'Linhas (Topo)',
-        type: 'lines',
-        x: 7, y: 20, w: 86, h: 25,
+        id: 'std-top-prio-sub',
+        name: 'Subtítulo Foco (Topo)',
+        type: 'text',
+        content: 'foco essencial',
+        x: 64, y: 27, w: 27, h: 4,
         zIndex: 2,
-        style: { lineSpacing: 14, color: '#fce7f3', borderWidth: 0.5, showCheckboxes: true, checkboxStyle: 'circle' }
+        style: { fontSize: 8, fontWeight: 'normal', fontFamily: 'Dancing Script', color: '#9333ea', textAlign: 'right' }
+    },
+    {
+        id: 'std-top-prio-lines',
+        name: 'Check-list de Prioridades (Topo)',
+        type: 'lines',
+        x: 8.5, y: 31.8, w: 83, h: 6.2,
+        zIndex: 2,
+        style: { lineSpacing: 13, color: '#e9d5ff', borderWidth: 0.6, borderStyle: 'solid', showCheckboxes: true, checkboxStyle: 'circle' }
+    },
+    {
+        id: 'std-top-schedule-lines',
+        name: 'Pauta de Horários (Topo)',
+        type: 'lines',
+        x: 7, y: 41, w: 55, h: 42,
+        zIndex: 2,
+        style: {
+            showTimes: true,
+            startHour: 8,
+            endHour: 18,
+            timeInterval: 60,
+            timeFontSize: 5.8,
+            timeColor: '#9d174d',
+            lineSpacing: 14,
+            color: '#fce7f3',
+            borderWidth: 0.5,
+            borderStyle: 'solid'
+        }
+    },
+    {
+        id: 'std-top-notes-box',
+        name: 'Box Notas & Tarefas (Topo)',
+        type: 'box',
+        x: 64, y: 41, w: 29, h: 42,
+        zIndex: 1,
+        style: { backgroundColor: '#ffffff', borderColor: '#fce7f3', borderWidth: 0.8, borderRadius: 8 }
+    },
+    {
+        id: 'std-top-notes-lbl',
+        name: 'Título Notas (Topo)',
+        type: 'text',
+        content: '✦ TAREFAS & NOTAS',
+        x: 65.5, y: 42.2, w: 26, h: 4,
+        zIndex: 2,
+        style: { fontSize: 5.5, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#9d174d', letterSpacing: 0.5 }
+    },
+    {
+        id: 'std-top-notes-lines',
+        name: 'Linhas Notas (Topo)',
+        type: 'lines',
+        x: 65.5, y: 46.8, w: 26, h: 35,
+        zIndex: 2,
+        style: { lineSpacing: 13, color: '#fce7f3', borderWidth: 0.5, borderStyle: 'solid', showCheckboxes: true, checkboxStyle: 'circle' }
+    },
+    {
+        id: 'std-top-water',
+        name: 'Hidratação (Topo)',
+        type: 'footer_tracker',
+        x: 7, y: 85, w: 32, h: 10,
+        zIndex: 2,
+        style: { variant: 'water', title: 'HIDRATAÇÃO', color: '#9d174d' }
+    },
+    {
+        id: 'std-top-quote',
+        name: 'Frase Inspiradora (Topo)',
+        type: 'quote',
+        x: 41, y: 86, w: 52, h: 8.5,
+        zIndex: 2,
+        style: { fontSize: 8, fontStyle: 'normal', fontFamily: 'Dancing Script', color: '#be185d', textAlign: 'right' }
     }
 ];
 
@@ -477,21 +592,21 @@ export const STANDARD_HALF_PAGE_BOTTOM_ELEMENTS: LayoutElement[] = [
         id: 'std-bot-card',
         name: 'Card Inferior Pastel',
         type: 'box',
-        x: 5, y: 51.5, w: 90, h: 44.5,
+        x: 5, y: 3, w: 90, h: 94,
         zIndex: 0,
         style: {
             backgroundColor: '#f0fdf4',
             borderColor: '#bbf7d0',
             borderWidth: 1,
             borderRadius: 12,
-            opacity: 0.45
+            opacity: 0.65
         }
     },
     {
         id: 'std-bot-badge',
         name: 'Badge Dia Inferior',
         type: 'box',
-        x: 7, y: 53, w: 12, h: 7.5,
+        x: 7, y: 5.5, w: 13, h: 18,
         zIndex: 1,
         style: {
             backgroundColor: '#ecfdf5',
@@ -504,41 +619,131 @@ export const STANDARD_HALF_PAGE_BOTTOM_ELEMENTS: LayoutElement[] = [
         id: 'std-bot-num',
         name: 'Número do Dia (Base)',
         type: 'day_number',
-        x: 7, y: 53.2, w: 12, h: 7,
+        x: 7, y: 6, w: 13, h: 17,
         zIndex: 2,
-        style: { fontSize: 19, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#14532d', textAlign: 'center' }
+        style: { fontSize: 19, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#14532d', textAlign: 'center', verticalAlign: 'middle' }
     },
     {
         id: 'std-bot-name',
         name: 'Dia da Semana (Base)',
         type: 'day_name',
-        x: 20.5, y: 53.2, w: 28, h: 3.5,
+        x: 21.5, y: 5.5, w: 34, h: 5.5,
         zIndex: 2,
-        style: { fontSize: 8, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#166534', textAlign: 'left', textTransform: 'uppercase', letterSpacing: 0.6 }
+        style: { fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#166534', textAlign: 'left', textTransform: 'uppercase', letterSpacing: 0.6 }
     },
     {
         id: 'std-bot-month',
         name: 'Mês (Base)',
         type: 'month_name',
-        x: 20.5, y: 56.6, w: 26, h: 3.5,
+        x: 21.5, y: 11, w: 26, h: 7,
         zIndex: 2,
         style: { fontSize: 10.5, fontWeight: 'normal', fontFamily: 'Dancing Script', color: '#15803d', textAlign: 'left', textTransform: 'capitalize' }
+    },
+    {
+        id: 'std-bot-year',
+        name: 'Ano (Base)',
+        type: 'year',
+        x: 48, y: 11.8, w: 12, h: 5.5,
+        zIndex: 2,
+        style: { fontSize: 7.5, fontWeight: 'bold', fontFamily: 'Playfair Display', color: '#a1a1aa', textAlign: 'left', letterSpacing: 0.8 }
     },
     {
         id: 'std-bot-holiday',
         name: 'Feriado (Base)',
         type: 'holiday',
-        x: 50, y: 53.2, w: 43, h: 3,
+        x: 21.5, y: 18, w: 41, h: 5.5,
         zIndex: 2,
-        style: { fontSize: 6, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#be123c', textAlign: 'right', letterSpacing: 0.4 }
+        style: { fontSize: 5.8, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#be123c', textAlign: 'left', letterSpacing: 0.4 }
     },
     {
-        id: 'std-bot-lines',
-        name: 'Linhas (Base)',
-        type: 'lines',
-        x: 7, y: 62, w: 86, h: 32,
+        id: 'std-bot-prio-box',
+        name: 'Box Prioridades (Base)',
+        type: 'box',
+        x: 64, y: 4.5, w: 29, h: 20,
+        zIndex: 1,
+        style: {
+            backgroundColor: '#f0fdf4',
+            borderColor: '#bbf7d0',
+            borderWidth: 0.8,
+            borderRadius: 8
+        }
+    },
+    {
+        id: 'std-bot-prio-lbl',
+        name: 'Label Prioridades (Base)',
+        type: 'text',
+        content: '✦ PRIORIDADES',
+        x: 65.5, y: 5.8, w: 26, h: 4,
         zIndex: 2,
-        style: { lineSpacing: 14, color: '#bbf7d0', borderWidth: 0.6, showCheckboxes: true, checkboxStyle: 'circle' }
+        style: { fontSize: 5.5, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#166534', letterSpacing: 0.5 }
+    },
+    {
+        id: 'std-bot-prio-lines',
+        name: 'Linhas Prioridades (Base)',
+        type: 'lines',
+        x: 65.5, y: 10.5, w: 26, h: 13,
+        zIndex: 2,
+        style: { rowCount: 2, lineSpacing: 13, color: '#86efac', borderWidth: 0.6, borderStyle: 'solid', showCheckboxes: true, checkboxStyle: 'circle' }
+    },
+    {
+        id: 'std-bot-schedule-lines',
+        name: 'Horários (Base)',
+        type: 'lines',
+        x: 7, y: 26, w: 55, h: 57,
+        zIndex: 2,
+        style: {
+            showTimes: true,
+            startHour: 8,
+            endHour: 18,
+            timeInterval: 60,
+            timeFontSize: 5.8,
+            timeColor: '#166534',
+            lineSpacing: 14,
+            color: '#bbf7d0',
+            borderWidth: 0.5,
+            borderStyle: 'solid'
+        }
+    },
+    {
+        id: 'std-bot-notes-box',
+        name: 'Box Notas (Base)',
+        type: 'box',
+        x: 64, y: 26, w: 29, h: 57,
+        zIndex: 1,
+        style: { backgroundColor: '#ffffff', borderColor: '#bbf7d0', borderWidth: 0.8, borderRadius: 8 }
+    },
+    {
+        id: 'std-bot-notes-lbl',
+        name: 'Título Notas (Base)',
+        type: 'text',
+        content: '✿ ANOTAÇÕES',
+        x: 65.5, y: 27.5, w: 26, h: 4,
+        zIndex: 2,
+        style: { fontSize: 5.5, fontWeight: 'bold', fontFamily: 'Montserrat', color: '#166534', letterSpacing: 0.5 }
+    },
+    {
+        id: 'std-bot-notes-lines',
+        name: 'Linhas Notas (Base)',
+        type: 'lines',
+        x: 65.5, y: 32.5, w: 26, h: 49,
+        zIndex: 2,
+        style: { lineSpacing: 13, color: '#bbf7d0', borderWidth: 0.5, borderStyle: 'solid', showCheckboxes: true, checkboxStyle: 'circle' }
+    },
+    {
+        id: 'std-bot-mood',
+        name: 'Humor do Dia (Base)',
+        type: 'footer_tracker',
+        x: 7, y: 85, w: 32, h: 10,
+        zIndex: 2,
+        style: { variant: 'mood', title: 'MEU HUMOR', color: '#166534' }
+    },
+    {
+        id: 'std-bot-quote',
+        name: 'Frase Inspiradora (Base)',
+        type: 'quote',
+        x: 41, y: 86, w: 52, h: 8.5,
+        zIndex: 2,
+        style: { fontSize: 8, fontStyle: 'normal', fontFamily: 'Dancing Script', color: '#15803d', textAlign: 'right' }
     }
 ];
 
@@ -1105,7 +1310,7 @@ export const PERMANENT_MONTHLY_INTRO_PAGES: IntroPage[] = [
     }
 ];
 
-const cloneElementWithNewId = (el: LayoutElement, baseYear: number): LayoutElement => {
+export const cloneElementWithNewId = (el: LayoutElement, baseYear: number): LayoutElement => {
     const cloned: LayoutElement = JSON.parse(JSON.stringify(el));
     cloned.id = Math.random().toString(36).substring(2, 11);
     const offset = cloned.style?.yearOffset || 0;
@@ -1198,7 +1403,7 @@ export const buildPastelModelConfig = (
         versoElements: dividerVersoSource.map(el => cloneElementWithNewId(el, year))
     };
 
-    const effectiveDailySource = (isPermanent && layoutType === '2_per_page') ? topElements : dailyElements;
+    const effectiveDailySource = (layoutType === '2_per_page') ? topElements : dailyElements;
     const clonedDaily = effectiveDailySource.map(el => cloneElementWithNewId(el, year));
     const clonedSaturday = effectiveDailySource.map(el => cloneElementWithNewId(el, year));
     const clonedSunday = effectiveDailySource.map(el => cloneElementWithNewId(el, year));

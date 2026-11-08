@@ -22,6 +22,7 @@ import {
   ArrowDownToLine,
   Italic,
   Columns,
+  Box,
 } from 'lucide-react';
 import { getTextStrokeCss } from '../../../core/logic/textStroke';
 import {
@@ -29,12 +30,14 @@ import {
   CharacterStylePreset,
   ColorStylePreset,
   LayoutElement,
+  ObjectStylePreset,
   ParagraphStylePreset,
   ProjectStylesConfig,
 } from '../../../types';
 import {
   applyCharacterStyleToElement,
   applyColorStyleToElement,
+  applyObjectStyleToElement,
   applyParagraphStyleToElement,
   countStyleUsageInConfig,
   getProjectStyles,
@@ -42,8 +45,9 @@ import {
   propagateStylesAcrossConfig,
 } from '../../../core/logic/styleSystem';
 import { getSafeFontFamily, ensureFontLoaded } from '../../../core/logic/fontDetector';
+import { FavoriteColorSwatches } from './FavoriteColorSwatches';
 
-export type StyleTabType = 'color' | 'character' | 'paragraph';
+export type StyleTabType = 'object' | 'color' | 'character' | 'paragraph';
 
 interface StylesManagerPanelProps {
   config: AgendaConfig;
@@ -59,6 +63,7 @@ interface StylesManagerPanelProps {
   onClose: () => void;
   onToast?: (msg: string) => void;
   onHeaderPointerDown?: (e: React.PointerEvent) => void;
+  onOpenFavoriteColorsModal?: () => void;
 }
 
 export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
@@ -68,15 +73,17 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
   availableFonts,
   systemFonts,
   customFonts,
-  initialTab = 'color',
+  initialTab = 'object',
   onUpdateConfig,
   onUpdateSelectedElements,
   onSelectElementIds,
   onClose,
   onToast,
   onHeaderPointerDown,
+  onOpenFavoriteColorsModal,
 }) => {
   const [activeTab, setActiveTab] = useState<StyleTabType>(initialTab);
+  const [expandedObjectId, setExpandedObjectId] = useState<string | null>(null);
   const [expandedCharId, setExpandedCharId] = useState<string | null>(null);
   const [expandedParaId, setExpandedParaId] = useState<string | null>(null);
 
@@ -85,11 +92,115 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
   }, [initialTab]);
 
   const projectStyles = getProjectStyles(config);
-  const { colorCounts, characterCounts, paragraphCounts } = countStyleUsageInConfig(config);
+  const { objectCounts, colorCounts, characterCounts, paragraphCounts } = countStyleUsageInConfig(config);
   const primarySelected = selectedElements[0] || null;
 
   const updateStylesAndPropagate = (nextStyles: ProjectStylesConfig) => {
     onUpdateConfig(prev => propagateStylesAcrossConfig(prev, nextStyles));
+  };
+
+  // ==================== OBJECT STYLES HANDLERS ====================
+  const handleUpdateObjectStyle = (id: string, updates: Partial<ObjectStylePreset>) => {
+    const nextObjs = (projectStyles.objectStyles || []).map(o =>
+      o.id === id ? { ...o, ...updates } : o
+    );
+    updateStylesAndPropagate({
+      ...projectStyles,
+      objectStyles: nextObjs,
+    });
+  };
+
+  const handleAddObjectStyle = (fromSelection = false) => {
+    const s = primarySelected?.style || {};
+    const bg = s.backgroundColor || s.fillColor || (fromSelection ? '#ffffff' : '#ffffff');
+    const borderColor = s.borderColor || '#4f46e5';
+    const borderWidth = typeof s.borderWidth === 'number' ? s.borderWidth : (fromSelection ? 1 : 1);
+    const borderStyle = s.borderStyle || 'solid';
+    const borderRadius = typeof s.borderRadius === 'number' ? s.borderRadius : 0;
+    const opacity = typeof s.opacity === 'number' ? s.opacity : 1;
+    const fillOpacity = typeof s.fillOpacity === 'number' ? s.fillOpacity : 1;
+    const strokeOpacity = typeof s.strokeOpacity === 'number' ? s.strokeOpacity : 1;
+
+    const newObj: ObjectStylePreset = {
+      id: 'obj_' + Math.random().toString(36).substring(2, 9),
+      name: fromSelection && primarySelected
+        ? `Objeto - ${primarySelected.name || primarySelected.type}`
+        : `Estilo de Objeto ${(projectStyles.objectStyles || []).length + 1}`,
+      backgroundColor: bg,
+      fillColor: bg,
+      color: s.color || '#1f2937',
+      backgroundType: s.backgroundType || 'solid',
+      gradientType: s.gradientType || 'linear',
+      gradientColors: s.gradientColors ? [...s.gradientColors] : ['#ffffff', '#000000'],
+      gradientDirection: s.gradientDirection ?? 0,
+      borderColor: borderColor,
+      borderWidth: borderWidth,
+      borderStyle: borderStyle,
+      borderRadius: borderRadius,
+      opacity: opacity,
+      fillOpacity: fillOpacity,
+      strokeOpacity: strokeOpacity,
+      boxShadow: s.boxShadow || 'none',
+    };
+
+    const nextStyles: ProjectStylesConfig = {
+      ...projectStyles,
+      objectStyles: [...(projectStyles.objectStyles || []), newObj],
+    };
+
+    onUpdateConfig(prev => ({
+      ...prev,
+      styles: nextStyles,
+    }));
+    setExpandedObjectId(newObj.id);
+
+    if (fromSelection && selectedElements.length > 0) {
+      onUpdateSelectedElements(el => applyObjectStyleToElement(el, newObj));
+      onToast?.(`Estilo de objeto "${newObj.name}" criado com cor, borda e transparência da seleção!`);
+    }
+  };
+
+  const handleRedefineObjectFromSelection = (objStyle: ObjectStylePreset) => {
+    if (!primarySelected) return;
+    const s = primarySelected.style || {};
+    handleUpdateObjectStyle(objStyle.id, {
+      backgroundColor: s.backgroundColor || s.fillColor || objStyle.backgroundColor,
+      fillColor: s.fillColor || s.backgroundColor || objStyle.fillColor,
+      color: s.color || objStyle.color,
+      backgroundType: s.backgroundType || objStyle.backgroundType,
+      gradientType: s.gradientType || objStyle.gradientType,
+      gradientColors: s.gradientColors ? [...s.gradientColors] : objStyle.gradientColors,
+      gradientDirection: s.gradientDirection ?? objStyle.gradientDirection,
+      borderColor: s.borderColor || objStyle.borderColor,
+      borderWidth: typeof s.borderWidth === 'number' ? s.borderWidth : objStyle.borderWidth,
+      borderStyle: s.borderStyle || objStyle.borderStyle,
+      borderRadius: typeof s.borderRadius === 'number' ? s.borderRadius : objStyle.borderRadius,
+      opacity: typeof s.opacity === 'number' ? s.opacity : objStyle.opacity,
+      fillOpacity: typeof s.fillOpacity === 'number' ? s.fillOpacity : objStyle.fillOpacity,
+      strokeOpacity: typeof s.strokeOpacity === 'number' ? s.strokeOpacity : objStyle.strokeOpacity,
+      boxShadow: s.boxShadow || objStyle.boxShadow,
+    });
+    onToast?.(`Estilo "${objStyle.name}" atualizado com a cor, borda e transparência da seleção!`);
+  };
+
+  const handleDeleteObjectStyle = (id: string) => {
+    const nextStyles: ProjectStylesConfig = {
+      ...projectStyles,
+      objectStyles: (projectStyles.objectStyles || []).filter(o => o.id !== id),
+    };
+    onUpdateConfig(prev => ({
+      ...prev,
+      styles: nextStyles,
+    }));
+  };
+
+  const handleApplyObjectStyle = (objStyle: ObjectStylePreset) => {
+    if (selectedElements.length === 0) {
+      onToast?.('Selecione um ou mais elementos na página para aplicar este estilo de objeto.');
+      return;
+    }
+    onUpdateSelectedElements(el => applyObjectStyleToElement(el, objStyle));
+    onToast?.(`Estilo de objeto "${objStyle.name}" aplicado em ${selectedElements.length} elemento(s)!`);
   };
 
   // ==================== COLOR STYLES HANDLERS ====================
@@ -117,8 +228,9 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
   };
 
   const handleAddColorStyle = (fromSelection = false) => {
+    const s = primarySelected?.style || {};
     const baseHex = fromSelection && primarySelected
-      ? (primarySelected.style.color || primarySelected.style.backgroundColor || primarySelected.style.borderColor || '#4f46e5')
+      ? (s.color || s.backgroundColor || s.fillColor || s.borderColor || '#4f46e5')
       : '#6366f1';
     const newStyle: ColorStylePreset = {
       id: 'col_' + Math.random().toString(36).substring(2, 9),
@@ -126,6 +238,17 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
         ? `Cor de ${primarySelected.name || primarySelected.type}`
         : `Cor ${projectStyles.colorStyles.length + 1}`,
       color: baseHex,
+      // Se criado a partir de um objeto selecionado, armazena também sua cor de fundo, borda e transparência!
+      backgroundColor: fromSelection && primarySelected ? (s.backgroundColor || s.fillColor) : undefined,
+      fillColor: fromSelection && primarySelected ? (s.fillColor || s.backgroundColor) : undefined,
+      borderColor: fromSelection && primarySelected ? s.borderColor : undefined,
+      borderWidth: fromSelection && primarySelected ? s.borderWidth : undefined,
+      borderStyle: fromSelection && primarySelected ? s.borderStyle : undefined,
+      borderRadius: fromSelection && primarySelected ? s.borderRadius : undefined,
+      opacity: fromSelection && primarySelected ? s.opacity : undefined,
+      fillOpacity: fromSelection && primarySelected ? s.fillOpacity : undefined,
+      strokeOpacity: fromSelection && primarySelected ? s.strokeOpacity : undefined,
+      boxShadow: fromSelection && primarySelected ? s.boxShadow : undefined,
     };
 
     const nextStyles: ProjectStylesConfig = {
@@ -140,7 +263,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
 
     if (fromSelection && selectedElements.length > 0) {
       onUpdateSelectedElements(el => applyColorStyleToElement(el, newStyle, 'color'));
-      onToast?.(`Estilo "${newStyle.name}" criado e vinculado à seleção!`);
+      onToast?.(`Estilo "${newStyle.name}" criado com cor, borda e transparência e vinculado à seleção!`);
     }
   };
 
@@ -187,11 +310,12 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
   };
 
   const handleSelectLinkedOnPage = (
-    type: 'color' | 'character' | 'paragraph',
+    type: 'object' | 'color' | 'character' | 'paragraph',
     styleId: string
   ) => {
     const matchingIds = activePageElements
       .filter(el => {
+        if (type === 'object') return el.style.objectStyleId === styleId;
         if (type === 'color') {
           return (
             el.style.colorStyleId === styleId ||
@@ -443,11 +567,24 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
       </div>
 
       {/* Category Tabs */}
-      <div className="grid grid-cols-3 gap-1 p-1.5 bg-[#fbf6f4] border-b border-[#eedad5] shrink-0">
+      <div className="grid grid-cols-4 gap-1 p-1.5 bg-[#fbf6f4] border-b border-[#eedad5] shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveTab('object')}
+          className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[9.5px] font-black uppercase tracking-tight transition-all cursor-pointer ${
+            activeTab === 'object'
+              ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+          }`}
+          title="Estilos de Objeto: Cor de Fundo, Borda e Transparência"
+        >
+          <Box className="w-3.5 h-3.5 text-[#b84a56]" />
+          <span>Objeto ({(projectStyles.objectStyles || []).length})</span>
+        </button>
         <button
           type="button"
           onClick={() => setActiveTab('color')}
-          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[9.5px] font-black uppercase tracking-tight transition-all cursor-pointer ${
             activeTab === 'color'
               ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
@@ -459,7 +596,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('character')}
-          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[9.5px] font-black uppercase tracking-tight transition-all cursor-pointer ${
             activeTab === 'character'
               ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
@@ -471,7 +608,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('paragraph')}
-          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[9.5px] font-black uppercase tracking-tight transition-all cursor-pointer ${
             activeTab === 'paragraph'
               ? 'bg-white text-[#9f3d4a] shadow-xs ring-1 ring-[#eedad5]'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
@@ -484,6 +621,553 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
 
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+        {/* ==================== TAB 0: ESTILOS DE OBJETO ==================== */}
+        {activeTab === 'object' && (
+          <div className="space-y-3">
+            <div className="p-2.5 bg-[#fff5f5] border border-[#eedad5] rounded-xl text-[10px] text-[#85313d] leading-relaxed">
+              <strong>Estilos de Objeto:</strong> Padronize a aparência completa de caixas, formas e cartões com{' '}
+              <span className="font-bold underline decoration-[#d98b95]">Cor de Fundo</span>,{' '}
+              <span className="font-bold underline decoration-[#d98b95]">Borda</span> (cor, espessura e cantos) e{' '}
+              <span className="font-bold underline decoration-[#d98b95]">Transparência</span>.
+              Ao alterar aqui, todos os objetos vinculados atualizam automaticamente!
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleAddObjectStyle(false)}
+                className="flex-1 py-1.5 px-2.5 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Novo Objeto</span>
+              </button>
+              {primarySelected && (
+                <button
+                  type="button"
+                  onClick={() => handleAddObjectStyle(true)}
+                  className="flex-1 py-1.5 px-2.5 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] border border-[#eedad5] rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                  title="Cria um estilo com a cor, borda e transparência do elemento selecionado e já o vincula"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Da Seleção</span>
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {(projectStyles.objectStyles || []).map(objStyle => {
+                const count = objectCounts[objStyle.id] || 0;
+                const isApplied = primarySelected?.style?.objectStyleId === objStyle.id;
+                const isExpanded = expandedObjectId === objStyle.id;
+
+                const bgPreview =
+                  objStyle.backgroundType === 'gradient' && objStyle.gradientColors
+                    ? objStyle.gradientType === 'radial'
+                      ? `radial-gradient(circle, ${objStyle.gradientColors[0] || 'transparent'}, ${objStyle.gradientColors[1] || 'transparent'})`
+                      : `linear-gradient(${objStyle.gradientDirection ?? 0}deg, ${objStyle.gradientColors[0] || 'transparent'}, ${objStyle.gradientColors[1] || 'transparent'})`
+                    : (objStyle.backgroundColor || 'transparent');
+
+                return (
+                  <div
+                    key={objStyle.id}
+                    className={`rounded-xl border transition-all overflow-hidden ${
+                      isApplied
+                        ? 'bg-[#fff5f5] border-[#d98b95] ring-1 ring-[#eedad5]'
+                        : 'bg-white border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="p-2.5 flex items-center justify-between gap-2.5">
+                      {/* Visual Preview Box */}
+                      <div
+                        onClick={() => setExpandedObjectId(isExpanded ? null : objStyle.id)}
+                        className="w-9 h-9 rounded-lg shrink-0 overflow-hidden relative border border-black/10 shadow-2xs cursor-pointer flex items-center justify-center"
+                        style={{
+                          background: bgPreview,
+                          border: `${Math.max(1, objStyle.borderWidth || 0)}px ${objStyle.borderStyle || 'solid'} ${objStyle.borderColor || '#cbd5e1'}`,
+                          borderRadius: `${Math.min(10, objStyle.borderRadius || 0)}px`,
+                          opacity: objStyle.opacity ?? 1,
+                        }}
+                        title="Pré-visualização do Estilo de Objeto"
+                      />
+
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => setExpandedObjectId(isExpanded ? null : objStyle.id)}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-gray-900 truncate block">
+                            {objStyle.name}
+                          </span>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full shrink-0 ${
+                              count > 0
+                                ? 'bg-indigo-100 text-indigo-800'
+                                : 'bg-gray-100 text-gray-400'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        </div>
+                        <div className="text-[9.5px] text-gray-500 truncate mt-0.5">
+                          🎨 {objStyle.backgroundType === 'gradient' ? 'Gradiente' : (objStyle.backgroundColor || 'Transp.')} • 
+                          🔲 {objStyle.borderWidth !== undefined && objStyle.borderWidth > 0 ? `${objStyle.borderWidth}px ${objStyle.borderStyle || 'sólido'}` : 'Sem borda'} • 
+                          👁️ {Math.round((objStyle.opacity ?? 1) * 100)}%
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleApplyObjectStyle(objStyle)}
+                          className={`py-1 px-2.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                            isApplied
+                              ? 'bg-[#b84a56] text-white shadow-2xs'
+                              : 'bg-[#fff5f5] hover:bg-[#fdeeed] text-[#9f3d4a] border border-[#eedad5]'
+                          }`}
+                        >
+                          {isApplied && <Check className="w-3 h-3" />}
+                          <span>{isApplied ? 'Aplicado' : 'Aplicar'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedObjectId(isExpanded ? null : objStyle.id)}
+                          className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg cursor-pointer"
+                          title="Editar propriedades deste Estilo de Objeto"
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-3 bg-[#faf6f4] border-t border-[#eedad5] space-y-3 text-xs">
+                        {/* Nome do Estilo */}
+                        <div>
+                          <label className="block text-[9.5px] font-bold text-gray-500 uppercase mb-1">
+                            Nome do Estilo de Objeto
+                          </label>
+                          <input
+                            type="text"
+                            value={objStyle.name}
+                            onChange={e =>
+                              handleUpdateObjectStyle(objStyle.id, { name: e.target.value })
+                            }
+                            className="w-full text-xs p-1.5 bg-white border border-gray-200 rounded-lg font-bold"
+                          />
+                        </div>
+
+                        {/* SEÇÃO 1: COR E PREENCHIMENTO */}
+                        <div className="p-2.5 bg-white rounded-lg border border-gray-200/90 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black text-gray-700 uppercase tracking-wide">
+                              🎨 Cor e Preenchimento
+                            </span>
+                            <div className="flex rounded-md border border-gray-200 overflow-hidden text-[9px] font-bold">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateObjectStyle(objStyle.id, { backgroundType: 'solid' })}
+                                className={`px-2 py-0.5 cursor-pointer ${
+                                  objStyle.backgroundType !== 'gradient'
+                                    ? 'bg-[#b84a56] text-white'
+                                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                Sólido
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    backgroundType: 'gradient',
+                                    gradientColors: objStyle.gradientColors || ['#ffffff', '#eedad5'],
+                                  })
+                                }
+                                className={`px-2 py-0.5 border-l border-gray-200 cursor-pointer ${
+                                  objStyle.backgroundType === 'gradient'
+                                    ? 'bg-[#b84a56] text-white'
+                                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                Gradiente
+                              </button>
+                            </div>
+                          </div>
+
+                          {objStyle.backgroundType === 'gradient' ? (
+                            <div className="space-y-2 pt-1 border-t border-gray-100">
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">
+                                    Cor Inicial
+                                  </label>
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="color"
+                                      value={objStyle.gradientColors?.[0] || '#ffffff'}
+                                      onChange={e =>
+                                        handleUpdateObjectStyle(objStyle.id, {
+                                          gradientColors: [e.target.value, objStyle.gradientColors?.[1] || '#000000'],
+                                        })
+                                      }
+                                      className="w-8 h-8 p-0.5 bg-white border border-gray-200 rounded-lg cursor-pointer shrink-0"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={objStyle.gradientColors?.[0] || '#ffffff'}
+                                      onChange={e =>
+                                        handleUpdateObjectStyle(objStyle.id, {
+                                          gradientColors: [e.target.value, objStyle.gradientColors?.[1] || '#000000'],
+                                        })
+                                      }
+                                      className="w-full text-[10px] font-mono p-1 border rounded"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">
+                                    Cor Final
+                                  </label>
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="color"
+                                      value={objStyle.gradientColors?.[1] || '#000000'}
+                                      onChange={e =>
+                                        handleUpdateObjectStyle(objStyle.id, {
+                                          gradientColors: [objStyle.gradientColors?.[0] || '#ffffff', e.target.value],
+                                        })
+                                      }
+                                      className="w-8 h-8 p-0.5 bg-white border border-gray-200 rounded-lg cursor-pointer shrink-0"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={objStyle.gradientColors?.[1] || '#000000'}
+                                      onChange={e =>
+                                        handleUpdateObjectStyle(objStyle.id, {
+                                          gradientColors: [objStyle.gradientColors?.[0] || '#ffffff', e.target.value],
+                                        })
+                                      }
+                                      className="w-full text-[10px] font-mono p-1 border rounded"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[9px] font-bold text-gray-500 uppercase">
+                                  Ângulo ({objStyle.gradientDirection || 0}°)
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="360"
+                                  step="15"
+                                  value={objStyle.gradientDirection || 0}
+                                  onChange={e =>
+                                    handleUpdateObjectStyle(objStyle.id, {
+                                      gradientDirection: parseInt(e.target.value) || 0,
+                                    })
+                                  }
+                                  className="w-32 accent-[#b84a56] cursor-pointer"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={
+                                  objStyle.backgroundColor && objStyle.backgroundColor.startsWith('#')
+                                    ? objStyle.backgroundColor
+                                    : '#ffffff'
+                                }
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    backgroundColor: e.target.value,
+                                    fillColor: e.target.value,
+                                  })
+                                }
+                                className="w-9 h-9 p-0.5 bg-white border border-gray-200 rounded-lg cursor-pointer shrink-0"
+                              />
+                              <input
+                                type="text"
+                                value={objStyle.backgroundColor || '#ffffff'}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    backgroundColor: e.target.value,
+                                    fillColor: e.target.value,
+                                  })
+                                }
+                                className="w-24 text-xs font-mono p-1.5 border border-gray-200 rounded uppercase font-bold"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    backgroundColor: 'transparent',
+                                    fillColor: 'transparent',
+                                  })
+                                }
+                                className={`px-2 py-1 rounded text-[9.5px] font-bold border transition-colors cursor-pointer ${
+                                  objStyle.backgroundColor === 'transparent'
+                                    ? 'bg-[#b84a56] text-white border-[#b84a56]'
+                                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                }`}
+                              >
+                                Transparente
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* SEÇÃO 2: BORDA */}
+                        <div className="p-2.5 bg-white rounded-lg border border-gray-200/90 space-y-2">
+                          <span className="text-[10px] font-black text-gray-700 uppercase tracking-wide block">
+                            🔲 Borda e Contorno
+                          </span>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">
+                                Cor da Borda
+                              </label>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="color"
+                                  value={
+                                    objStyle.borderColor && objStyle.borderColor.startsWith('#')
+                                      ? objStyle.borderColor
+                                      : '#000000'
+                                  }
+                                  onChange={e =>
+                                    handleUpdateObjectStyle(objStyle.id, { borderColor: e.target.value })
+                                  }
+                                  className="w-8 h-8 p-0.5 bg-white border border-gray-200 rounded-lg cursor-pointer shrink-0"
+                                />
+                                <input
+                                  type="text"
+                                  value={objStyle.borderColor || '#000000'}
+                                  onChange={e =>
+                                    handleUpdateObjectStyle(objStyle.id, { borderColor: e.target.value })
+                                  }
+                                  className="w-full text-[10px] font-mono p-1 border rounded uppercase font-bold"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">
+                                Tipo de Linha
+                              </label>
+                              <select
+                                value={objStyle.borderStyle || 'solid'}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    borderStyle: e.target.value as any,
+                                  })
+                                }
+                                className="w-full text-xs p-1.5 bg-white border border-gray-200 rounded-lg font-bold"
+                              >
+                                <option value="solid">Contínuo (Sólido)</option>
+                                <option value="dashed">Tracejado (Pesponto)</option>
+                                <option value="dotted">Pontilhado</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-500 uppercase">
+                                Espessura da Borda
+                              </label>
+                              <span className="text-[10px] font-mono font-bold text-gray-600">
+                                {objStyle.borderWidth ?? 1}px
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="range"
+                                min="0"
+                                max="10"
+                                step="0.5"
+                                value={objStyle.borderWidth ?? 1}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    borderWidth: parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                                className="flex-1 accent-[#b84a56] cursor-pointer"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="0.5"
+                                value={objStyle.borderWidth ?? 1}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    borderWidth: parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                                className="w-12 text-xs p-1 border rounded text-center font-bold"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 pt-1 border-t border-gray-100">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-500 uppercase">
+                                Cantos Arredondados
+                              </label>
+                              <span className="text-[10px] font-mono font-bold text-gray-600">
+                                {objStyle.borderRadius || 0}px
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="50"
+                              step="1"
+                              value={objStyle.borderRadius || 0}
+                              onChange={e =>
+                                handleUpdateObjectStyle(objStyle.id, {
+                                  borderRadius: parseInt(e.target.value) || 0,
+                                })
+                              }
+                              className="w-full accent-[#b84a56] cursor-pointer"
+                            />
+                          </div>
+                        </div>
+
+                        {/* SEÇÃO 3: TRANSPARÊNCIA E OPACIDADE */}
+                        <div className="p-2.5 bg-white rounded-lg border border-gray-200/90 space-y-2">
+                          <span className="text-[10px] font-black text-gray-700 uppercase tracking-wide block">
+                            👁️ Transparência e Opacidade
+                          </span>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-500 uppercase">
+                                Opacidade Geral ({Math.round((objStyle.opacity ?? 1) * 100)}%)
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={objStyle.opacity ?? 1}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    opacity: parseFloat(e.target.value),
+                                  })
+                                }
+                                className="w-32 accent-[#b84a56] cursor-pointer"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-500 uppercase">
+                                Opacidade Fundo ({Math.round((objStyle.fillOpacity ?? 1) * 100)}%)
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={objStyle.fillOpacity ?? 1}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    fillOpacity: parseFloat(e.target.value),
+                                  })
+                                }
+                                className="w-32 accent-[#b84a56] cursor-pointer"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-500 uppercase">
+                                Opacidade Borda ({Math.round((objStyle.strokeOpacity ?? 1) * 100)}%)
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={objStyle.strokeOpacity ?? 1}
+                                onChange={e =>
+                                  handleUpdateObjectStyle(objStyle.id, {
+                                    strokeOpacity: parseFloat(e.target.value),
+                                  })
+                                }
+                                className="w-32 accent-[#b84a56] cursor-pointer"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SEÇÃO 4: SOMBRA */}
+                        <div className="p-2.5 bg-white rounded-lg border border-gray-200/90 flex items-center justify-between">
+                          <label className="text-[9.5px] font-bold text-gray-600 uppercase">
+                            Sombra da Caixa
+                          </label>
+                          <select
+                            value={objStyle.boxShadow || 'none'}
+                            onChange={e =>
+                              handleUpdateObjectStyle(objStyle.id, {
+                                boxShadow: e.target.value as any,
+                              })
+                            }
+                            className="text-xs p-1 bg-white border border-gray-200 rounded-md font-bold"
+                          >
+                            <option value="none">Nenhuma</option>
+                            <option value="sm">Suave (sm)</option>
+                            <option value="md">Média (md)</option>
+                            <option value="lg">Marcante (lg)</option>
+                          </select>
+                        </div>
+
+                        {/* Ações inferiores */}
+                        <div className="flex items-center justify-between pt-2 border-t border-gray-200/80 gap-1.5">
+                          {primarySelected && (
+                            <button
+                              type="button"
+                              onClick={() => handleRedefineObjectFromSelection(objStyle)}
+                              className="flex-1 py-1.5 px-2 bg-white hover:bg-rose-50 text-[#9f3d4a] border border-[#eedad5] rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                              title="Atualiza este estilo de objeto com cor, borda e transparência do elemento selecionado"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Redefinir c/ Seleção</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleSelectLinkedOnPage('object', objStyle.id)}
+                            className="py-1.5 px-2 bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                            title="Selecionar elementos que usam este estilo nesta página"
+                          >
+                            <MousePointerClick className="w-3 h-3" />
+                            <span>Selecionar</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteObjectStyle(objStyle.id)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 cursor-pointer"
+                            title="Excluir estilo de objeto"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ==================== TAB 1: CORES ==================== */}
         {activeTab === 'color' && (
           <div className="space-y-3">
@@ -493,6 +1177,27 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
               <span className="underline decoration-[#d98b95] font-bold">Fundo</span> ou{' '}
               <span className="underline decoration-[#d98b95] font-bold">Borda</span> de qualquer
               objeto. Quando você trocar a cor aqui, todos os elementos vinculados mudam juntos!
+            </div>
+
+            <div className="p-2.5 bg-white border border-[#eedad5] rounded-xl shadow-2xs">
+              <FavoriteColorSwatches
+                currentColor={primarySelected?.style?.color || primarySelected?.style?.backgroundColor || primarySelected?.style?.borderColor}
+                onSelectColor={(hex) => {
+                  if (selectedElements.length > 0) {
+                    onUpdateSelectedElements(el => ({
+                      ...el,
+                      style: {
+                        ...el.style,
+                        color: hex,
+                      }
+                    }));
+                    onToast?.(`Cor ${hex.toUpperCase()} aplicada aos elementos selecionados!`);
+                  }
+                }}
+                onOpenFullModal={onOpenFavoriteColorsModal}
+                label="Minhas Cores Preferidas (Computador)"
+                compact
+              />
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -1509,6 +2214,8 @@ interface ElementQuickStylesBarProps {
   selectedElement: LayoutElement;
   onApplyStyle: (updater: (el: LayoutElement) => LayoutElement) => void;
   onOpenStylesPanel: (tab: StyleTabType) => void;
+  onUpdateConfig?: (updater: (prev: AgendaConfig) => AgendaConfig) => void;
+  onToast?: (msg: string) => void;
 }
 
 export const ElementQuickStylesBar: React.FC<ElementQuickStylesBarProps> = ({
@@ -1516,6 +2223,8 @@ export const ElementQuickStylesBar: React.FC<ElementQuickStylesBarProps> = ({
   selectedElement,
   onApplyStyle,
   onOpenStylesPanel,
+  onUpdateConfig,
+  onToast,
 }) => {
   const projectStyles = getProjectStyles(config);
   const s = selectedElement.style;
@@ -1549,11 +2258,119 @@ export const ElementQuickStylesBar: React.FC<ElementQuickStylesBarProps> = ({
         </span>
         <button
           type="button"
-          onClick={() => onOpenStylesPanel('color')}
+          onClick={() => onOpenStylesPanel('object')}
           className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded-md border border-indigo-200 hover:bg-indigo-50 transition-colors cursor-pointer shadow-2xs"
         >
           Gerenciar Estilos
         </button>
+      </div>
+
+      {/* Object Style (Aparência Completa: Cor, Borda e Transparência) */}
+      <div className="p-2 bg-white rounded-lg border border-indigo-200/90 space-y-1.5 shadow-2xs">
+        <div className="flex items-center justify-between">
+          <span className="text-[9.5px] font-black text-[#9f3d4a] uppercase tracking-wide flex items-center gap-1">
+            <Box className="w-3 h-3 text-[#b84a56]" /> Estilo de Objeto
+          </span>
+          {s.objectStyleId ? (
+            <div className="flex items-center gap-1">
+              <span className="text-[8.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-full border border-emerald-200">
+                ✓ Vinculado
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  onApplyStyle(el => ({
+                    ...el,
+                    style: { ...el.style, objectStyleId: undefined },
+                  }))
+                }
+                className="text-[8.5px] text-gray-400 hover:text-red-500 flex items-center gap-0.5 cursor-pointer"
+                title="Desvincular estilo de objeto"
+              >
+                <Unlink className="w-2.5 h-2.5" /> Desvincular
+              </button>
+            </div>
+          ) : (
+            <span className="text-[8.5px] text-gray-400 font-semibold">Sem vínculo</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <select
+            value={s.objectStyleId || ''}
+            onChange={e => {
+              const id = e.target.value;
+              if (!id) {
+                onApplyStyle(el => ({
+                  ...el,
+                  style: { ...el.style, objectStyleId: undefined },
+                }));
+                return;
+              }
+              const obj = (projectStyles.objectStyles || []).find(o => o.id === id);
+              if (obj) onApplyStyle(el => applyObjectStyleToElement(el, obj));
+            }}
+            className="flex-1 text-[10px] p-1 bg-[#faf6f4] border border-gray-200 rounded font-bold text-gray-800"
+          >
+            <option value="">Nenhum estilo de objeto</option>
+            {(projectStyles.objectStyles || []).map(obj => (
+              <option key={obj.id} value={obj.id}>
+                📦 {obj.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => onOpenStylesPanel('object')}
+            className="px-2 py-1 bg-white hover:bg-gray-50 text-[#9f3d4a] border border-[#eedad5] rounded text-[9px] font-bold cursor-pointer shrink-0"
+            title="Abrir painel de Estilos de Objeto"
+          >
+            Editar
+          </button>
+        </div>
+
+        {/* Botão de Criação Rápida a partir deste objeto */}
+        {onUpdateConfig && (
+          <button
+            type="button"
+            onClick={() => {
+              const bg = s.backgroundColor || s.fillColor || '#ffffff';
+              const newObj: ObjectStylePreset = {
+                id: 'obj_' + Math.random().toString(36).substring(2, 9),
+                name: `Objeto - ${selectedElement.name || selectedElement.type}`,
+                backgroundColor: bg,
+                fillColor: bg,
+                color: s.color || '#1f2937',
+                backgroundType: s.backgroundType || 'solid',
+                gradientType: s.gradientType || 'linear',
+                gradientColors: s.gradientColors ? [...s.gradientColors] : ['#ffffff', '#000000'],
+                gradientDirection: s.gradientDirection ?? 0,
+                borderColor: s.borderColor || '#4f46e5',
+                borderWidth: typeof s.borderWidth === 'number' ? s.borderWidth : 1,
+                borderStyle: s.borderStyle || 'solid',
+                borderRadius: typeof s.borderRadius === 'number' ? s.borderRadius : 0,
+                opacity: typeof s.opacity === 'number' ? s.opacity : 1,
+                fillOpacity: typeof s.fillOpacity === 'number' ? s.fillOpacity : 1,
+                strokeOpacity: typeof s.strokeOpacity === 'number' ? s.strokeOpacity : 1,
+                boxShadow: s.boxShadow || 'none',
+              };
+              onUpdateConfig(prev => ({
+                ...prev,
+                styles: {
+                  ...getProjectStyles(prev),
+                  objectStyles: [...(getProjectStyles(prev).objectStyles || []), newObj],
+                },
+              }));
+              onApplyStyle(el => applyObjectStyleToElement(el, newObj));
+              onToast?.(`Estilo "${newObj.name}" criado com cor, borda e transparência deste objeto!`);
+            }}
+            className="w-full py-1 px-2 bg-gradient-to-r from-[#b84a56] to-[#9f3d4a] hover:from-[#9f3d4a] hover:to-[#85313d] text-white rounded text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-all cursor-pointer"
+            title="Cria um estilo reutilizável com a cor, borda e transparência deste objeto"
+          >
+            <Sparkles className="w-3 h-3 text-amber-300" />
+            <span>Criar Estilo a partir deste Objeto</span>
+          </button>
+        )}
       </div>
 
       {/* Color Swatches Row */}

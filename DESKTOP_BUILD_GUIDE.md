@@ -100,10 +100,10 @@ Se no futuro você alterar o código nativo do Windows (como o arquivo `electron
      ]
    }
    ```
-2. Incremente o campo `"version"` no seu `package.json` (ex: de `"1.0.0"` para `"1.0.1"`).
-3. Execute o comando `npm run dist` no terminal do seu computador.
-4. Além de gerar o instalador `.exe`, o compilador criará um arquivo chamado `latest.yml` na pasta `dist-desktop/`.
-5. Faça o upload do novo arquivo `.exe` **E** do arquivo `latest.yml` para a mesma pasta pública do seu Supabase Storage.
+2. Incremente o campo `"version"` no seu `package.json` (ex: de `"2.0.1"` para `"2.0.3"`).
+3. Execute o comando `npm run dist:win` no terminal do seu computador (ou apenas `npm run generate:latest` se o `.exe` já foi compilado).
+4. O compilador gerará tanto o instalador `.exe` quanto o arquivo **`latest.yml`** (com SHA-512 e tamanho calculados) diretamente na pasta `dist-desktop/`.
+5. Faça o upload do novo arquivo `.exe` **E** do arquivo `latest.yml` para a mesma pasta pública do seu Supabase Storage ou GitHub Release.
 6. **Pronto!** Na próxima vez que qualquer usuário abrir o Agenda Master no computador, ele detectará o arquivo `latest.yml` na nuvem, fará o download da nova instalação silenciosamente em segundo plano e exibirá uma janela de aviso perguntando se ele deseja reiniciar o programa para aplicar a atualização agora!
 
 ---

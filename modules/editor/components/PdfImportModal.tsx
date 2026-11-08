@@ -7,7 +7,7 @@ import {
   BookMarked, ShieldCheck, Copy, Plus, ArrowRight,
   ListFilter, CheckSquare, Wand2, Hash, BookCopy
 } from 'lucide-react';
-import { LayoutElement, ElementType, PdfImportDestination, PdfImportBatchItem } from '../../../types';
+import { LayoutElement, ElementType, PdfImportDestination, PdfImportBatchItem, ProjectType } from '../../../types';
 export type { PdfImportDestination, PdfImportBatchItem };
 import {
   extractPdfObjects,
@@ -50,6 +50,10 @@ export interface PdfImportModalProps {
     inside: number;
     outside: number;
   };
+  projectType?: ProjectType;
+  layoutType?: string;
+  isWeekly?: boolean;
+  currentViewMode?: string;
 }
 
 interface PageMappingEntry {
@@ -66,7 +70,13 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   currentPageTitle = 'Página Atual',
   initialFile = null,
   initialDestination = 'miolo_default',
+  projectType,
+  layoutType,
+  isWeekly,
+  currentViewMode,
 }) => {
+  const computedIsWeekly = Boolean(isWeekly || projectType === 'planner' || layoutType?.startsWith('weekly'));
+
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>('');
   const [totalPages, setTotalPages] = useState<number>(1);
@@ -79,8 +89,15 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   const [importMode, setImportMode] = useState<'single' | 'batch'>('single');
 
   // Destino da importação da página atual
-  const [chosenDestination, setChosenDestination] = useState<PdfImportDestination>(initialDestination || 'miolo_default');
-  const [customPageName, setCustomPageName] = useState<string>('Layout Importado');
+  const defaultInitialDest: PdfImportDestination = (computedIsWeekly && (!initialDestination || initialDestination === 'miolo_default'))
+    ? (currentViewMode === 'weekly_right' ? 'miolo_right' : 'miolo_left')
+    : (initialDestination || 'miolo_default');
+  const [chosenDestination, setChosenDestination] = useState<PdfImportDestination>(defaultInitialDest);
+  const [customPageName, setCustomPageName] = useState<string>(
+    computedIsWeekly 
+      ? (defaultInitialDest === 'miolo_right' ? 'Página Direita do Planner' : 'Página Esquerda do Planner')
+      : 'Layout Importado'
+  );
 
   // Mapeamento de Múltiplas Páginas do PDF
   const [pageMappings, setPageMappings] = useState<PageMappingEntry[]>([]);
@@ -138,21 +155,40 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
   // Inicializa mapa de páginas quando o arquivo é carregado
   const initializePageMappings = (numPages: number, defaultDest: PdfImportDestination) => {
     const mappings: PageMappingEntry[] = [];
+    const isMioloDest = defaultDest === 'miolo_default' || defaultDest === 'miolo_right' || defaultDest === 'miolo_left' || defaultDest === 'replace';
+
     for (let p = 1; p <= numPages; p++) {
       let dest: PdfImportDestination | 'ignore' = 'ignore';
       let name = `Página ${p}`;
 
       if (numPages === 1) {
-        dest = defaultDest;
+        if (computedIsWeekly) {
+          dest = currentViewMode === 'weekly_right' ? 'miolo_right' : 'miolo_left';
+          name = currentViewMode === 'weekly_right' ? 'Página Direita do Planner (Fim da Semana)' : 'Página Esquerda do Planner (Início da Semana)';
+        } else {
+          dest = defaultDest;
+          name = isMioloDest ? 'Miolo Diário (Principal)' : (defaultDest === 'cover_front' ? 'Capa Frente' : `Página 1`);
+        }
+      } else if (computedIsWeekly) {
+        // No planner semanal, página 1 é esquerda (Seg a Qua) e página 2 é direita (Qui a Dom)
+        dest = p % 2 === 1 ? 'miolo_left' : 'miolo_right';
+        name = p % 2 === 1 ? `Planner Página Esquerda (Pág ${p})` : `Planner Página Direita (Pág ${p})`;
       } else if (p === 1) {
-        dest = defaultDest;
-        name = 'Capa Frente ou Página 1';
-      } else if (p === 2 && (defaultDest === 'miolo_default' || defaultDest === 'miolo_right')) {
+        dest = isMioloDest ? 'miolo_default' : defaultDest;
+        name = isMioloDest ? 'Miolo Frente (Página Direita)' : (defaultDest === 'cover_front' ? 'Capa Frente' : 'Página 1');
+      } else if (p === 2 && isMioloDest) {
         dest = 'miolo_left';
-        name = 'Miolo Verso';
-      } else if (p === numPages && numPages > 3) {
+        name = 'Miolo Verso (Página Esquerda)';
+      } else if (p === 2 && defaultDest === 'cover_front') {
+        dest = 'endsheet_front';
+        name = 'Guarda Dianteira';
+      } else if (p === numPages && (defaultDest === 'cover_front' || defaultDest === 'cover_back')) {
         dest = 'cover_back';
-        name = 'Contracapa';
+        name = 'Contracapa (Verso da Capa)';
+      } else if (isMioloDest) {
+        // Se for miolo, alterna páginas ímpares (frente) e pares (verso) em vez de desviar para páginas iniciais
+        dest = p % 2 === 1 ? 'miolo_default' : 'miolo_left';
+        name = p % 2 === 1 ? `Miolo Frente (Pág ${p})` : `Miolo Verso (Pág ${p})`;
       } else {
         dest = 'new_intro';
         name = `Página Inicial ${p}`;
@@ -243,6 +279,10 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
         return { ...m, destination: 'new_intro', customName: `Página Inicial ${p}` };
       }
       if (presetType === 'spread') {
+        if (computedIsWeekly) {
+          if (p % 2 === 1) return { ...m, destination: 'miolo_left', customName: `Planner Página Esquerda (Pág ${p})` };
+          return { ...m, destination: 'miolo_right', customName: `Planner Página Direita (Pág ${p})` };
+        }
         if (p % 2 === 1) return { ...m, destination: 'miolo_right', customName: `Miolo Frente (Pág ${p})` };
         return { ...m, destination: 'miolo_left', customName: `Miolo Verso (Pág ${p})` };
       }
@@ -250,7 +290,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
         return { ...m, destination: 'new_intro', customName: `Página Inicial ${p}` };
       }
       if (presetType === 'all_daily') {
-        return { ...m, destination: 'miolo_default', customName: `Miolo Diário ${p}` };
+        return { ...m, destination: computedIsWeekly ? (p % 2 === 1 ? 'miolo_left' : 'miolo_right') : 'miolo_default', customName: computedIsWeekly ? (p % 2 === 1 ? `Planner Página Esquerda (Pág ${p})` : `Planner Página Direita (Pág ${p})`) : `Miolo Diário ${p}` };
       }
       return m;
     }));
@@ -827,49 +867,122 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                         </div>
                       </div>
 
-                      {/* 4. Miolo Diário Principal (Frente) */}
-                      <div
-                        onClick={() => {
-                          setChosenDestination('miolo_default');
-                          setIsBackgroundOnly(false);
-                          setCustomPageName('Layout de Miolo Diário');
-                        }}
-                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
-                          chosenDestination === 'miolo_default' && !isBackgroundOnly
-                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
-                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                        }`}
-                      >
-                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_default' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
-                          <BookOpen className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <span className="text-xs font-bold text-slate-900 block truncate">Miolo Diário (Principal / Frente)</span>
-                          <span className="text-[10px] text-slate-500 block truncate">Modelo para os dias da agenda</span>
-                        </div>
-                      </div>
+                      {/* Miolo: opções contextuais de acordo com o tipo de projeto (Agenda vs Planner) */}
+                      {computedIsWeekly ? (
+                        <>
+                          {/* Planner: Página Esquerda */}
+                          <div
+                            onClick={() => {
+                              setChosenDestination('miolo_left');
+                              setIsBackgroundOnly(false);
+                              setCustomPageName('Página Esquerda do Planner');
+                            }}
+                            className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                              chosenDestination === 'miolo_left' && !isBackgroundOnly
+                                ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_left' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                              <BookOpen className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">Página Esquerda do Planner</span>
+                              <span className="text-[10px] text-slate-500 block truncate">Segunda a Quarta / Início da Semana</span>
+                            </div>
+                          </div>
 
-                      {/* 5. Miolo Verso (Página Par) */}
-                      <div
-                        onClick={() => {
-                          setChosenDestination('miolo_left');
-                          setIsBackgroundOnly(false);
-                          setCustomPageName('Layout Miolo Verso');
-                        }}
-                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
-                          chosenDestination === 'miolo_left' && !isBackgroundOnly
-                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
-                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                        }`}
-                      >
-                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_left' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
-                          <ArrowRightLeft className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <span className="text-xs font-bold text-slate-900 block truncate">Miolo Verso (Página Esquerda / Par)</span>
-                          <span className="text-[10px] text-slate-500 block truncate">Layout diferenciado para o verso do dia</span>
-                        </div>
-                      </div>
+                          {/* Planner: Página Direita */}
+                          <div
+                            onClick={() => {
+                              setChosenDestination('miolo_right');
+                              setIsBackgroundOnly(false);
+                              setCustomPageName('Página Direita do Planner');
+                            }}
+                            className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                              chosenDestination === 'miolo_right' && !isBackgroundOnly
+                                ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_right' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                              <BookOpen className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">Página Direita do Planner</span>
+                              <span className="text-[10px] text-slate-500 block truncate">Quinta a Domingo / Fim da Semana</span>
+                            </div>
+                          </div>
+
+                          {/* Planner: Semana Completa em Página Única */}
+                          <div
+                            onClick={() => {
+                              setChosenDestination('miolo_default');
+                              setIsBackgroundOnly(false);
+                              setCustomPageName('Planner Semana Completa');
+                            }}
+                            className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                              chosenDestination === 'miolo_default' && !isBackgroundOnly
+                                ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_default' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                              <BookOpen className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">Semana Completa (Página Única)</span>
+                              <span className="text-[10px] text-slate-500 block truncate">Todos os dias na mesma página</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* 4. Miolo Diário Principal (Frente) */}
+                          <div
+                            onClick={() => {
+                              setChosenDestination('miolo_default');
+                              setIsBackgroundOnly(false);
+                              setCustomPageName('Layout de Miolo Diário');
+                            }}
+                            className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                              chosenDestination === 'miolo_default' && !isBackgroundOnly
+                                ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_default' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                              <BookOpen className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">Miolo Diário (Principal / Frente)</span>
+                              <span className="text-[10px] text-slate-500 block truncate">Modelo para os dias da agenda</span>
+                            </div>
+                          </div>
+
+                          {/* 5. Miolo Verso (Página Par) */}
+                          <div
+                            onClick={() => {
+                              setChosenDestination('miolo_left');
+                              setIsBackgroundOnly(false);
+                              setCustomPageName('Layout Miolo Verso');
+                            }}
+                            className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                              chosenDestination === 'miolo_left' && !isBackgroundOnly
+                                ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'miolo_left' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                              <ArrowRightLeft className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">Miolo Verso (Página Esquerda / Par)</span>
+                              <span className="text-[10px] text-slate-500 block truncate">Layout diferenciado para o verso do dia</span>
+                            </div>
+                          </div>
+                        </>
+                      )}
 
                       {/* 6. Nova Página Inicial */}
                       <div
@@ -1087,8 +1200,19 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                             <option value="cover_back">📘 Contracapa / Verso (Studio de Capas)</option>
                             <option value="endsheet_front">📑 Guarda Dianteira</option>
                             <option value="endsheet_back">📑 Guarda Traseira</option>
-                            <option value="miolo_default">📖 Miolo Diário (Principal / Frente)</option>
-                            <option value="miolo_left">📄 Miolo Verso (Página Esquerda)</option>
+                            {computedIsWeekly ? (
+                              <>
+                                <option value="miolo_left">📖 Planner Página Esquerda (Seg a Qua / Início)</option>
+                                <option value="miolo_right">📖 Planner Página Direita (Qui a Dom / Fim)</option>
+                                <option value="miolo_default">📄 Planner Semana Completa (Pág Única)</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="miolo_default">📖 Miolo Diário (Principal / Frente)</option>
+                                <option value="miolo_left">📄 Miolo Verso (Página Esquerda)</option>
+                                <option value="miolo_right">📄 Miolo Frente (Página Direita)</option>
+                              </>
+                            )}
                             <option value="new_intro">📋 Nova Página Inicial (Dados/Metas)</option>
                             <option value="new_monthly_intro">📅 Nova Abertura Mensal</option>
                             <option value="divider">🗂️ Divisória Mensal (Frente)</option>

@@ -15,22 +15,38 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { LayoutElement, ElementType } from '../../types';
 import { getMonthName } from '../backend/calendar';
 
-// Inicialização segura do Worker do PDF.js priorizando arquivo local no servidor
+// Inicialização segura do Worker do PDF.js priorizando compatibilidade com Web e Electron
 export const setupPdfWorker = () => {
   if (typeof window === 'undefined') return;
   try {
-    // 1. Tenta o worker local já presente na pasta /public
-    if (typeof window !== 'undefined' && window.location) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+    const isFileProtocol = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
+    const isElectron = typeof window !== 'undefined' && (
+      (navigator?.userAgent || '').toLowerCase().includes('electron') ||
+      !!(window as any).electronAPI?.isElectron
+    );
+
+    if (isFileProtocol || isElectron) {
+      // No Electron empacotado (file://), workers locais relativos ou via Vite URL funcionam perfeitamente
+      if (pdfWorkerUrl) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      } else {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.js';
+      }
     } else if (pdfWorkerUrl) {
       pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    } else if (typeof window !== 'undefined' && window.location) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
     } else {
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
   } catch (err) {
-    console.warn('[setupPdfWorker] Erro ao inicializar worker do PDF:', err);
+    console.warn('[setupPdfWorker] Aviso ao configurar worker:', err);
     try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+      if (pdfWorkerUrl) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      } else {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.js';
+      }
     } catch {}
   }
 };
@@ -1563,28 +1579,53 @@ async function convertPdfImageToDataUrl(imageObj: any): Promise<string | null> {
 }
 
 /**
- * Deduplica linhas que possuem as mesmas coordenadas dentro de tolerâncias mínimas
+ * Deduplica linhas que possuem as mesmas coordenadas dentro de tolerâncias mínimas (O(N) com grid espacial)
  */
 function deduplicateLines(lines: ExtractedShapeItem[], isHorizontal: boolean): ExtractedShapeItem[] {
   const result: ExtractedShapeItem[] = [];
+  const grid = new Map<string, ExtractedShapeItem[]>();
+  const cellSize = 6;
+
   for (const line of lines) {
-    const duplicate = result.find(r => {
-      if (isHorizontal) {
-        return (
-          Math.abs(r.y - line.y) <= 1.5 &&
-          Math.abs(r.x - line.x) <= 2.5 &&
-          Math.abs(r.width - line.width) <= 3.0
-        );
-      } else {
-        return (
-          Math.abs(r.x - line.x) <= 1.5 &&
-          Math.abs(r.y - line.y) <= 2.5 &&
-          Math.abs(r.height - line.height) <= 3.0
-        );
+    const key = isHorizontal
+      ? `${Math.round(line.y / cellSize)}_${Math.round(line.x / cellSize)}`
+      : `${Math.round(line.x / cellSize)}_${Math.round(line.y / cellSize)}`;
+
+    const bucket = grid.get(key);
+    let duplicate = false;
+
+    if (bucket) {
+      for (let i = 0; i < bucket.length; i++) {
+        const r = bucket[i];
+        if (isHorizontal) {
+          if (
+            Math.abs(r.y - line.y) <= 1.5 &&
+            Math.abs(r.x - line.x) <= 2.5 &&
+            Math.abs(r.width - line.width) <= 3.0
+          ) {
+            duplicate = true;
+            break;
+          }
+        } else {
+          if (
+            Math.abs(r.x - line.x) <= 1.5 &&
+            Math.abs(r.y - line.y) <= 2.5 &&
+            Math.abs(r.height - line.height) <= 3.0
+          ) {
+            duplicate = true;
+            break;
+          }
+        }
       }
-    });
+    }
+
     if (!duplicate) {
       result.push(line);
+      if (!bucket) {
+        grid.set(key, [line]);
+      } else {
+        bucket.push(line);
+      }
     }
   }
   return result;
@@ -1820,9 +1861,11 @@ export function mergeAndOptimizeShapes(
   const finalHLines = deduplicateLines(mergedHLines, true);
   const finalVLines = deduplicateLines(mergedVLines, false);
 
-  // Deduplicação e mesclagem inteligente de caixas/blocos
-  // Elimina caixas sobrepostas idênticas (ex: preenchimento e borda geradas como 2 objetos separados)
+  // Deduplicação e mesclagem inteligente de caixas/blocos com indexação espacial O(N)
   const mergedBoxes: ExtractedShapeItem[] = [];
+  const boxGrid = new Map<string, ExtractedShapeItem[]>();
+  const boxCellSize = 8;
+
   for (const b of boxes) {
     const isBgTransparent = !b.backgroundColor || b.backgroundColor === 'transparent';
     const isBorderTransparent = !b.borderColor || b.borderColor === 'transparent' || !b.borderWidth || b.borderWidth <= 0;
@@ -1830,12 +1873,18 @@ export function mergeAndOptimizeShapes(
     // Ignorar elementos 100% invisíveis
     if (isBgTransparent && isBorderTransparent) continue;
 
-    const existing = mergedBoxes.find(m => 
-      Math.abs(m.x - b.x) <= 2.0 &&
-      Math.abs(m.y - b.y) <= 2.0 &&
-      Math.abs(m.width - b.width) <= 3.0 &&
-      Math.abs(m.height - b.height) <= 3.0
-    );
+    const bKey = `${Math.round(b.x / boxCellSize)}_${Math.round(b.y / boxCellSize)}`;
+    const bucket = boxGrid.get(bKey);
+    let existing: ExtractedShapeItem | undefined = undefined;
+
+    if (bucket) {
+      existing = bucket.find(m => 
+        Math.abs(m.x - b.x) <= 2.0 &&
+        Math.abs(m.y - b.y) <= 2.0 &&
+        Math.abs(m.width - b.width) <= 3.0 &&
+        Math.abs(m.height - b.height) <= 3.0
+      );
+    }
 
     if (existing) {
       // Se existing não tinha borda válida mas b tem, transfere
@@ -1850,6 +1899,11 @@ export function mergeAndOptimizeShapes(
       }
     } else {
       mergedBoxes.push({ ...b });
+      if (!bucket) {
+        boxGrid.set(bKey, [b]);
+      } else {
+        bucket.push(b);
+      }
     }
   }
 
@@ -1997,7 +2051,16 @@ export async function extractPdfObjects(
         return { x: webX, y: webY };
       };
 
+      // Limites de segurança para evitar congelamento de navegador e estouro de RAM em PCs modestos
+      const MAX_RAW_SHAPES = 450;
+      const MAX_IMAGES = 15;
+
       for (let i = 0; i < fnArray.length; i++) {
+        // Cede o controle para o event loop do navegador a cada 300 operações para não travar a UI (evita "Página Travada")
+        if (i > 0 && i % 300 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
         const fn = fnArray[i];
         const args = argsArray[i];
 
@@ -2052,7 +2115,7 @@ export async function extractPdfObjects(
             }
           }
         } else if (extractShapes && fn === pdfjsLib.OPS.moveTo) {
-          if (currentPathPts.length >= 2) {
+          if (currentPathPts.length >= 2 && pendingSubPaths.length < MAX_RAW_SHAPES) {
             pendingSubPaths.push({
               type: currentPathPts.length === 2 ? 'line' : 'rect',
               pts: [...currentPathPts],
@@ -2069,7 +2132,7 @@ export async function extractPdfObjects(
         } else if (extractShapes && (fn === pdfjsLib.OPS.curveTo2 || fn === pdfjsLib.OPS.curveTo3)) {
           currentPathPts.push({ x: args[2], y: args[3] });
         } else if (extractShapes && fn === pdfjsLib.OPS.closePath) {
-          if (currentPathPts.length >= 2) {
+          if (currentPathPts.length >= 2 && pendingSubPaths.length < MAX_RAW_SHAPES) {
             pendingSubPaths.push({
               type: currentPathPts.length === 2 ? 'line' : 'rect',
               pts: [...currentPathPts],
@@ -2081,18 +2144,20 @@ export async function extractPdfObjects(
           currentPathPts = [];
         } else if (extractShapes && fn === pdfjsLib.OPS.rectangle) {
           const [rx, ry, rw, rh] = args;
-          pendingSubPaths.push({
-            type: 'rect',
-            pts: [
-              { x: rx, y: ry },
-              { x: rx + rw, y: ry },
-              { x: rx + rw, y: ry + rh },
-              { x: rx, y: ry + rh },
-            ],
-            matrix: [...currentMatrix],
-            lineWidth: currentState.lineWidth,
-            borderStyle: currentState.borderStyle,
-          });
+          if (pendingSubPaths.length < MAX_RAW_SHAPES) {
+            pendingSubPaths.push({
+              type: 'rect',
+              pts: [
+                { x: rx, y: ry },
+                { x: rx + rw, y: ry },
+                { x: rx + rw, y: ry + rh },
+                { x: rx, y: ry + rh },
+              ],
+              matrix: [...currentMatrix],
+              lineWidth: currentState.lineWidth,
+              borderStyle: currentState.borderStyle,
+            });
+          }
         } else if (extractShapes && fn === pdfjsLib.OPS.constructPath) {
           const [subOps, subArgs] = args;
           let j = 0;
@@ -2101,6 +2166,7 @@ export async function extractPdfObjects(
             let cpPts: Array<{ x: number; y: number }> = [];
 
             for (let s = 0; s < subOps.length; s++) {
+              if (pendingSubPaths.length >= MAX_RAW_SHAPES) break;
               const sop = subOps[s];
               if (sop === pdfjsLib.OPS.rectangle) {
                 const rx = subArgs[j++];
@@ -2152,7 +2218,7 @@ export async function extractPdfObjects(
               }
             }
 
-            if (cpPts.length >= 2) {
+            if (cpPts.length >= 2 && pendingSubPaths.length < MAX_RAW_SHAPES) {
               pendingSubPaths.push({
                 type: cpPts.length === 2 ? 'line' : 'rect',
                 pts: [...cpPts],
@@ -2173,7 +2239,7 @@ export async function extractPdfObjects(
             fn === pdfjsLib.OPS.closeFillStroke ||
             fn === pdfjsLib.OPS.closeEOFillStroke)
         ) {
-          if (currentPathPts.length >= 2) {
+          if (currentPathPts.length >= 2 && pendingSubPaths.length < MAX_RAW_SHAPES) {
             pendingSubPaths.push({
               type: currentPathPts.length === 2 ? 'line' : 'rect',
               pts: [...currentPathPts],
@@ -2200,8 +2266,9 @@ export async function extractPdfObjects(
             fn === pdfjsLib.OPS.closeFillStroke ||
             fn === pdfjsLib.OPS.closeEOFillStroke;
 
-          if (pendingSubPaths.length > 0) {
+          if (pendingSubPaths.length > 0 && shapes.length < MAX_RAW_SHAPES) {
             for (const sp of pendingSubPaths) {
+              if (shapes.length >= MAX_RAW_SHAPES) break;
               if (sp.pts.length < 2) continue;
 
               const webPts = sp.pts.map(p => transformPoint(p.x, p.y, sp.matrix));
@@ -2313,6 +2380,7 @@ export async function extractPdfObjects(
           pendingSubPaths = [];
         } else if (
           extractImages &&
+          images.length < MAX_IMAGES &&
           (fn === pdfjsLib.OPS.paintImageXObject ||
             fn === pdfjsLib.OPS.paintInlineImageXObject ||
             fn === pdfjsLib.OPS.paintImageMaskXObject)
@@ -2322,7 +2390,8 @@ export async function extractPdfObjects(
 
           if (typeof imgKey === 'string') {
             imageObj = await new Promise((resolve) => {
-              const timer = setTimeout(() => resolve(null), 1200);
+              // Timeout rápido de 250ms (evita travar quando referências a imagens não existem)
+              const timer = setTimeout(() => resolve(null), 250);
               try {
                 if (page.objs.has(imgKey)) {
                   clearTimeout(timer);
@@ -2382,7 +2451,14 @@ export async function extractPdfObjects(
   let backgroundDataUrl: string | undefined = undefined;
   if (renderBackgroundCanvas) {
     try {
-      const renderScale = 2.0; // 200 DPI de alta fidelidade e excelente desempenho
+      // Limite inteligente de resolução para evitar esgotar a memória RAM em computadores de alunas
+      const MAX_CANVAS_DIM = 2200;
+      let renderScale = 2.0;
+      if (widthPt * renderScale > MAX_CANVAS_DIM || heightPt * renderScale > MAX_CANVAS_DIM) {
+        renderScale = Math.min(MAX_CANVAS_DIM / widthPt, MAX_CANVAS_DIM / heightPt);
+      }
+      renderScale = Math.max(1.0, Math.min(2.0, renderScale));
+
       const bgViewport = page.getViewport({ scale: renderScale });
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(bgViewport.width);

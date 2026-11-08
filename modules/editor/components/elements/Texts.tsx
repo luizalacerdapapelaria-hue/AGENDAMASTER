@@ -344,12 +344,10 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     }
 
     if (element.type === 'quote') {
-        let rawQuote = quote || element.content || (isEditor ? 'Frase Inspiradora' : '');
-        if (element.style?.quoteDisplayMode === 'fixed' && element.style?.quoteFixedText) {
-            rawQuote = element.style.quoteFixedText;
-        } else if (element.content && element.style?.quoteDisplayMode === 'fixed') {
-            rawQuote = element.content;
-        }
+        const isFixed = element.style?.quoteDisplayMode === 'fixed';
+        let rawQuote = isFixed
+            ? (element.style?.quoteFixedText || element.content || (isEditor ? 'Frase Fixa' : ''))
+            : (quote || (isEditor ? 'Frase Inspiradora' : ''));
 
         if (isEditor && isSelected && isEditing) {
             return (
@@ -447,13 +445,19 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     }
 
     if (element.type === 'holiday') {
-        if (!dayData || dayData.dayOfMonth === 0) return null;
+        if (!dayData) return null;
+        // Se for dia do mês anterior/posterior (padding) e estiver sem data (desmarcado), deixa em branco
+        if (dayData.isPaddingDay && (!dayData.dayOfMonth || dayData.dayOfMonth === 0)) {
+            return isEditor ? <div style={{ width: '100%', height: '100%' }} /> : null;
+        }
+        if (!isEditor && (!dayData.dayOfMonth || dayData.dayOfMonth === 0)) return null;
+
         let holidayText = dayData.holiday || '';
         if (dayData.specialEventText) {
             holidayText = holidayText ? `${holidayText} • ${dayData.specialEventText}` : dayData.specialEventText;
         }
         if (!holidayText && isEditor) {
-            holidayText = 'Confraternização Universal';
+            holidayText = 'Feriado';
         }
         if (!holidayText && !isEditor) return null;
         const content = isSentenceOrCapitalize ? applyTextTransform(holidayText, textTransform) : holidayText;
