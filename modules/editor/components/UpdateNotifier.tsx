@@ -3,7 +3,7 @@ import { RefreshCw, Sparkles, X, ChevronRight, Laptop } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { localStorage, sessionStorage } from '../../../services/safeStorage';
 
-const CURRENT_VERSION = "2.0.3"; // Versão fixa do build atual
+const CURRENT_VERSION = "2.0.4"; // Versão fixa do build atual
 
 interface UpdateNotifierProps {
   autoApply?: boolean;

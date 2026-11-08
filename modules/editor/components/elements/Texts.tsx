@@ -384,8 +384,12 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
             );
         }
 
-        const preset = (style as any).preset || 'default';
+        const quotePreset = (style as any).quoteStylePreset || (style as any).preset || 'default';
+        const showMarks = Boolean((style as any).showQuoteMarks || quotePreset === 'quotation_marks');
         const displayContent = isSentenceOrCapitalize ? applyTextTransform(rawQuote, textTransform) : rawQuote;
+        const formattedQuote = showMarks && displayContent && !displayContent.startsWith('“') && !displayContent.startsWith('"')
+            ? `“${displayContent}”`
+            : displayContent;
 
         return (
             <div 
@@ -407,13 +411,13 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                     overflow: hasStroke ? 'visible' : undefined
                 }}
             >
-                {preset === 'divider_card' ? (
+                {quotePreset === 'divider_card' ? (
                     <div className="w-full h-full p-2 rounded-xl border border-[#eedad5] bg-[#fffbf9] flex flex-col justify-center items-center text-center shadow-2xs">
                         <span className="text-[9px] text-[#b84a56] font-bold uppercase tracking-wider mb-0.5">✦ Inspiração ✦</span>
-                        <div className="italic" style={strokeCss}>{displayContent}</div>
+                        <div className="italic" style={{ fontSize: style.fontSize, ...strokeCss }}>{formattedQuote}</div>
                     </div>
                 ) : (
-                    <span style={strokeCss}>{displayContent}</span>
+                    <span style={{ fontSize: style.fontSize, ...strokeCss }}>{formattedQuote}</span>
                 )}
             </div>
         );

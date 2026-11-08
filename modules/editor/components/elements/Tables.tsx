@@ -283,56 +283,21 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
             className="w-full h-full relative select-none"
             style={{
                 borderRadius: borderRadius > 0 ? `${borderRadius}px` : undefined,
-                borderTop: borderCssTop,
-                borderBottom: borderCssBottom,
-                borderLeft: borderCssLeft,
-                borderRight: borderCssRight,
+                borderTop: borderRadius > 0 ? borderCssTop : undefined,
+                borderBottom: borderRadius > 0 ? borderCssBottom : undefined,
+                borderLeft: borderRadius > 0 ? borderCssLeft : undefined,
+                borderRight: borderRadius > 0 ? borderCssRight : undefined,
                 boxSizing: 'border-box',
                 overflow: 'hidden',
             }}
         >
-            {/* SVG Grid Borders Rendering (Internal Lines) */}
-            {insideBorderWidth > 0 && (
-                <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
-                    {/* Internal Vertical Lines */}
-                    {borders.insideVertical && colDividerPositions.map((posX, idx) => (
-                        <line
-                            key={`v-${idx}`}
-                            x1={`${posX}%`}
-                            y1="0%"
-                            x2={`${posX}%`}
-                            y2="100%"
-                            stroke={borderColor}
-                            strokeWidth={insideBorderWidth}
-                            strokeDasharray={dashArray}
-                        />
-                    ))}
-
-                    {/* Internal Horizontal Lines */}
-                    {borders.insideHorizontal && rowDividerPositions.map((posY, idx) => {
-                        const isHeaderSep = hasHeader && idx === 0;
-                        if (isHeaderSep && !borders.headerSeparator) return null;
-                        return (
-                            <line
-                                key={`h-${idx}`}
-                                x1="0%"
-                                y1={`${posY}%`}
-                                x2="100%"
-                                y2={`${posY}%`}
-                                stroke={borderColor}
-                                strokeWidth={insideBorderWidth}
-                                strokeDasharray={dashArray}
-                            />
-                        );
-                    })}
-                </svg>
-            )}
-
-            {/* Table Content Grid */}
+            {/* Table Content Grid with native CSS borders for bulletproof PDF/print rendering */}
             {Array(rows).fill(0).map((_, r) => {
                 const rowHPercent = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
                 const rowHeightStyle = `${rowHPercent}%`;
                 const rowHeightPx = Math.max(2, (rowHPercent / 100) * effectiveTableHeightPx);
+                const isFirstRow = r === 0;
+                const isLastRow = r === rows - 1;
                 
                 return (
                     <div 
@@ -341,6 +306,8 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                         style={{ height: rowHeightStyle, minHeight: 0, overflow: 'hidden' }}
                     >
                         {Array(columns).fill(0).map((_, c) => {
+                            const isFirstCol = c === 0;
+                            const isLastCol = c === columns - 1;
                             const cellKey = `${r}-${c}`;
                             const cellKeyAlt = `${r}_${c}`;
                             const content = style.table?.cellContent?.[cellKey] ?? style.table?.cellContent?.[cellKeyAlt] ?? (style.table as any)?.data?.[r]?.[c] ?? '';
@@ -392,6 +359,44 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             }
                             const cellBg = (customBg && customBg !== 'transparent') ? customBg : defaultBg;
 
+                            // Calculate individual cell borders with fallback for robust cross-engine rendering
+                            let cellBorderTop: string | undefined = undefined;
+                            let cellBorderBottom: string | undefined = undefined;
+                            let cellBorderLeft: string | undefined = undefined;
+                            let cellBorderRight: string | undefined = undefined;
+
+                            if (isFirstRow && borders.top && outerBorderWidth > 0) {
+                                cellBorderTop = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
+                            }
+
+                            if (isLastRow) {
+                                if (borders.bottom && outerBorderWidth > 0) {
+                                    cellBorderBottom = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
+                                }
+                            } else if (hasHeader && isFirstRow) {
+                                if (borders.headerSeparator && insideBorderWidth > 0) {
+                                    cellBorderBottom = `${insideBorderWidth}px ${borderStyle} ${borderColor}`;
+                                }
+                            } else {
+                                if (borders.insideHorizontal && insideBorderWidth > 0) {
+                                    cellBorderBottom = `${insideBorderWidth}px ${borderStyle} ${borderColor}`;
+                                }
+                            }
+
+                            if (isFirstCol && borders.left && outerBorderWidth > 0) {
+                                cellBorderLeft = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
+                            }
+
+                            if (isLastCol) {
+                                if (borders.right && outerBorderWidth > 0) {
+                                    cellBorderRight = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
+                                }
+                            } else {
+                                if (borders.insideVertical && insideBorderWidth > 0) {
+                                    cellBorderRight = `${insideBorderWidth}px ${borderStyle} ${borderColor}`;
+                                }
+                            }
+
                             const cellStyle: React.CSSProperties = { 
                                 width: `${columnWidths[c]}%`, 
                                 height: '100%', 
@@ -413,7 +418,11 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 textWrap: tStyle.textWrap as any,
                                 padding: `${padY}px ${padX}px`,
                                 boxSizing: 'border-box',
-                                overflow: 'hidden'
+                                overflow: 'hidden',
+                                borderTop: cellBorderTop,
+                                borderBottom: cellBorderBottom,
+                                borderLeft: cellBorderLeft,
+                                borderRight: cellBorderRight,
                             };
 
                             const cellTextStrokeCss = getTextStrokeCss(tStyle, tStyle.color || '#666666');

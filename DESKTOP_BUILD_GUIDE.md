@@ -62,7 +62,7 @@ npm run dist:win
 Este comando vai:
 1. Compilar todo o projeto React para a pasta `/dist`.
 2. Empacotar a aplicação em um instalador de Windows otimizado na pasta `/dist-desktop`.
-3. Gerar o arquivo final em `/dist-desktop/Agenda.Master.Setup.2.0.3.exe`.
+3. Gerar o arquivo final em `/dist-desktop/Agenda.Master.Setup.2.0.4.exe`.
 
 ---
 
@@ -100,7 +100,7 @@ Se no futuro você alterar o código nativo do Windows (como o arquivo `electron
      ]
    }
    ```
-2. Incremente o campo `"version"` no seu `package.json` (ex: de `"2.0.1"` para `"2.0.3"`).
+2. Incremente o campo `"version"` no seu `package.json` (ex: de `"2.0.3"` para `"2.0.4"`).
 3. Execute o comando `npm run dist:win` no terminal do seu computador (ou apenas `npm run generate:latest` se o `.exe` já foi compilado).
 4. O compilador gerará tanto o instalador `.exe` quanto o arquivo **`latest.yml`** (com SHA-512 e tamanho calculados) diretamente na pasta `dist-desktop/`.
 5. Faça o upload do novo arquivo `.exe` **E** do arquivo `latest.yml` para a mesma pasta pública do seu Supabase Storage ou GitHub Release.

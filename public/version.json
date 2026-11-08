@@ -1,5 +1,5 @@
 {
-  "version": "2.0.3",
-  "releaseDate": "2026-10-26",
-  "notes": "Limpeza e renovação 100% automática de cache e sessão em segundo plano, sem precisar clicar em nada."
+  "version": "2.0.4",
+  "releaseDate": "2026-11-08",
+  "notes": "Remoção da linha pontilhada no PDF de 2 DPP e botão de cancelar conversão de PDF em andamento."
 }

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, Sparkles, Check, Copy, Plus, Upload, Trash2, Search, Shuffle, 
   Crown, Heart, Sun, Flame, Lightbulb, Coffee, BookOpen, Layers,
-  CheckCircle2, ArrowRight, Star
+  CheckCircle2, ArrowRight, Star, AlertCircle
 } from 'lucide-react';
 import { 
   QuoteCategory, 
@@ -48,6 +48,7 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedQuote, setCopiedQuote] = useState<string | null>(null);
   const [insertedQuote, setInsertedQuote] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [pastedText, setPastedText] = useState('');
   const [randomPreviewQuote, setRandomPreviewQuote] = useState<string>(() => getRandomQuote('feminine_strength'));
 
@@ -110,17 +111,31 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
   };
 
   const handleSavePasted = () => {
-    if (!pastedText.trim()) return;
-    const lines = pastedText
+    const textToProcess = pastedText.trim();
+    if (!textToProcess) {
+      setSaveStatus({ type: 'error', message: 'Cole ou digite ao menos uma frase antes de salvar.' });
+      setTimeout(() => setSaveStatus(null), 4000);
+      return;
+    }
+    const lines = textToProcess
       .split(/\r?\n/)
       .map(cleanQuoteLine)
-      .filter(l => l.length >= 2);
+      .filter(l => l.length > 0);
+
     if (lines.length > 0) {
       onSaveCustomQuotes(lines);
       onSetProjectCategory('custom');
       setPastedText('');
-      setInsertedQuote(`${lines.length} frase(s) própria(s) salva(s) e ativada(s) no projeto!`);
-      setTimeout(() => setInsertedQuote(null), 3500);
+      const msg = `${lines.length} frase(s) própria(s) salva(s) e ativada(s) no projeto!`;
+      setSaveStatus({ type: 'success', message: msg });
+      setInsertedQuote(msg);
+      setTimeout(() => {
+        setSaveStatus(null);
+        setInsertedQuote(null);
+      }, 4500);
+    } else {
+      setSaveStatus({ type: 'error', message: 'Nenhuma frase válida encontrada no texto colado.' });
+      setTimeout(() => setSaveStatus(null), 4000);
     }
   };
 
@@ -135,10 +150,10 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
         if (file.name.endsWith('.json')) {
           const parsed = JSON.parse(text);
           if (Array.isArray(parsed)) {
-            phrases = parsed.map(String).map(cleanQuoteLine).filter(l => l.length >= 2);
+            phrases = parsed.map(String).map(cleanQuoteLine).filter(l => l.length > 0);
           }
         } else {
-          const rawLines = text.split(/\r?\n/).map(cleanQuoteLine).filter(l => l.length >= 2);
+          const rawLines = text.split(/\r?\n/).map(cleanQuoteLine).filter(l => l.length > 0);
           const headerRegex = /^(frases?|quotes?|texto|mensagens?|mensage|frase_motivacional|citacao|citacoes)$/i;
           if (rawLines.length > 1 && headerRegex.test(rawLines[0].toLowerCase())) {
             phrases = rawLines.slice(1);
@@ -149,11 +164,21 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
         if (phrases.length > 0) {
           onSaveCustomQuotes(phrases);
           onSetProjectCategory('custom');
-          setInsertedQuote(`${phrases.length} frase(s) importada(s) e ativada(s) no projeto!`);
-          setTimeout(() => setInsertedQuote(null), 3500);
+          const msg = `${phrases.length} frase(s) importada(s) e ativada(s) no projeto!`;
+          setSaveStatus({ type: 'success', message: msg });
+          setInsertedQuote(msg);
+          setTimeout(() => {
+            setSaveStatus(null);
+            setInsertedQuote(null);
+          }, 4500);
+        } else {
+          setSaveStatus({ type: 'error', message: 'O arquivo não continha frases válidas.' });
+          setTimeout(() => setSaveStatus(null), 4000);
         }
       } catch (err) {
         console.error('Erro ao importar frases:', err);
+        setSaveStatus({ type: 'error', message: 'Erro ao ler arquivo. Verifique se é um arquivo de texto válido.' });
+        setTimeout(() => setSaveStatus(null), 4000);
       }
     };
     reader.readAsText(file);
@@ -655,14 +680,35 @@ export const MotivationalQuotesModal: React.FC<MotivationalQuotesModalProps> = (
                     className="w-full h-56 p-3 text-xs border border-[#eedad5] rounded-2xl focus:ring-2 focus:ring-[#b84a56] outline-none resize-none font-mono text-slate-800 bg-[#fffbf9]"
                   />
 
+                  {saveStatus && (
+                    <div
+                      className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-1 ${
+                        saveStatus.type === 'success'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                          : 'bg-rose-50 text-rose-800 border border-rose-300'
+                      }`}
+                    >
+                      {saveStatus.type === 'success' ? (
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      <span>{saveStatus.message}</span>
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleSavePasted}
                     disabled={!pastedText.trim()}
-                    className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-700/20 transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                    className={`w-full py-2.5 font-bold text-xs rounded-xl shadow-md transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                      saveStatus?.type === 'success'
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-700/20'
+                        : 'bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white shadow-emerald-700/20'
+                    }`}
                   >
                     <Check className="w-4 h-4" />
-                    <span>Salvar Frases Coladas</span>
+                    <span>{saveStatus?.type === 'success' ? '✓ Frases Salvas e Ativadas!' : 'Salvar Frases Coladas'}</span>
                   </button>
                 </div>
               </div>

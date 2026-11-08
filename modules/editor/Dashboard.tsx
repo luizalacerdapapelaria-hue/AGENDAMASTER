@@ -198,7 +198,8 @@ const VirtualPreviewSpread: React.FC<{
                     </PreviewPageScaleWrapper>
                 ) : (
                     <div 
-                        id={`preview-page-${pageLeftNum}`}
+                        id={`virtual-placeholder-${pageLeftNum}`}
+                        data-virtual-placeholder="true"
                         className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
                         style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
                     >
@@ -225,7 +226,8 @@ const VirtualPreviewSpread: React.FC<{
                         </PreviewPageScaleWrapper>
                     ) : (
                         <div 
-                            id={`preview-page-${pageLeftNum}`}
+                            id={`virtual-placeholder-${pageLeftNum}`}
+                            data-virtual-placeholder="true"
                             className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
                             style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
                         >
@@ -251,7 +253,8 @@ const VirtualPreviewSpread: React.FC<{
                     </PreviewPageScaleWrapper>
                 ) : (
                     <div 
-                        id={`preview-page-${pageLeftNum}`}
+                        id={`virtual-placeholder-${pageLeftNum}`}
+                        data-virtual-placeholder="true"
                         className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
                         style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
                     >
@@ -267,7 +270,8 @@ const VirtualPreviewSpread: React.FC<{
                         </PreviewPageScaleWrapper>
                     ) : (
                         <div 
-                            id={`preview-page-${pageRightNum}`}
+                            id={`virtual-placeholder-${pageRightNum}`}
+                            data-virtual-placeholder="true"
                             className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
                             style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
                         >
@@ -1330,6 +1334,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [pdfScaleMode, setPdfScaleMode] = useState<'fast' | 'standard' | 'high'>('standard');
   const [pdfExportMethod, setPdfExportMethod] = useState<'vector' | 'canvas'>('vector');
   const [previewPageIndex, setPreviewPageIndex] = useState<number>(0);
+  const pdfExportCancelledRef = useRef<boolean>(false);
 
   // PWA (Progressive Web Application) Installation States
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -2890,10 +2895,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const cancelPrint = () => {
+      pdfExportCancelledRef.current = true;
       setPrintStatus('idle');
       setRenderedPrintCount(0);
       setPdfExporting(false);
       setPdfExportProgress(0);
+      setToastMessage('Conversão para PDF cancelada.');
   };
 
   const handleKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -4151,7 +4158,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       let hasChanges = false;
       const updatedList = prevList.map(el => {
         if (!targetIds.includes(el.id)) return el;
-        if (el.type === 'full_calendar' || el.type === 'mini_calendar' || el.type === 'holiday_list') {
+        if (el.type === 'full_calendar' || el.type === 'mini_calendar' || el.type === 'holiday_list' || el.type === 'quote' || el.type === 'verse') {
           if (id && el.id === id && overrideStyle) {
             hasChanges = true;
             return { ...el, style: { ...el.style, ...overrideStyle } };
@@ -7134,7 +7141,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const activeList = getActiveElements();
     const targetElement = activeList.find(e => e.id === id);
     const isCalendar = targetElement?.type === 'mini_calendar' || targetElement?.type === 'full_calendar';
-    const isFixedBlock = isCalendar || targetElement?.type === 'holiday_list';
+    const isFixedBlock = isCalendar || targetElement?.type === 'holiday_list' || targetElement?.type === 'quote' || targetElement?.type === 'verse';
 
     const styleKeysAffectingBounds = [
         'fontSize', 'fontFamily', 'fontWeight', 'letterSpacing', 'lineHeight', 'textTransform',
@@ -9390,7 +9397,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               willChange: isEditor && isSelectedThis && (isDragging || !!resizeDir) ? 'left, top, width, height' : 'auto'
           };
           const containerClass = `absolute group ${isSelected ? 'ring-2 ring-indigo-500 z-50' : 'hover:ring-1 hover:ring-indigo-300'} ${isEditor || activeTab === 'preview' ? 'cursor-pointer' : ''} ${isEditor ? 'cursor-move' : ''}`;
-          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list', 'special_event'].includes(el.type);
+          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list', 'special_event', 'quote', 'verse'].includes(el.type);
           const shouldClip = ['lines', 'note_grid', 'habit_tracker', 'mini_calendar', 'full_calendar', 'table', 'permanent_day_header', 'vector_shape'].includes(el.type);
           
           const currentQuote = (el.style?.quoteDisplayMode === 'fixed' && el.style?.quoteFixedText)
@@ -9513,6 +9520,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     title="Exibir feriados em 2 colunas lado a lado"
                                 >
                                     2 Colunas ✨
+                                </button>
+                            </div>
+                        )}
+                        {el.type === 'quote' && (
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1 z-50 whitespace-nowrap select-none bg-white/95 backdrop-blur-xs p-0.5 px-2 rounded-full border border-[#eedad5] shadow-md">
+                                <span className="text-[#b84a56] text-[9.5px] font-black flex items-center gap-1 mr-1">
+                                    <Sparkles className="w-2.5 h-2.5 text-[#b84a56]" /> Frase
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const cur = typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10);
+                                        const next = Math.max(4, Math.round((cur - 0.5) * 10) / 10);
+                                        updateElementStyle(el.id, { fontSize: next });
+                                    }}
+                                    className="w-5 h-5 rounded-md bg-[#fff5f5] hover:bg-[#fdeeed] text-[#b84a56] font-black text-xs flex items-center justify-center cursor-pointer transition-colors active:scale-90"
+                                    title="Diminuir tamanho da letra (A-)"
+                                >
+                                    A-
+                                </button>
+                                <span className="text-[10px] font-mono font-bold text-slate-700 min-w-[28px] text-center">
+                                    {typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10)}pt
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const cur = typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10);
+                                        const next = Math.min(72, Math.round((cur + 0.5) * 10) / 10);
+                                        updateElementStyle(el.id, { fontSize: next });
+                                    }}
+                                    className="w-5 h-5 rounded-md bg-[#fff5f5] hover:bg-[#fdeeed] text-[#b84a56] font-black text-xs flex items-center justify-center cursor-pointer transition-colors active:scale-90"
+                                    title="Aumentar tamanho da letra (A+)"
+                                >
+                                    A+
+                                </button>
+                                <div className="w-px h-3 bg-[#eedad5] mx-0.5" />
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const cur = typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10);
+                                        const presets = [8.5, 10, 11.5, 13, 16];
+                                        const next = presets.find(p => p > cur) || presets[0];
+                                        updateElementStyle(el.id, { fontSize: next });
+                                    }}
+                                    className="text-[9px] font-bold text-slate-500 hover:text-[#b84a56] px-1 py-0.5 rounded cursor-pointer"
+                                    title="Alternar entre tamanhos pré-definidos (8.5pt, 10pt, 11.5pt, 13pt, 16pt)"
+                                >
+                                    Preset
                                 </button>
                             </div>
                         )}
@@ -10565,7 +10623,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     const renderMonthDivider = (month: number, year: number) => {
         const style = config.monthlyDividerStyle || {};
-        const elements = style.elements || [];
+        let elements = style.elements;
+        if (!elements || elements.length === 0) {
+            elements = [
+                { id: `div-title-${month}`, type: 'text', name: 'Título', x: 10, y: 35, w: 80, h: 8, content: style.titleText || 'Planejamento Mensal', zIndex: 1, style: { fontSize: 14, fontWeight: 'medium', textAlign: 'center' as const, color: style.textColor || '#312e81', fontFamily: 'Inter' } },
+                { id: `div-month-${month}`, type: 'month_name', name: 'Mês', x: 10, y: 44, w: 80, h: 14, content: '', zIndex: 2, style: { fontSize: 36, fontWeight: 'bold', textAlign: 'center' as const, color: style.textColor || '#312e81', fontFamily: 'Inter', variant: 'month_name' } },
+                { id: `div-year-${month}`, type: 'year', name: 'Ano', x: 10, y: 58, w: 80, h: 8, content: '', zIndex: 3, style: { fontSize: 18, fontWeight: 'light', textAlign: 'center' as const, color: style.accentColor || '#6366f1', fontFamily: 'Inter', variant: 'year' } }
+            ];
+        }
         const dividerBg = getEffectiveBg(style.background);
 
         const monthDummyDay: DayData = {
@@ -10751,8 +10816,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (hasDividers) {
             // A Divisória (Capa do Mês) deve sempre iniciar na PÁGINA DIREITA (Ímpar).
             // Se pageCount for ímpar (pageCount % 2 !== 0), a próxima página seria par (esquerda).
-            // Inserimos uma página de preenchimento para que a divisória fique na página ímpar (direita).
-            if (pageCount % 2 !== 0) {
+            // Inserimos uma página de preenchimento apenas se disableSequenceSkip não estiver ativado.
+            if (pageCount % 2 !== 0 && !config.disableSequenceSkip) {
                 const filler = renderFillerPage(pageCount + 1, currentMonth);
                 if (filler) pages.push(filler);
             }
@@ -10786,9 +10851,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     if (container) pages.push(container);
                 });
             } else {
-                // Renderiza o verso específico escolhido
-                const versoContainer = renderDividerVersoPage(currentMonth, currentYear, pageCount + 1, versoContent);
-                if (versoContainer) pages.push(versoContainer);
+                // Renderiza o verso específico se configurado (evita página em branco se usuário desativou saltos)
+                if (versoContent !== 'blank' || !config.disableSequenceSkip) {
+                    const versoContainer = renderDividerVersoPage(currentMonth, currentYear, pageCount + 1, versoContent);
+                    if (versoContainer) pages.push(versoContainer);
+                }
 
                 // Renderiza as páginas introdutórias mensais se houverem, excluindo a própria página caso tenha sido usada como verso
                 if (hasIntroPages && hasIntroPagesData) {
@@ -10819,7 +10886,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
         } else if (hasIntroPages && hasIntroPagesData) {
             // Se não tem divisórias, mas tem páginas mensais ativas, inicia as páginas mensais na PÁGINA DIREITA (Ímpar)
-            if (pageCount % 2 !== 0) {
+            if (pageCount % 2 !== 0 && !config.disableSequenceSkip) {
                 const filler = renderFillerPage(pageCount + 1, currentMonth);
                 if (filler) pages.push(filler);
             }
@@ -10848,10 +10915,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
 
         // Quando a opção de iniciar o mês na página direita estiver marcada, OU quando houver páginas mensais / divisórias ativas:
-        // Garantimos que o Dia 01 / miolo diário inicie em uma PÁGINA ÍMPAR (Direita).
-        // Se o pageCount atual for ímpar (pageCount % 2 !== 0), a próxima página seria par (esquerda).
-        // Nesse caso, inserimos uma página em branco/preenchimento ao final das páginas mensais para fazer o mês começar na página direita.
-        const shouldStartMonthOnRight = (config.startMonthOnRightPage ?? true);
+        // Garantimos que o Dia 01 / miolo diário inicie em uma PÁGINA ÍMPAR (Direita), exceto se disableSequenceSkip estiver ativo.
+        const shouldStartMonthOnRight = (config.startMonthOnRightPage ?? true) && !config.disableSequenceSkip;
         if (shouldStartMonthOnRight) {
             if (pageCount % 2 !== 0) {
                 const filler = renderFillerPage(pageCount + 1, currentMonth);
@@ -10981,7 +11046,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 
                 const container = renderPageContainer(
                     <div className="flex flex-col h-full">
-                        <div className="flex-1 relative border-b border-dashed border-gray-200 overflow-visible">
+                        <div className="flex-1 relative overflow-visible">
                             <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(topToRender, dayTop, false, false, pageCount + 1, printW, printH / 2, 'top')}</div>
                         </div>
                         <div className="flex-1 relative overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
@@ -11004,7 +11069,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             const container = renderPageContainer(
                 <div className="flex flex-col h-full">
-                    <div className="flex-1 relative border-b border-dashed border-gray-200 overflow-visible">
+                    <div className="flex-1 relative overflow-visible">
                         <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(topToRender, dayTop, false, false, pageCount + 1, printW, printH / 2, 'top')}</div>
                     </div>
                     <div className="flex-1 relative overflow-visible">
@@ -11043,7 +11108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     
                     const container = renderPageContainer(
                         <div className="flex flex-col h-full">
-                            <div className="flex-1 relative border-b border-dashed border-gray-300 overflow-visible">
+                            <div className="flex-1 relative overflow-visible">
                                 <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
                             </div>
                             <div className="flex-1 relative overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
@@ -11067,7 +11132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 const container = renderPageContainer(
                     <div className="flex flex-col h-full">
-                        <div className="flex-1 relative border-b border-dashed border-gray-300 overflow-visible">
+                        <div className="flex-1 relative overflow-visible">
                             <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
                         </div>
                         <div className="flex-1 relative overflow-visible">
@@ -11812,7 +11877,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const actualTotalPagesCount = useMemo(() => {
     if (generatedData.length === 0) return 0;
     return renderPrintLayout(undefined, undefined, undefined, true).length;
-  }, [generatedData, config, showMargins]);
+  }, [
+    generatedData.length,
+    config.introPages.length,
+    config.monthlyIntroPages?.length,
+    config.includeMonthlyDividers,
+    config.monthlyDividerStyle?.versoElements?.length,
+    config.monthlyDividerStyle?.elements?.length,
+    config.mirrorEvenPages,
+    config.disableSequenceSkip,
+    config.customVerso,
+    config.versoAdvancesSequence,
+    config.layoutType,
+    config.projectType,
+    config.pageCount,
+    config.durationMonths,
+    config.startMonth,
+    config.year,
+    config.isPermanent,
+    config.weeklyStartMode,
+    config.startOfWeekDay,
+    showMargins
+  ]);
 
   const totalPages = actualTotalPagesCount;
   const progressPercent = Math.min(100, Math.round(((config.introPages.length + (config.monthlyIntroPages?.length || 0) * 12 + renderedPrintCount) / Math.max(1, totalPages)) * 100));
@@ -11830,6 +11916,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           alert(`Desculpe! As configurações do arquivo englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
           return;
       }
+      pdfExportCancelledRef.current = false;
       setPdfExporting(true);
       setPdfExportProgress(0);
       
@@ -11859,8 +11946,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           
           // Process pages in parallel batches of 4 to maximize rendering speed under safety limits
           const batchSize = 4;
+          let isFirstPdfPage = true;
           
           for (let i = 1; i <= totalPagesCount; i += batchSize) {
+              if (pdfExportCancelledRef.current) {
+                  return;
+              }
               const batchIds = [];
               for (let b = 0; b < batchSize && (i + b) <= totalPagesCount; b++) {
                   batchIds.push(i + b);
@@ -11868,7 +11959,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               
               // Render multiple pages in parallel
               const batchResults = await Promise.all(batchIds.map(async (pageNum) => {
-                  const pageElement = document.getElementById(`preview-page-${pageNum}`);
+                  if (pdfExportCancelledRef.current) return null;
+                  const printContainer = document.getElementById('print-container');
+                  const pageElement = (printContainer?.querySelector(`[data-page="${pageNum}"]`) as HTMLElement) ||
+                                      (printContainer?.querySelector(`#preview-page-${pageNum}`) as HTMLElement) ||
+                                      (document.getElementById(`preview-page-${pageNum}`));
                   if (!pageElement) {
                       console.warn(`Página preview-page-${pageNum} não encontrada na renderização.`);
                       return null;
@@ -11883,9 +11978,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       imageTimeout: 15000,
                       onclone: (clonedDoc) => {
                           applyHtml2CanvasTextStrokeFallback(clonedDoc);
-                          const clonedEl = clonedDoc.getElementById(`preview-page-${pageNum}`);
+                          const clonedPrintContainer = clonedDoc.getElementById('print-container');
+                          if (clonedPrintContainer) {
+                              clonedPrintContainer.style.opacity = '1';
+                              clonedPrintContainer.style.visibility = 'visible';
+                              clonedPrintContainer.style.display = 'block';
+                              clonedPrintContainer.style.zIndex = '1';
+                          }
+                          const clonedEl = (clonedPrintContainer?.querySelector(`[data-page="${pageNum}"]`) as HTMLElement) ||
+                                           (clonedDoc.getElementById(`preview-page-${pageNum}`));
                           if (clonedEl) {
                               clonedEl.style.boxShadow = 'none';
+                              clonedEl.style.opacity = '1';
+                              clonedEl.style.visibility = 'visible';
+                              clonedEl.style.display = 'block';
                           }
                           clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
                               el.style.display = 'none';
@@ -11893,6 +11999,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       }
                   });
                   
+                  if (pdfExportCancelledRef.current) {
+                      canvas.width = 0;
+                      canvas.height = 0;
+                      return null;
+                  }
+
                   const imgData = canvas.toDataURL('image/jpeg', jpegQuality);
                   
                   // Explicitly clear canvas dimensions to release GPU and hardware memory backing stores
@@ -11902,11 +12014,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   return { pageNum, imgData };
               }));
               
+              if (pdfExportCancelledRef.current) {
+                  return;
+              }
+
               // Add generated pages chronologically to the PDF
               for (const result of batchResults) {
-                  if (!result) continue;
-                  if (result.pageNum > 1) {
+                  if (pdfExportCancelledRef.current) return;
+                  if (!result || !result.imgData) continue;
+                  if (!isFirstPdfPage) {
                       pdf.addPage([PAGE_WIDTH_MM, PAGE_HEIGHT_MM], orientation);
+                  } else {
+                      isFirstPdfPage = false;
                   }
                   pdf.addImage(result.imgData, 'JPEG', 0, 0, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, undefined, 'FAST');
                   
@@ -11914,12 +12033,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   result.imgData = '';
               }
               
+              if (pdfExportCancelledRef.current) return;
+
               setPdfExportProgress(Math.min(totalPagesCount, i + batchSize - 1));
               
               // Small pause to let UI thread breathe and render progress bar
               await new Promise(resolve => setTimeout(resolve, 5));
           }
           
+          if (pdfExportCancelledRef.current) {
+              return;
+          }
+
           // Se estiver rodando no Electron desktop, usar o fluxo nativo extremamente seguro e polido
           const winAny = window as any;
           if (winAny.electronAPI && typeof winAny.electronAPI.savePDFBase64 === 'function') {
@@ -11938,8 +12063,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               setPrintStatus('idle');
           }
       } catch (err) {
-          console.error('Erro ao gerar o PDF:', err);
-          alert('Erro ao processar as páginas do PDF. Por favor, feche as abas extras e tente de novo.');
+          if (!pdfExportCancelledRef.current) {
+              console.error('Erro ao gerar o PDF:', err);
+              alert('Erro ao processar as páginas do PDF. Por favor, feche as abas extras e tente de novo.');
+          }
       } finally {
           setPdfExporting(false);
           setPdfExportProgress(0);
@@ -12067,7 +12194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       
       {printStatus !== 'idle' && (
           <div id="print-container" className="absolute top-0 left-0 -z-50 opacity-0 print:opacity-100 print:z-50 pointer-events-none print:pointer-events-auto">
-              {renderPrintLayout(undefined, undefined, renderedPrintCount)}
+              {renderPrintLayout(undefined, undefined, (printStatus === 'ready' || pdfExporting) ? undefined : renderedPrintCount)}
           </div>
       )}
 
@@ -12116,12 +12243,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         </div>
                         
-                        <button 
-                            disabled
-                            className="w-full py-3.5 px-4 rounded-xl bg-[#faf5f3] text-slate-400 font-bold text-xs uppercase tracking-wider cursor-not-allowed text-center border border-[#eedad5]"
-                        >
-                            Aguarde, gerando arquivo...
-                        </button>
+                        <div className="w-full flex flex-col gap-2.5">
+                            <button 
+                                type="button"
+                                onClick={cancelPrint}
+                                className="w-full py-3.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#b84a56] hover:text-[#9f3d4a] font-black text-xs uppercase tracking-wider transition-all border border-[#f5ded9] flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-98"
+                            >
+                                <X className="w-4 h-4 text-[#b84a56]" />
+                                Cancelar Conversão
+                            </button>
+                            <p className="text-[11px] text-slate-400 text-center font-medium">
+                                Você pode cancelar a qualquer momento sem perder o seu projeto.
+                            </p>
+                        </div>
                   </div>
               ) : (
                   <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl flex flex-col md:flex-row text-gray-800 animate-in zoom-in duration-300 overflow-hidden border border-gray-100">
@@ -20312,6 +20446,130 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         );
                                                                     })}
                                                                 </div>
+                                                            </div>
+
+                                                            {/* Tamanho da Fonte da Frase (Resposta Instantânea) */}
+                                                            <div className="space-y-1.5 p-2 bg-[#fffbf9] rounded-xl border border-[#eedad5]">
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="text-[10px] font-bold text-slate-700 uppercase flex items-center gap-1">
+                                                                        <icons.Type className="w-3.5 h-3.5 text-[#b84a56]" /> Tamanho da Letra
+                                                                    </label>
+                                                                    <span className="text-[10px] font-mono font-bold text-[#b84a56] bg-white px-2 py-0.5 rounded-full border border-[#eedad5]">
+                                                                        {typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10)} pt
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            const cur = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
+                                                                            const next = Math.max(4, Math.round((cur - 0.5) * 10) / 10);
+                                                                            updateElementStyle(selectedElement.id, { fontSize: next });
+                                                                        }}
+                                                                        className="w-8 h-8 rounded-lg bg-white border border-[#eedad5] hover:bg-[#fff5f5] text-[#b84a56] font-black text-sm flex items-center justify-center cursor-pointer transition-colors active:scale-95 shadow-2xs"
+                                                                        title="Diminuir fonte em 0.5"
+                                                                    >
+                                                                        -
+                                                                    </button>
+                                                                    <input 
+                                                                        type="number"
+                                                                        step="0.5"
+                                                                        min="4"
+                                                                        max="72"
+                                                                        value={typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10)}
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            if (!isNaN(val)) updateElementStyle(selectedElement.id, { fontSize: val });
+                                                                        }}
+                                                                        className="flex-1 text-center font-bold text-xs p-1.5 h-8 border border-[#eedad5] rounded-lg bg-white text-slate-800 focus:ring-1 focus:ring-[#b84a56] outline-none"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            const cur = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
+                                                                            const next = Math.min(72, Math.round((cur + 0.5) * 10) / 10);
+                                                                            updateElementStyle(selectedElement.id, { fontSize: next });
+                                                                        }}
+                                                                        className="w-8 h-8 rounded-lg bg-white border border-[#eedad5] hover:bg-[#fff5f5] text-[#b84a56] font-black text-sm flex items-center justify-center cursor-pointer transition-colors active:scale-95 shadow-2xs"
+                                                                        title="Aumentar fonte em 0.5"
+                                                                    >
+                                                                        +
+                                                                    </button>
+                                                                </div>
+                                                                {/* Atalhos de Tamanhos Rápidos */}
+                                                                <div className="grid grid-cols-4 gap-1 pt-1">
+                                                                    {[
+                                                                        { label: '8.5 pt', val: 8.5 },
+                                                                        { label: '10 pt', val: 10 },
+                                                                        { label: '11.5 pt', val: 11.5 },
+                                                                        { label: '13 pt', val: 13 }
+                                                                    ].map(preset => {
+                                                                        const currentSize = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
+                                                                        const isCur = Math.abs(currentSize - preset.val) < 0.1;
+                                                                        return (
+                                                                            <button
+                                                                                key={preset.val}
+                                                                                type="button"
+                                                                                onClick={() => updateElementStyle(selectedElement.id, { fontSize: preset.val })}
+                                                                                className={`py-1 text-[9px] font-bold rounded-md border transition-all cursor-pointer text-center ${
+                                                                                    isCur
+                                                                                        ? 'bg-[#b84a56] text-white border-[#b84a56] shadow-2xs'
+                                                                                        : 'bg-white text-slate-600 border-[#eedad5] hover:bg-[#faf6f4]'
+                                                                                }`}
+                                                                            >
+                                                                                {preset.label}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                {/* Sincronizar com todas as frases do miolo */}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const currentSize = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
+                                                                        const currentFont = selectedElement.style.fontFamily || 'Inter';
+                                                                        const currentWeight = selectedElement.style.fontWeight || 'normal';
+                                                                        const currentStyle = selectedElement.style.fontStyle || 'italic';
+                                                                        const currentColor = selectedElement.style.color || '#4a3a37';
+                                                                        
+                                                                        const syncInList = (list?: LayoutElement[]) => list?.map(el => {
+                                                                            if (el.type === 'quote') {
+                                                                                return {
+                                                                                    ...el,
+                                                                                    style: {
+                                                                                        ...el.style,
+                                                                                        fontSize: currentSize,
+                                                                                        fontFamily: currentFont,
+                                                                                        fontWeight: currentWeight,
+                                                                                        fontStyle: currentStyle,
+                                                                                        color: currentColor
+                                                                                    }
+                                                                                };
+                                                                            }
+                                                                            return el;
+                                                                        });
+
+                                                                        setConfig(prev => ({
+                                                                            ...prev,
+                                                                            elements: syncInList(prev.elements) || prev.elements,
+                                                                            elementsVerso: syncInList(prev.elementsVerso),
+                                                                            elementsTop: syncInList(prev.elementsTop),
+                                                                            elementsBottom: syncInList(prev.elementsBottom),
+                                                                            elementsSaturday: syncInList(prev.elementsSaturday),
+                                                                            elementsSunday: syncInList(prev.elementsSunday),
+                                                                            elementsWeeklyLeft: syncInList(prev.elementsWeeklyLeft),
+                                                                            elementsWeeklyRight: syncInList(prev.elementsWeeklyRight),
+                                                                            elementsWeeklyVersoLeft: syncInList(prev.elementsWeeklyVersoLeft),
+                                                                            elementsWeeklyVersoRight: syncInList(prev.elementsWeeklyVersoRight)
+                                                                        }));
+                                                                        setToastMessage(`✓ Tamanho (${currentSize}pt) e fonte aplicados a todas as frases do miolo!`);
+                                                                    }}
+                                                                    className="w-full mt-1 py-1 px-2 text-[9px] font-bold text-[#b84a56] hover:bg-[#fdeeed] rounded-lg transition-colors border border-dashed border-[#eedad5] flex items-center justify-center gap-1 cursor-pointer"
+                                                                    title="Aplica este mesmo tamanho e fonte a todas as frases motivacionais existentes nas outras páginas do miolo"
+                                                                >
+                                                                    <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+                                                                    <span>Aplicar Tamanho em Todas as Frases</span>
+                                                                </button>
                                                             </div>
 
                                                             {/* Botão de Ação: Abrir Modal Completo */}

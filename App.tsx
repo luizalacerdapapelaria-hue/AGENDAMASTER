@@ -129,9 +129,9 @@ const App: React.FC = () => {
   const [initialConfig, setInitialConfig] = useState<Partial<AgendaConfig> | undefined>(undefined);
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [exeUrl, setExeUrl] = useState(() => {
-    const defaultExeUrl = 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/V2.0.3/Agenda.Master.Setup.2.0.3.exe';
+    const defaultExeUrl = 'https://github.com/luizalacerdapapelaria-hue/AGENDAMASTER/releases/download/V2.0.4/Agenda.Master.Setup.2.0.4.exe';
     const saved = localStorage.getItem('agenda_master_exe_url');
-    if (saved && !saved.includes('2.0.3')) {
+    if (saved && !saved.includes('2.0.4')) {
       localStorage.removeItem('agenda_master_exe_url');
       return defaultExeUrl;
     }

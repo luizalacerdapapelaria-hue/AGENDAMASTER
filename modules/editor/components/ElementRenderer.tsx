@@ -67,6 +67,11 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     
     if (typeof style.fontSize === 'number') {
         scaled.fontSize = Math.max(1, style.fontSize * scaleFactor);
+    } else if (typeof style.fontSize === 'string') {
+        const parsed = parseFloat(style.fontSize);
+        if (!isNaN(parsed)) {
+            scaled.fontSize = Math.max(1, parsed * scaleFactor);
+        }
     }
     if (typeof style.letterSpacing === 'number') {
         scaled.letterSpacing = style.letterSpacing * scaleFactor;
