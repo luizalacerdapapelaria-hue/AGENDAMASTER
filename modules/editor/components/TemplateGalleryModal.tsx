@@ -493,7 +493,14 @@ export const TemplateGalleryModal: React.FC<TemplateGalleryModalProps> = ({
                                   {isMiolo ? 'Modelo de Miolo' : 'Página Avulsa'}
                                 </span>
                                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                  {template.elements.length} elementos
+                                  {((template.elements?.length || 0) +
+                                    (template.elementsVerso?.length || 0) +
+                                    (template.elementsTop?.length || 0) +
+                                    (template.elementsBottom?.length || 0) +
+                                    (template.elementsSaturday?.length || 0) +
+                                    (template.elementsSunday?.length || 0) +
+                                    (template.elementsWeeklyLeft?.length || 0) +
+                                    (template.elementsWeeklyRight?.length || 0))} elementos
                                 </span>
                               </div>
                             </div>

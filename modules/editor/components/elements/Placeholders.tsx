@@ -113,8 +113,8 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
                     width: '100%', 
                     height: '100%', 
                     whiteSpace: 'nowrap',
-                    overflow: hasStroke ? 'visible' : 'hidden',
-                    textOverflow: 'ellipsis',
+                    overflow: 'visible',
+                    textOverflow: 'clip',
                     textTransform: cssTransform as any,
                     opacity: d.isPaddingDay ? 0.45 : (style?.opacity ?? 1),
                     ...strokeCss

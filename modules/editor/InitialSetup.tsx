@@ -11,6 +11,7 @@ import { INTRO_TEMPLATES } from './templates/introTemplates';
 import { NOTEBOOK_TEMPLATES, DEVOTIONAL_TEMPLATES } from './templates/extraTemplates';
 import { buildStandardAgendaConfig, STANDARD_HALF_PAGE_TOP_ELEMENTS, STANDARD_HALF_PAGE_BOTTOM_ELEMENTS, cloneElementWithNewId } from './templates/standardAgendaTemplate';
 import { LAYOUT_LIBRARY, LayoutLibraryItem, resolveLayoutLibraryConfig } from './templates/layoutLibrary';
+import { DEFAULT_WEEKEND_TRANSITION_CONFIG } from '../../core/logic/weekendTransition';
 
 interface InitialSetupProps {
   onComplete: (config: Partial<AgendaConfig>) => void;
@@ -948,6 +949,8 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               elements: finalElements,
               elementsSaturday: isPureBlankSelected || isPermanentAgenda ? [] : stdConfig.elementsSaturday,
               elementsSunday: isPureBlankSelected || isPermanentAgenda ? [] : stdConfig.elementsSunday,
+              weekendTransitionConfig: defaultValues?.weekendTransitionConfig ?? stdConfig.weekendTransitionConfig ?? DEFAULT_WEEKEND_TRANSITION_CONFIG,
+              splitWeekendAcrossMonths: defaultValues?.splitWeekendAcrossMonths ?? true,
               elementsTop: isPureBlankSelected ? [] : stdConfig.elementsTop,
               elementsBottom: isPureBlankSelected ? [] : stdConfig.elementsBottom,
               elementsWeeklyLeft: finalWeeklyLeft,
@@ -1043,6 +1046,8 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           monthlyDividerStyle: defaultValues?.monthlyDividerStyle,
           monthlyIntroPages: defaultValues?.monthlyIntroPages,
           introPages: defaultValues?.introPages ?? [],
+          weekendTransitionConfig: defaultValues?.weekendTransitionConfig ?? DEFAULT_WEEKEND_TRANSITION_CONFIG,
+          splitWeekendAcrossMonths: defaultValues?.splitWeekendAcrossMonths ?? true,
           background: defaultValues?.background,
           backgrounds: defaultValues?.backgrounds,
           backgroundRules: defaultValues?.backgroundRules
@@ -2128,6 +2133,26 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                                             ? 'Garante que o início de cada ciclo comece sempre em página ímpar (direita).'
                                             : 'Garante que o dia 1 de cada mês comece sempre em página ímpar (direita), inserindo página complementar ao final do período anterior quando necessário.'}
                                     </p>
+
+                                    {/* Configuração da Página de Preenchimento / Transição */}
+                                    <div className="ml-7 pt-3 border-t border-[#eedad5] space-y-1.5">
+                                        <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
+                                            Página de Preenchimento / Transição do Projeto
+                                        </label>
+                                        <select
+                                            value={fillerPageContent}
+                                            onChange={(e) => setFillerPageContent(e.target.value)}
+                                            className="w-full text-xs p-2.5 border-2 border-[#eedad5] rounded-xl bg-white text-slate-800 font-semibold shadow-xs focus:border-[#b84a56] focus:ring-1 focus:ring-[#b84a56] outline-none cursor-pointer"
+                                        >
+                                            <option value="blank">Página em Branco (100% limpa)</option>
+                                            <option value="notes">Anotações do Período (Pautada)</option>
+                                            <option value="habit_tracker">Controle de Hábitos (Habit Tracker)</option>
+                                            <option value="quote">Frase Motivacional</option>
+                                        </select>
+                                        <p className="text-[11px] text-slate-500 font-medium">
+                                            Define o conteúdo das páginas inseridas automaticamente para alinhamento entre meses.
+                                        </p>
+                                    </div>
                                 </div>
                             )}
                         </div>

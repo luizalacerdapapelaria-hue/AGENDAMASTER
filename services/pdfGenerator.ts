@@ -5,6 +5,7 @@ import { getMonthName, getDayName, checkIsHoliday } from "../core/backend/calend
 import { getVerseForDay } from "../core/constants/verses";
 import { getQuoteForDay } from "../core/constants/quotes";
 import { ImageManager } from "../modules/editor/utils/imageManager";
+import { getWeekendTransitionElements } from "../core/logic/weekendTransition";
 
 const hexToRgb = (hex: string): { r: number, g: number, b: number } | null => {
   if (!hex || hex === 'transparent') return null;
@@ -719,7 +720,19 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
     const isWeeklyTwoPage = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
     const weeklyWeeksCount = Math.ceil(generatedDays.length / 7);
     const weeklyPagesCount = (isWeeklyTwoPage && config.customVerso && config.versoAdvancesSequence === false) ? weeklyWeeksCount * 4 : weeklyWeeksCount * 2;
-    const totalPages = config.introPages.length + (isSinglePageType ? (config.customVerso && config.versoAdvancesSequence === false ? singlePagesCount * 2 : singlePagesCount) : isWeeklyTwoPage ? weeklyPagesCount : config.layoutType === '2_per_page' ? Math.ceil(generatedDays.length / 2) : Math.ceil(generatedDays.length));
+    const isSharedWeekend = config.layoutType === '1_per_page_weekend_shared';
+    const sharedWeekendPagesCount = Math.ceil(generatedDays.length * (6 / 7));
+    const totalPages = config.introPages.length + (
+        isSinglePageType 
+            ? (config.customVerso && config.versoAdvancesSequence === false ? singlePagesCount * 2 : singlePagesCount) 
+            : isWeeklyTwoPage 
+                ? weeklyPagesCount 
+                : isSharedWeekend 
+                    ? (config.customVerso && config.versoAdvancesSequence === false ? sharedWeekendPagesCount * 2 : sharedWeekendPagesCount)
+                    : config.layoutType === '2_per_page' 
+                        ? Math.ceil(generatedDays.length / 2) 
+                        : Math.ceil(generatedDays.length)
+    );
 
     for (const page of config.introPages) {
         addNextPage();
@@ -801,28 +814,112 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
         while (i < generatedDays.length) {
             const day = generatedDays[i];
             const isSaturday = day.dayOfWeek === 6;
-            addNextPage();
-            const geo = getSafeGeometry(globalPageCount);
-            const elements = getElementsForPage(config.elements, globalPageCount);
-            const verse = getVerseForDay(getDayOfYear(new Date(day.date)));
-            const quote = getDayQuote(day, globalPageCount);
-            
-            if (isSaturday) {
-                const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
-                const elementsSat = getElementsForPage(satSource, globalPageCount);
-                elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
-                const nextDay = generatedDays[i+1];
-                if (nextDay) { 
+            const isSundayAlone = day.dayOfWeek === 0;
+
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Frente Page
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let verse = getVerseForDay(getDayOfYear(new Date(day.date)));
+                let quote = getDayQuote(day, globalPageCount);
+
+                if (isSaturday) {
+                    const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+                    const elementsSat = getElementsForPage(satSource, globalPageCount);
+                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    const nextDay = generatedDays[i+1];
+                    const hasMonthlyBreak = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDay && nextDay.month !== day.month);
+                    
+                    if (nextDay && !hasMonthlyBreak) { 
+                        const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                        const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                        const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
+                        const nextQuote = getDayQuote(nextDay, globalPageCount);
+                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                    } else {
+                        // Sábado isolado no fim do mês: renderiza o espaço de transição personalizado na metade inferior
+                        const transElements = getWeekendTransitionElements(config, 'Anotações do Fim de Semana');
+                        const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                        elementsTrans.forEach(el => {
+                            const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
+                            renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                        });
+                    }
+                } else if (isSundayAlone) {
+                    // Domingo isolado no início do mês: renderiza espaço de transição no topo e Domingo na base
+                    const transElements = getWeekendTransitionElements(config, 'Metas da Semana');
+                    const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                    elementsTrans.forEach(el => {
+                        const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 };
+                        renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                    });
+
                     const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
                     const elementsSun = getElementsForPage(sunSource, globalPageCount);
-                    const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
-                    const nextQuote = getDayQuote(nextDay, globalPageCount);
-                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                } else {
+                    const elements = getElementsForPage(config.elements, globalPageCount);
+                    elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
                 }
-                i += 2; 
+
+                // Verso Page (same sequence)
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                const versoSource = (config.elementsVerso && config.elementsVerso.length > 0) ? config.elementsVerso : config.elements;
+                const elementsVerso = getElementsForPage(versoSource, globalPageCount);
+                elementsVerso.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+
+                const nextDayFrente = generatedDays[i+1];
+                const hasMonthlyBreakFrente = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDayFrente && nextDayFrente.month !== day.month);
+                i += isSaturday ? ((nextDayFrente && !hasMonthlyBreakFrente) ? 2 : 1) : 1;
             } else {
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
-                i += 1;
+                addNextPage();
+                const geo = getSafeGeometry(globalPageCount);
+                const verse = getVerseForDay(getDayOfYear(new Date(day.date)));
+                const quote = getDayQuote(day, globalPageCount);
+                
+                if (isSaturday) {
+                    const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+                    const elementsSat = getElementsForPage(satSource, globalPageCount);
+                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    const nextDay = generatedDays[i+1];
+                    const hasMonthlyBreak = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDay && nextDay.month !== day.month);
+                    
+                    if (nextDay && !hasMonthlyBreak) { 
+                        const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                        const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                        const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
+                        const nextQuote = getDayQuote(nextDay, globalPageCount);
+                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                        i += 2;
+                    } else {
+                        // Sábado isolado no fim do mês: renderiza o espaço de transição personalizado na metade inferior
+                        const transElements = getWeekendTransitionElements(config, 'Anotações do Fim de Semana');
+                        const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                        elementsTrans.forEach(el => {
+                            const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
+                            renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                        });
+                        i += 1;
+                    }
+                } else if (isSundayAlone) {
+                    // Domingo isolado no início do mês: renderiza espaço de transição no topo e Domingo na base
+                    const transElements = getWeekendTransitionElements(config, 'Metas da Semana');
+                    const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                    elementsTrans.forEach(el => {
+                        const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 };
+                        renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                    });
+
+                    const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                    const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    i += 1;
+                } else {
+                    const elements = getElementsForPage(config.elements, globalPageCount);
+                    elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                    i += 1;
+                }
             }
             if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
         }

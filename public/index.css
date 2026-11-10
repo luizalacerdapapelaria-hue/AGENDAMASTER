@@ -2,6 +2,7 @@
 
 /* Scrollbar moderna em tons de laranja e preto */
 #editor-scroll-container::-webkit-scrollbar,
+#preview-scroll-container::-webkit-scrollbar,
 .custom-scrollbar::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -9,6 +10,7 @@
 }
 
 #editor-scroll-container::-webkit-scrollbar-track,
+#preview-scroll-container::-webkit-scrollbar-track,
 .custom-scrollbar::-webkit-scrollbar-track {
   background: #18181b !important;
   border-radius: 9999px;

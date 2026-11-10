@@ -394,6 +394,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
       case 'new_monthly_intro': return 'Nova Abertura Mensal';
       case 'divider': return 'Divisória Mensal (Frente / Capa)';
       case 'divider_verso': return 'Divisória Mensal (Verso)';
+      case 'filler_page': return 'Página de Preenchimento / Transição';
       case 'replace': return 'Substituir Página Atual da Tela';
       case 'append': return 'Adicionar Elementos à Página Atual';
       case 'ignore': return 'Ignorar (Não Importar)';
@@ -1025,6 +1026,28 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({
                         <div className="min-w-0">
                           <span className="text-xs font-bold text-slate-900 block truncate">Divisória Mensal (Capa)</span>
                           <span className="text-[10px] text-slate-500 block truncate">Capa de abertura dos meses</span>
+                        </div>
+                      </div>
+
+                      {/* 8. Página de Preenchimento / Transição */}
+                      <div
+                        onClick={() => {
+                          setChosenDestination('filler_page');
+                          setIsBackgroundOnly(false);
+                          setCustomPageName('Página de Preenchimento');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          chosenDestination === 'filler_page' && !isBackgroundOnly
+                            ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-1 ring-[#b84a56]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${chosenDestination === 'filler_page' && !isBackgroundOnly ? 'bg-[#b84a56] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <RotateCcw className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">Página de Preenchimento</span>
+                          <span className="text-[10px] text-slate-500 block truncate">Transição de meses e alinhamento</span>
                         </div>
                       </div>
 

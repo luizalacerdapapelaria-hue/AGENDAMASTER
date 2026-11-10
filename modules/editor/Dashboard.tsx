@@ -34,6 +34,7 @@ import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBou
 import * as icons from 'lucide-react';
 import { CoverCanvasOverlay } from './components/cover/CoverCanvasOverlay';
 import { CoverToolsPanel } from './components/cover/CoverToolsPanel';
+import { getWeekendTransitionElements, generatePresetElementsForWeekendTransition } from '../../core/logic/weekendTransition';
 import { createDefaultCoverConfig } from './components/cover/coverGabaritoData';
 import { CoverProjectConfig, CoverPage } from '../../types';
 
@@ -70,9 +71,11 @@ import {
   ObjectiveModelOption
 } from './InitialSetup';
 
+let cachedPreviewSpreadScale = 0.8;
+
 const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: number; heightMm: number; zoom?: number; scale?: number }> = ({ children, widthMm, heightMm, zoom = 1, scale: propScale }) => {
     const wrapperRef = useRef<HTMLDivElement>(null);
-    const [internalScale, setInternalScale] = useState(1);
+    const [internalScale, setInternalScale] = useState<number>(() => (propScale !== undefined ? propScale : cachedPreviewSpreadScale));
 
     const safeW = Math.max(20, Number(widthMm) || 148);
     const safeH = Math.max(20, Number(heightMm) || 210);
@@ -88,8 +91,9 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
         const handleResize = () => {
             const currentWidth = wrapper.clientWidth;
             if (currentWidth > 0 && nativeWidth > 0) {
-                const targetScale = currentWidth / nativeWidth;
-                setInternalScale(Math.min(1.0, Math.max(0.1, targetScale)));
+                const targetScale = Math.min(1.0, Math.max(0.1, currentWidth / nativeWidth));
+                cachedPreviewSpreadScale = targetScale;
+                setInternalScale(prev => (Math.abs(prev - targetScale) > 0.005 ? targetScale : prev));
             }
         };
 
@@ -115,7 +119,7 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
                     height: `${heightMm}mm`,
                     marginBottom: `${nativeHeight * (effectiveScale - 1)}px`,
                 }}
-                className="shrink-0 overflow-visible transition-transform duration-150 ease-out"
+                className="shrink-0 overflow-visible"
             >
                 {children}
             </div>
@@ -149,24 +153,30 @@ const VirtualPreviewSpread: React.FC<{
     scale
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [isVisible, setIsVisible] = useState(false);
+    // Prime the first spreads immediately so initial viewing has no layout pop
+    const [hasBeenVisible, setHasBeenVisible] = useState<boolean>(() => Boolean(isInitial || pageLeftNum <= 6));
 
     useEffect(() => {
+        if (hasBeenVisible) return;
         const el = containerRef.current;
         if (!el) return;
 
         if (typeof IntersectionObserver === 'undefined') {
-            setIsVisible(true);
+            setHasBeenVisible(true);
             return;
         }
 
         const observer = new IntersectionObserver((entries) => {
             const entry = entries[0];
-            if (entry) {
-                setIsVisible(entry.isIntersecting);
+            // CRITICAL: Once a spread enters view, keep it rendered!
+            // Toggling between rendered elements and placeholders when scrolling up
+            // shifts document layout height above viewport and creates an infinite jitter loop.
+            if (entry && entry.isIntersecting) {
+                setHasBeenVisible(true);
+                observer.disconnect();
             }
         }, {
-            rootMargin: '1000px 0px',
+            rootMargin: '1200px 0px',
             threshold: 0
         });
 
@@ -174,25 +184,36 @@ const VirtualPreviewSpread: React.FC<{
         return () => {
             observer.disconnect();
         };
-    }, []);
+    }, [hasBeenVisible]);
 
     const safeW = Math.max(20, Number(widthMm) || 148);
     const safeH = Math.max(20, Number(heightMm) || 210);
-    const activeScale = scale !== undefined ? scale : 1;
+    const activeScale = scale !== undefined ? scale : cachedPreviewSpreadScale;
     const effectiveScale = activeScale * zoom;
     const nativeHeight = safeH * 3.77952;
     const nativeWidth = safeW * 3.77952;
-    const estimatedHeight = Math.max(160, nativeHeight * effectiveScale);
+    const singlePageHeight = nativeHeight * effectiveScale;
+    
+    // Check if on smaller screens the spread stacks vertically
+    const isMobileStacked = !isLandscape && !isInitial && Boolean(pageRight) && (typeof window !== 'undefined' && window.innerWidth < 1024);
+    const estimatedSpreadHeight = Math.max(160, Math.round(isMobileStacked ? (singlePageHeight * 2 + 32) : singlePageHeight));
+
+    const commonContainerStyle: React.CSSProperties = {
+        minHeight: `${estimatedSpreadHeight + 8}px`,
+        contentVisibility: 'auto',
+        containIntrinsicSize: `auto ${estimatedSpreadHeight + 8}px`,
+    };
 
     if (isLandscape) {
         return (
             <div 
                 ref={containerRef}
                 id={`preview-spread-${pageLeftNum}`}
+                data-page-left={pageLeftNum}
                 className="w-full max-w-4xl flex justify-center print:contents"
-                style={{ minHeight: isVisible ? undefined : `${estimatedHeight + 20}px` }}
+                style={commonContainerStyle}
             >
-                {isVisible ? (
+                {hasBeenVisible ? (
                     <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
                         {pageLeft}
                     </PreviewPageScaleWrapper>
@@ -201,7 +222,7 @@ const VirtualPreviewSpread: React.FC<{
                         id={`virtual-placeholder-${pageLeftNum}`}
                         data-virtual-placeholder="true"
                         className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
-                        style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                        style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedSpreadHeight}px` }}
                     >
                         <span className="text-xs font-mono font-medium">Página {pageLeftNum}</span>
                     </div>
@@ -215,12 +236,13 @@ const VirtualPreviewSpread: React.FC<{
             <div 
                 ref={containerRef}
                 id={`preview-spread-${pageLeftNum}`}
+                data-page-left={pageLeftNum}
                 className="flex items-start justify-center w-full print:contents"
-                style={{ minHeight: isVisible ? undefined : `${estimatedHeight + 20}px` }}
+                style={commonContainerStyle}
             >
                 <div className="hidden lg:block w-[45%] opacity-0 pointer-events-none" />
                 <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
-                    {isVisible ? (
+                    {hasBeenVisible ? (
                         <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
                             {pageLeft}
                         </PreviewPageScaleWrapper>
@@ -229,7 +251,7 @@ const VirtualPreviewSpread: React.FC<{
                             id={`virtual-placeholder-${pageLeftNum}`}
                             data-virtual-placeholder="true"
                             className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
-                            style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                            style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedSpreadHeight}px` }}
                         >
                             <span className="text-xs font-mono font-medium">Página 1</span>
                         </div>
@@ -243,11 +265,13 @@ const VirtualPreviewSpread: React.FC<{
         <div 
             ref={containerRef}
             id={`preview-spread-${pageLeftNum}`}
+            data-page-left={pageLeftNum}
+            data-page-right={pageRightNum}
             className="flex flex-col lg:flex-row items-center lg:items-start justify-center w-full gap-8 lg:gap-0 print:contents"
-            style={{ minHeight: isVisible ? undefined : `${estimatedHeight + 20}px` }}
+            style={commonContainerStyle}
         >
             <div className="w-full lg:w-[45%] flex justify-center lg:justify-end pr-0 lg:pr-[2mm]">
-                {isVisible ? (
+                {hasBeenVisible ? (
                     <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
                         {pageLeft}
                     </PreviewPageScaleWrapper>
@@ -256,7 +280,7 @@ const VirtualPreviewSpread: React.FC<{
                         id={`virtual-placeholder-${pageLeftNum}`}
                         data-virtual-placeholder="true"
                         className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
-                        style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                        style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedSpreadHeight}px` }}
                     >
                         <span className="text-xs font-mono font-medium">Página {pageLeftNum}</span>
                     </div>
@@ -264,7 +288,7 @@ const VirtualPreviewSpread: React.FC<{
             </div>
             <div className="w-full lg:w-[45%] flex justify-center lg:justify-start pl-0 lg:pl-[2mm]">
                 {pageRight ? (
-                    isVisible ? (
+                    hasBeenVisible ? (
                         <PreviewPageScaleWrapper widthMm={widthMm} heightMm={heightMm} zoom={zoom} scale={scale}>
                             {pageRight}
                         </PreviewPageScaleWrapper>
@@ -273,7 +297,7 @@ const VirtualPreviewSpread: React.FC<{
                             id={`virtual-placeholder-${pageRightNum}`}
                             data-virtual-placeholder="true"
                             className="flex flex-col items-center justify-center border border-white/10 rounded-xl bg-white/5 text-white/40 select-none shadow-sm"
-                            style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedHeight}px` }}
+                            style={{ width: `${nativeWidth * effectiveScale}px`, height: `${estimatedSpreadHeight}px` }}
                         >
                             <span className="text-xs font-mono font-medium">Página {pageRightNum}</span>
                         </div>
@@ -1107,14 +1131,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const [history, setHistory] = useState<AgendaConfig[]>([]);
 
+  const lastHistoryPushTimeRef = useRef<number>(0);
+
   const pushHistory = useCallback(() => {
     setHistory(h => [...h, config].slice(-25));
+    lastHistoryPushTimeRef.current = Date.now();
   }, [config]);
 
   const setConfig = useCallback((newConfig: AgendaConfig | ((prev: AgendaConfig) => AgendaConfig)) => {
     _setConfig(prev => {
       const resolved = typeof newConfig === 'function' ? newConfig(prev) : newConfig;
-      setHistory(h => [...h, prev].slice(-25));
+      const now = Date.now();
+      // Se chamadas consecutivas ocorrerem em alta frequência (< 350ms, como arrastar seletor de cor ou sliders),
+      // preservamos o snapshot de antes do início do gesto contínuo para desfazer limpo e não travar o loop de renderização.
+      if (now - lastHistoryPushTimeRef.current > 350) {
+        setHistory(h => [...h, prev].slice(-25));
+        lastHistoryPushTimeRef.current = now;
+      }
       return resolved;
     });
   }, []);
@@ -1286,7 +1319,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
   };
 
-  const [editorViewMode, setEditorViewMode] = useState<'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right'>(
+  const [editorViewMode, setEditorViewMode] = useState<'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'weekend_transition'>(
     initialConfig?.layoutType === 'weekly_vertical' || initialConfig?.layoutType === 'weekly_horizontal' 
     ? 'weekly_left' 
     : 'standard'
@@ -1642,7 +1675,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
   };
 
-  const [editMode, setEditMode] = useState<'daily' | 'intro' | 'monthly_intro' | 'divider' | 'cover'>('daily');
+  const [editMode, setEditMode] = useState<'daily' | 'intro' | 'monthly_intro' | 'divider' | 'cover' | 'filler'>('daily');
   const [dividerViewMode, setDividerViewMode] = useState<'front' | 'verso'>('front');
   const [currentIntroPageId, setCurrentIntroPageId] = useState<string | null>(config.introPages[0]?.id || null);
   const [currentMonthlyIntroPageId, setCurrentMonthlyIntroPageId] = useState<string | null>(config.monthlyIntroPages?.[0]?.id || null);
@@ -1660,8 +1693,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (!currentMonthlyIntroPageId || !config.monthlyIntroPages.some(p => p.id === currentMonthlyIntroPageId)) {
         setCurrentMonthlyIntroPageId(config.monthlyIntroPages[0].id);
       }
+      if (config.includeMonthlyIntroPages === false) {
+        setConfig(prev => ({ ...prev, includeMonthlyIntroPages: true }));
+      }
     }
-  }, [config.monthlyIntroPages, currentMonthlyIntroPageId]);
+  }, [config.monthlyIntroPages, currentMonthlyIntroPageId, config.includeMonthlyIntroPages]);
   
   const dragRef = useRef<any>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -2042,6 +2078,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               elementsVerso: Array.isArray(item.elementsVerso) ? item.elementsVerso.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
               elementsWeeklyLeft: Array.isArray(item.elementsWeeklyLeft) ? item.elementsWeeklyLeft.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
               elementsWeeklyRight: Array.isArray(item.elementsWeeklyRight) ? item.elementsWeeklyRight.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsWeeklyVersoLeft: Array.isArray(item.elementsWeeklyVersoLeft) ? item.elementsWeeklyVersoLeft.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsWeeklyVersoRight: Array.isArray(item.elementsWeeklyVersoRight) ? item.elementsWeeklyVersoRight.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsTop: Array.isArray(item.elementsTop) ? item.elementsTop.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsBottom: Array.isArray(item.elementsBottom) ? item.elementsBottom.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsSaturday: Array.isArray(item.elementsSaturday) ? item.elementsSaturday.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsSunday: Array.isArray(item.elementsSunday) ? item.elementsSunday.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              elementsWeekendTransition: Array.isArray(item.elementsWeekendTransition) ? item.elementsWeekendTransition.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
+              weekendTransitionContentType: item.weekendTransitionContentType,
+              customVerso: typeof item.customVerso === 'boolean' ? item.customVerso : undefined,
               background: item.background,
               createdAt: item.createdAt || new Date().toISOString()
             };
@@ -2068,7 +2113,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           });
           
           setCustomTemplates(updated);
-          localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+          persistCustomTemplatesSafely(updated);
           alert(`${migratedTemplates.length} modelo(s) importado(s) com sucesso!`);
         }
       } catch (err: any) {
@@ -3256,6 +3301,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           if (config.layoutType === '1_per_page_weekend_shared') {
               if (editorViewMode === 'saturday') return config.elementsSaturday || config.elements;
               if (editorViewMode === 'sunday') return config.elementsSunday || config.elements;
+              if (editorViewMode === 'weekend_transition') {
+                  if (config.elementsWeekendTransition !== undefined) return config.elementsWeekendTransition;
+                  return (config.weekendTransitionConfig?.elements && config.weekendTransitionConfig.elements.length > 0)
+                      ? config.weekendTransitionConfig.elements
+                      : getWeekendTransitionElements(config);
+              }
           }
           if (config.layoutType === '2_per_page') {
               if (editorViewMode === 'bottom') return (config.elementsBottom && config.elementsBottom.length > 0) ? config.elementsBottom : config.elements;
@@ -3317,6 +3368,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               return [];
           }
           return config.monthlyDividerStyle?.elements || [];
+      }
+      if (editMode === 'filler') {
+          if (config.fillerPageElements !== undefined) {
+              return config.fillerPageElements;
+          }
+          const content = config.fillerPageContent || 'blank';
+          if (content === 'notes') {
+              return [
+                  { id: 'filler-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Anotações', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                  { id: 'filler-lines', type: 'lines', name: 'Pauta', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { lineSpacing: 25, color: '#d1d5db' } }
+              ];
+          } else if (content === 'habit_tracker') {
+              return [
+                  { id: 'filler-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Controle de Hábitos', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                  { id: 'filler-ht', type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { habitLabel: 'Meus Hábitos' } }
+              ];
+          } else if (content === 'quote') {
+              return [
+                  { id: 'filler-quote', type: 'quote', name: 'Frase Motivacional', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+              ];
+          } else if (content !== 'blank') {
+              const targetPage = config.introPages?.find(p => p.id === content) || config.monthlyIntroPages?.find(p => p.id === content);
+              if (targetPage) return targetPage.elements;
+          }
+          return [];
       }
       if (editMode === 'cover') {
           const cover = config.cover || createDefaultCoverConfig();
@@ -3418,6 +3494,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               }
               if (editorViewMode === 'sunday') {
                   setter(prev => ({ ...prev, elementsSunday: getNew(prev.elementsSunday || prev.elements) }));
+                  return;
+              }
+              if (editorViewMode === 'weekend_transition') {
+                  setter(prev => {
+                      const currentList = prev.elementsWeekendTransition ??
+                          ((prev.weekendTransitionConfig?.elements && prev.weekendTransitionConfig.elements.length > 0)
+                              ? prev.weekendTransitionConfig.elements
+                              : getWeekendTransitionElements(prev));
+                      const updated = getNew(currentList);
+                      return {
+                          ...prev,
+                          elementsWeekendTransition: updated,
+                          weekendTransitionContentType: 'custom',
+                          weekendTransitionConfig: {
+                              ...prev.weekendTransitionConfig,
+                              type: 'custom',
+                              elements: updated
+                          }
+                      };
+                  });
                   return;
               }
           }
@@ -3589,6 +3685,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   elements: getNew(prev.monthlyDividerStyle?.elements || [])
               }
           }));
+      } else if (editMode === 'filler') {
+          setter(prev => {
+              const getBaseFillerElements = (p: AgendaConfig): LayoutElement[] => {
+                  if (p.fillerPageElements !== undefined) {
+                      return p.fillerPageElements;
+                  }
+                  const content = p.fillerPageContent || 'blank';
+                  if (content === 'notes') {
+                      return [
+                          { id: 'filler-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Anotações', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                          { id: 'filler-lines', type: 'lines', name: 'Pauta', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { lineSpacing: 25, color: '#d1d5db' } }
+                      ];
+                  } else if (content === 'habit_tracker') {
+                      return [
+                          { id: 'filler-title', type: 'text', name: 'Título', x: 10, y: 8, w: 80, h: 6, content: 'Controle de Hábitos', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                          { id: 'filler-ht', type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 18, w: 80, h: 74, zIndex: 1, style: { habitLabel: 'Meus Hábitos' } }
+                      ];
+                  } else if (content === 'quote') {
+                      return [
+                          { id: 'filler-quote', type: 'quote', name: 'Frase Motivacional', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                      ];
+                  } else if (content !== 'blank') {
+                      const targetPage = p.introPages?.find(pg => pg.id === content) || p.monthlyIntroPages?.find(pg => pg.id === content);
+                      if (targetPage) return targetPage.elements;
+                  }
+                  return [];
+              };
+
+              const currentFiller = getBaseFillerElements(prev);
+              const updated = getNew(currentFiller);
+              return {
+                  ...prev,
+                  fillerPageElements: updated
+              };
+          });
+          return;
       } else if (editMode === 'cover') {
           setter(prev => {
               const cover = prev.cover || createDefaultCoverConfig();
@@ -3885,6 +4017,88 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               const totalTextHeight = lines.length > 1 ? (lines.length * editorFontSizePx * lineHeightMult) : singleLineGlyphH;
               naturalWPx = maxLineWidth + padW + strokeExtraPx;
               naturalHPx = totalTextHeight + padH + strokeExtraPx;
+          }
+      }
+
+      // Garantir largura e altura seguras para todo o ano em elementos de data
+      // O editor exibe amigavelmente o início do ano ("01", "Janeiro"), mas a caixa delimitadora
+      // DEVE acomodar com folga o mês mais longo ("Novembro"/"Fevereiro") e o dia mais longo ("Segunda-feira"/"Quarta-feira")
+      const variant = effectiveStyle?.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
+      const isDateCategory = ['month_name', 'day_name', 'day_number', 'month_number', 'holiday'].includes(el.type) ||
+                             (el.type === 'date_placeholder' && ['month_name', 'day_name', 'day_number', 'month_number', 'holiday'].includes(variant));
+
+      if (isDateCategory) {
+          let safeSampleTexts: string[] = [];
+          const nameFormat = effectiveStyle?.nameFormat;
+          if (el.type === 'month_name' || variant === 'month_name') {
+              if (nameFormat === 'short' || nameFormat === 'abbreviated') {
+                  safeSampleTexts = ['NOV.', 'FEV.', 'SET.', 'DEZ.'];
+              } else if (nameFormat === 'initial' || nameFormat === 'letter') {
+                  safeSampleTexts = ['M', 'Q', 'D', 'S'];
+              } else {
+                  safeSampleTexts = ['Novembro', 'Fevereiro', 'Setembro', 'Dezembro'];
+              }
+          } else if (el.type === 'day_name' || variant === 'day_name') {
+              if (nameFormat === 'short' || nameFormat === 'abbreviated') {
+                  safeSampleTexts = ['QUAR.', 'SEGU.', 'SÁB.', 'DOM.'];
+              } else if (nameFormat === 'initial' || nameFormat === 'letter') {
+                  safeSampleTexts = ['Q', 'S', 'D'];
+              } else {
+                  safeSampleTexts = ['Segunda-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
+              }
+          } else if (el.type === 'day_number' || variant === 'day_number') {
+              safeSampleTexts = ['30', '31', '28'];
+          } else if (el.type === 'month_number' || variant === 'month_number') {
+              safeSampleTexts = ['10', '11', '12'];
+          } else if (el.type === 'holiday') {
+              safeSampleTexts = ['Confraternização Universal', 'Proclamação da República', 'Nossa Senhora Aparecida'];
+          }
+
+          if (safeSampleTexts.length > 0) {
+              const rawFontSize = typeof effectiveStyle?.fontSize === 'number' ? effectiveStyle.fontSize : parseFloat(effectiveStyle?.fontSize || '16') || 16;
+              const editorFontSizePx = rawFontSize * scaleFactor;
+              const rawLetterSpacing = typeof effectiveStyle?.letterSpacing === 'number' ? effectiveStyle.letterSpacing : parseFloat(effectiveStyle?.letterSpacing || '0') || 0;
+              const scaledLetterSpacing = rawLetterSpacing * scaleFactor;
+              const strokeExtraPx = (Number(effectiveStyle?.textStrokeWidth || 0) * 2) * scaleFactor;
+              const padW = Math.max(8, Math.round(8 * scaleFactor));
+              const padH = Math.max(4, Math.round(4 * scaleFactor));
+
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                  ctx.font = `${fontStyle} ${fontWeight} ${editorFontSizePx}px ${fontFamily}`;
+                  let maxSampleW = 0;
+                  let maxSampleH = editorFontSizePx * 1.2;
+
+                  safeSampleTexts.forEach(sample => {
+                      let transformed = sample;
+                      const tr = effectiveStyle?.textTransform;
+                      if (tr === 'uppercase') transformed = transformed.toUpperCase();
+                      else if (tr === 'lowercase') transformed = transformed.toLowerCase();
+                      else if (tr === 'capitalize') transformed = transformed.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+                      else if (tr === 'sentence') transformed = transformed.charAt(0).toUpperCase() + transformed.slice(1).toLowerCase();
+
+                      const metrics = ctx.measureText(transformed);
+                      const actualLeft = metrics.actualBoundingBoxLeft || 0;
+                      const actualRight = metrics.actualBoundingBoxRight || metrics.width;
+                      let w = Math.max(metrics.width, actualLeft + actualRight);
+                      if (scaledLetterSpacing > 0 && transformed.length > 1) {
+                          w += scaledLetterSpacing * (transformed.length - 1);
+                      }
+                      if (w > maxSampleW) maxSampleW = w;
+
+                      const asc = metrics.actualBoundingBoxAscent || (editorFontSizePx * 0.85);
+                      const dsc = metrics.actualBoundingBoxDescent || (editorFontSizePx * 0.25);
+                      const h = Math.max(asc + dsc, editorFontSizePx * 1.15);
+                      if (h > maxSampleH) maxSampleH = h;
+                  });
+
+                  const safeMinWPx = maxSampleW + padW + strokeExtraPx;
+                  const safeMinHPx = maxSampleH + padH + strokeExtraPx;
+
+                  naturalWPx = Math.max(naturalWPx, safeMinWPx);
+                  naturalHPx = Math.max(naturalHPx, safeMinHPx);
+              }
           }
       }
     } else if (el.type === 'full_calendar') {
@@ -4242,7 +4456,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           elements: newElements
       };
       if (editMode === 'monthly_intro') {
-          setConfig(prev => ({ ...prev, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
+          setConfig(prev => ({ ...prev, includeMonthlyIntroPages: true, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
           setCurrentMonthlyIntroPageId(newPage.id);
       } else if (editMode === 'divider') {
           if (dividerViewMode === 'verso') {
@@ -4266,6 +4480,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   }
               }));
           }
+      } else if (editMode === 'filler') {
+          setConfig(prev => ({
+              ...prev,
+              fillerPageElements: newElements
+          }));
+          setToastMessage('Modelo aplicado à Página de Preenchimento!');
       } else {
           setConfig(prev => ({ ...prev, introPages: [...prev.introPages, newPage] }));
           setCurrentIntroPageId(newPage.id);
@@ -4426,6 +4646,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
       if (shouldApplyToMiolo) {
           pushHistory();
+          const cloneEl = (el: LayoutElement) => ({ ...el, id: Math.random().toString(36).substr(2, 9) });
           setConfig(prev => ({
               ...prev,
               ...(template.layoutType ? { layoutType: template.layoutType } : {}),
@@ -4436,17 +4657,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         pageCount: template.isPermanent ? (prev.pageCount || 365) : undefined,
                     }
                   : {}),
-              elements: (template.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-              elementsVerso: template.elementsVerso ? template.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsVerso,
-              elementsWeeklyLeft: template.elementsWeeklyLeft ? template.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyLeft,
-              elementsWeeklyRight: template.elementsWeeklyRight ? template.elementsWeeklyRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyRight,
-              elementsWeeklyVersoLeft: template.elementsWeeklyVersoLeft ? template.elementsWeeklyVersoLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyVersoLeft,
-              elementsWeeklyVersoRight: template.elementsWeeklyVersoRight ? template.elementsWeeklyVersoRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : prev.elementsWeeklyVersoRight,
+              customVerso: template.customVerso !== undefined ? template.customVerso : prev.customVerso,
+              elements: (template.elements || []).map(cloneEl),
+              elementsVerso: template.elementsVerso ? template.elementsVerso.map(cloneEl) : prev.elementsVerso,
+              elementsWeeklyLeft: template.elementsWeeklyLeft ? template.elementsWeeklyLeft.map(cloneEl) : prev.elementsWeeklyLeft,
+              elementsWeeklyRight: template.elementsWeeklyRight ? template.elementsWeeklyRight.map(cloneEl) : prev.elementsWeeklyRight,
+              elementsWeeklyVersoLeft: template.elementsWeeklyVersoLeft ? template.elementsWeeklyVersoLeft.map(cloneEl) : prev.elementsWeeklyVersoLeft,
+              elementsWeeklyVersoRight: template.elementsWeeklyVersoRight ? template.elementsWeeklyVersoRight.map(cloneEl) : prev.elementsWeeklyVersoRight,
+              elementsTop: template.elementsTop ? template.elementsTop.map(cloneEl) : prev.elementsTop,
+              elementsBottom: template.elementsBottom ? template.elementsBottom.map(cloneEl) : prev.elementsBottom,
+              elementsSaturday: template.elementsSaturday ? template.elementsSaturday.map(cloneEl) : prev.elementsSaturday,
+              elementsSunday: template.elementsSunday ? template.elementsSunday.map(cloneEl) : prev.elementsSunday,
+              elementsWeekendTransition: template.elementsWeekendTransition ? template.elementsWeekendTransition.map(cloneEl) : prev.elementsWeekendTransition,
+              weekendTransitionContentType: template.weekendTransitionContentType || prev.weekendTransitionContentType,
+              background: template.background !== undefined ? template.background : prev.background,
           }));
           if (template.layoutType === 'weekly_one_page_vertical' || template.layoutType === 'weekly_one_page_horizontal') {
               setEditorViewMode('standard');
           } else if (template.layoutType === 'weekly_vertical' || template.layoutType === 'weekly_horizontal') {
               setEditorViewMode('weekly_left');
+          } else if (template.layoutType === '2_per_page') {
+              setEditorViewMode('standard');
+          } else if (template.layoutType === '1_per_page_weekend_shared') {
+              setEditorViewMode('standard');
           }
           setEditMode('daily');
           setToastMessage(`Modelo de Miolo "${template.name}" aplicado com sucesso!`);
@@ -4461,7 +4694,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           elements: (template.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
       };
       if (editMode === 'monthly_intro') {
-          setConfig(prev => ({ ...prev, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
+          setConfig(prev => ({ ...prev, includeMonthlyIntroPages: true, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
           setCurrentMonthlyIntroPageId(newPage.id);
           setToastMessage(`Modelo "${template.name}" inserido como Página Mensal!`);
       } else if (editMode === 'divider') {
@@ -4487,6 +4720,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               }));
           }
           setToastMessage(`Modelo "${template.name}" aplicado à Divisória!`);
+      } else if (editMode === 'filler') {
+          setConfig(prev => ({
+              ...prev,
+              fillerPageElements: newPage.elements,
+              ...(newPage.background ? { fillerPageBackground: newPage.background } : {})
+          }));
+          setToastMessage(`Modelo "${template.name}" aplicado à Página de Preenchimento!`);
       } else {
           setConfig(prev => ({ ...prev, introPages: [...prev.introPages, newPage] }));
           setCurrentIntroPageId(newPage.id);
@@ -4495,11 +4735,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       setTemplateModal(false);
   };
 
+  const persistCustomTemplatesSafely = (templates: CustomTemplateItem[]) => {
+      try {
+          localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(templates));
+      } catch (storageErr) {
+          console.warn('[Templates] LocalStorage cheio, tentando versão compactada sem imagens pesadas base64...', storageErr);
+          try {
+              const sanitized = templates.map(t => ({
+                  ...t,
+                  elements: t.elements?.map(el => (el.type === 'image' && typeof (el.style as any)?.imageSrc === 'string' && (el.style as any).imageSrc.startsWith('data:') ? { ...el, style: { ...el.style, imageSrc: '' } } : el))
+              }));
+              localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(sanitized));
+          } catch (innerErr) {
+              console.error('[Templates] Não foi possível salvar em localStorage:', innerErr);
+          }
+      }
+  };
+
   const saveCurrentMioloAsTemplate = () => {
       let defaultName = 'Meu Modelo de Miolo';
       if (config.projectType === 'planner') defaultName = 'Meu Modelo de Planner';
       else if (config.projectType === 'notebook') defaultName = 'Meu Modelo de Caderno';
       else if (config.layoutType === '2_per_page') defaultName = 'Miolo 2 Dias por Página';
+      else if (config.layoutType === '1_per_page_weekend_shared') defaultName = 'Miolo Fim de Semana Dividido';
       else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') defaultName = 'Miolo Semanal';
 
       let templateName: string | null = null;
@@ -4508,9 +4766,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       } catch (e) {
           templateName = defaultName;
       }
-      if (templateName === null) return;
-      const finalName = templateName.trim() || defaultName;
+      // Se prompt for cancelado explicitamente ou bloqueado por política de sandbox do navegador, não abortar silently
+      const finalName = (templateName && templateName.trim()) ? templateName.trim() : defaultName;
 
+      const cloneEl = (el: LayoutElement) => ({ ...el, id: Math.random().toString(36).substr(2, 9) });
       const activeElements = config.elements || [];
       const newTemplate: CustomTemplateItem = {
           id: 'miolo-' + Math.random().toString(36).substr(2, 9),
@@ -4519,19 +4778,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           layoutType: config.layoutType,
           projectType: config.projectType,
           isPermanent: config.isPermanent,
-          elements: activeElements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-          elementsVerso: config.elementsVerso ? config.elementsVerso.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
-          elementsWeeklyLeft: config.elementsWeeklyLeft ? config.elementsWeeklyLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
-          elementsWeeklyRight: config.elementsWeeklyRight ? config.elementsWeeklyRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
-          elementsWeeklyVersoLeft: config.elementsWeeklyVersoLeft ? config.elementsWeeklyVersoLeft.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
-          elementsWeeklyVersoRight: config.elementsWeeklyVersoRight ? config.elementsWeeklyVersoRight.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })) : undefined,
+          customVerso: config.customVerso,
+          elements: activeElements.map(cloneEl),
+          elementsVerso: config.elementsVerso ? config.elementsVerso.map(cloneEl) : undefined,
+          elementsWeeklyLeft: config.elementsWeeklyLeft ? config.elementsWeeklyLeft.map(cloneEl) : undefined,
+          elementsWeeklyRight: config.elementsWeeklyRight ? config.elementsWeeklyRight.map(cloneEl) : undefined,
+          elementsWeeklyVersoLeft: config.elementsWeeklyVersoLeft ? config.elementsWeeklyVersoLeft.map(cloneEl) : undefined,
+          elementsWeeklyVersoRight: config.elementsWeeklyVersoRight ? config.elementsWeeklyVersoRight.map(cloneEl) : undefined,
+          elementsTop: config.elementsTop ? config.elementsTop.map(cloneEl) : undefined,
+          elementsBottom: config.elementsBottom ? config.elementsBottom.map(cloneEl) : undefined,
+          elementsSaturday: config.elementsSaturday ? config.elementsSaturday.map(cloneEl) : undefined,
+          elementsSunday: config.elementsSunday ? config.elementsSunday.map(cloneEl) : undefined,
+          elementsWeekendTransition: config.elementsWeekendTransition ? config.elementsWeekendTransition.map(cloneEl) : undefined,
+          weekendTransitionContentType: config.weekendTransitionContentType,
           background: config.background,
           createdAt: new Date().toISOString()
       };
 
       const updated = [...customTemplates, newTemplate];
       setCustomTemplates(updated);
-      localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+      persistCustomTemplatesSafely(updated);
       setToastMessage(`Modelo de Miolo "${finalName}" salvo com sucesso em Meus Modelos!`);
       setTemplateCategory('custom');
       setTemplateModal(true);
@@ -4542,23 +4808,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       try {
           templateName = prompt("Digite o nome para o seu modelo personalizado:", page.name);
       } catch (e) {
-          // Fallback if prompt is blocked/not available
           templateName = page.name;
       }
       
-      if (templateName === null) return; // cancelled
-      const finalName = templateName.trim() || page.name;
+      const finalName = (templateName && templateName.trim()) ? templateName.trim() : page.name;
+      const cloneEl = (el: LayoutElement) => ({ ...el, id: Math.random().toString(36).substr(2, 9) });
+
       const newTemplate: CustomTemplateItem = {
           id: 'custom-' + Math.random().toString(36).substr(2, 9),
           name: finalName,
           templateType: type,
-          elements: (page.elements || []).map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
+          elements: (page.elements || []).map(cloneEl),
           background: page.background,
           createdAt: new Date().toISOString()
       };
       const updated = [...customTemplates, newTemplate];
       setCustomTemplates(updated);
-      localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+      persistCustomTemplatesSafely(updated);
       setToastMessage(`Modelo "${finalName}" salvo com sucesso em Meus Modelos!`);
       
       // Navigate and open tab automatically
@@ -4570,7 +4836,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (confirm(`Deseja excluir o modelo "${name}" permanentemente?`)) {
           const updated = customTemplates.filter(t => t.id !== id);
           setCustomTemplates(updated);
-          localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
+          persistCustomTemplatesSafely(updated);
       }
   };
 
@@ -4587,10 +4853,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (editMode === 'divider') {
       return dividerViewMode === 'verso' ? 'Verso da Divisória' : 'Frente da Divisória';
     }
+    if (editMode === 'filler') {
+      return 'Página de Preenchimento / Transição';
+    }
     return 'Página Atual';
   }, [editMode, currentIntroPageId, currentMonthlyIntroPageId, dividerViewMode, config]);
 
   const currentPageInEditor = useMemo(() => {
+    if (editMode === 'filler') {
+      return 2;
+    }
     if (editMode === 'intro') {
       const idx = config.introPages.findIndex(ip => ip.id === currentIntroPageId);
       return idx >= 0 ? idx + 1 : 1;
@@ -5071,6 +5343,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           setConfig(prev => ({
             ...prev,
             ...dimensionUpdates,
+            includeMonthlyIntroPages: true,
             monthlyIntroPages: [...(prev.monthlyIntroPages || []), ...newPages]
           }));
           setEditMode('monthly_intro');
@@ -5093,6 +5366,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         setConfig(prev => ({
           ...prev,
           ...dimensionUpdates,
+          includeMonthlyIntroPages: true,
           monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage]
         }));
         setEditMode('monthly_intro');
@@ -5204,6 +5478,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         break;
       }
 
+      case 'filler_page': {
+        setConfig(prev => ({
+          ...prev,
+          ...dimensionUpdates,
+          fillerPageElements: processedElements,
+          fillerPageBackground: newBgConfig || (metadata.clearBackground ? undefined : prev.fillerPageBackground)
+        }));
+        setEditMode('filler');
+        setSelectedIds(processedElements.map(e => e.id));
+        setActiveTab('editor');
+        setToastMessage(`Página de Preenchimento atualizada com ${processedElements.length} elementos editáveis a partir do PDF!${dimensionNote}`);
+        break;
+      }
+
       case 'save_template': {
         if (metadata.batchPages && metadata.batchPages.length > 0) {
           const newTemplates: IntroPage[] = [];
@@ -5237,11 +5525,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           }
           const updated = [...customTemplates, ...newTemplates];
           setCustomTemplates(updated);
-          try {
-            localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
-          } catch (e) {
-            console.error('Erro ao salvar templates em localStorage:', e);
-          }
+          persistCustomTemplatesSafely(updated);
           if (Object.keys(dimensionUpdates).length > 0) {
             setConfig(prev => ({ ...prev, ...dimensionUpdates }));
           }
@@ -5259,11 +5543,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         };
         const updated = [...customTemplates, newTemplate];
         setCustomTemplates(updated);
-        try {
-          localStorage.setItem('agendamaster_custom_page_templates', JSON.stringify(updated));
-        } catch (e) {
-          console.error('Erro ao salvar template em localStorage:', e);
-        }
+        persistCustomTemplatesSafely(updated);
         if (Object.keys(dimensionUpdates).length > 0) {
           setConfig(prev => ({ ...prev, ...dimensionUpdates }));
         }
@@ -5611,7 +5891,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
            name: `Página Mensal ${(config.monthlyIntroPages || []).length + 1}`,
            elements: []
        };
-       setConfig(prev => ({ ...prev, monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] }));
+       setConfig(prev => ({ 
+           ...prev, 
+           includeMonthlyIntroPages: true,
+           monthlyIntroPages: [...(prev.monthlyIntroPages || []), newPage] 
+       }));
        setCurrentMonthlyIntroPageId(newPage.id);
   };
 
@@ -6030,7 +6314,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           pageNumber = p;
       }
 
-      const element = document.getElementById(`preview-page-${pageNumber}`);
+      const element = document.getElementById(`preview-page-${pageNumber}`) ||
+                      document.getElementById(`preview-spread-${pageNumber}`) ||
+                      document.getElementById(`preview-spread-${pageNumber - (pageNumber % 2 === 0 ? 1 : 0)}`);
       if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
@@ -6038,7 +6324,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const getCurrentPageHeight = () => {
       if (editMode === 'daily') {
-          if (config.layoutType === '1_per_page_weekend_shared' && (editorViewMode === 'saturday' || editorViewMode === 'sunday')) {
+          if (config.layoutType === '1_per_page_weekend_shared' && (editorViewMode === 'saturday' || editorViewMode === 'sunday' || editorViewMode === 'weekend_transition')) {
               return EDITOR_HEIGHT_PX / 2;
           }
           if (config.layoutType === '2_per_page' && (editorViewMode === 'top' || editorViewMode === 'bottom')) {
@@ -7015,6 +7301,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (fontToEnsure) {
         ensureFontLoaded(fontToEnsure);
       }
+
+      // Fast-path visual no DOM para retorno instantâneo a 60-120 FPS ao arrastar o ponto do seletor de cor
+      if (editorRef.current && (styleUpdate.color || styleUpdate.backgroundColor || styleUpdate.borderColor || styleUpdate.fillColor)) {
+        const domEl = editorRef.current.querySelector(`[data-element-id="${id}"]`) as HTMLElement | null;
+        if (domEl) {
+          if (styleUpdate.color) domEl.style.color = styleUpdate.color;
+          if (styleUpdate.backgroundColor) domEl.style.backgroundColor = styleUpdate.backgroundColor;
+          if (styleUpdate.borderColor) domEl.style.borderColor = styleUpdate.borderColor;
+        }
+      }
     }
     const currentPageHeight = getCurrentPageHeight();
     updateActiveElements(prevList => prevList.map(e => {
@@ -7802,7 +8098,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             elementsSunday: (prev.elementsSunday && prev.elementsSunday.length > 0) ? prev.elementsSunday : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
         }));
     }
-  }, [config.layoutType]);
+
+    const isSinglePageLayout = !config.layoutType.startsWith('weekly') || config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal';
+    if (isSinglePageLayout && config.customVerso && (!config.elementsVerso || config.elementsVerso.length === 0)) {
+        setConfig(prev => ({
+            ...prev,
+            elementsVerso: (prev.elementsVerso && prev.elementsVerso.length > 0)
+                ? prev.elementsVerso
+                : prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
+        }));
+    }
+  }, [config.layoutType, config.customVerso, config.elementsVerso?.length]);
 
   // Copiar o layout inferior no layout superior (e vice-versa) para 2DPP e Fim de Semana Dividido
   const copy2DppBottomToTop = useCallback(() => {
@@ -7853,6 +8159,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     setSelectedIds([]);
     setToastMessage("Layout superior (Sábado) copiado para o layout inferior (Domingo)!");
   }, [config.elementsSaturday, config.elements, config.year, pushHistory]);
+
+  const copySaturdayToTransition = useCallback(() => {
+    pushHistory();
+    const source = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+    const cloned = source.map(el => cloneElementWithNewId(el, config.year));
+    setConfig(prev => ({
+      ...prev,
+      elementsWeekendTransition: cloned,
+      weekendTransitionContentType: 'custom',
+      weekendTransitionConfig: {
+        ...(prev.weekendTransitionConfig || {}),
+        type: 'custom',
+        elements: cloned
+      }
+    }));
+    setSelectedIds([]);
+    setToastMessage("Layout de Sábado copiado para o Espaço Entre Meses!");
+  }, [config.elementsSaturday, config.elements, config.year, pushHistory]);
+
+  const restoreDefaultTransition = useCallback(() => {
+    pushHistory();
+    const preset = config.weekendTransitionContentType || 'notes';
+    const defaultEls = generatePresetElementsForWeekendTransition(preset);
+    setConfig(prev => ({
+      ...prev,
+      elementsWeekendTransition: defaultEls,
+      weekendTransitionConfig: {
+        ...(prev.weekendTransitionConfig || {}),
+        type: preset as any,
+        elements: defaultEls
+      }
+    }));
+    setSelectedIds([]);
+    setToastMessage("Espaço Entre Meses restaurado para o modelo padrão!");
+  }, [config.weekendTransitionContentType, pushHistory]);
 
   const startMarqueeSelection = useCallback((e: React.MouseEvent | MouseEvent) => {
     // Apenas botão esquerdo
@@ -7978,7 +8319,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     startMarqueeSelectionRef.current = startMarqueeSelection;
   }, [startMarqueeSelection]);
 
-  const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'cover', introPageId?: string) => {
+  const handleInteractionStart = (e: React.MouseEvent, id: string, dir: string | null = null, templateType?: 'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'cover' | 'weekend_transition', introPageId?: string) => {
     window.focus();
     if (templateType === 'cover') {
         setEditMode('cover');
@@ -7995,6 +8336,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         if (introPageId === 'divider' || introPageId === 'divider_verso') {
             setEditMode('divider');
             setDividerViewMode(introPageId === 'divider_verso' ? 'verso' : 'front');
+        } else if (introPageId === 'filler_page') {
+            setEditMode('filler');
         } else if (config.monthlyIntroPages?.some(p => p.id === introPageId)) {
             setEditMode('monthly_intro');
             setCurrentMonthlyIntroPageId(introPageId);
@@ -8004,7 +8347,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
     } else if (templateType && templateType !== 'intro') {
         setEditMode('daily');
-        setEditorViewMode(templateType);
+        if (activeTab === 'preview') {
+            setEditorViewMode(templateType);
+        } else {
+            // No editor direto, preserva o modo verso se o usuário estiver editando o verso
+            if (templateType === 'top' || templateType === 'bottom' || 
+                templateType === 'saturday' || templateType === 'sunday' || templateType === 'weekend_transition' || 
+                templateType === 'weekly_left' || templateType === 'weekly_right' || 
+                templateType === 'weekly_verso_left' || templateType === 'weekly_verso_right') {
+                setEditorViewMode(templateType);
+            } else if (templateType === 'verso') {
+                setEditorViewMode('verso');
+            } else if (templateType === 'standard' && editorViewMode !== 'verso') {
+                setEditorViewMode('standard');
+            }
+        }
     }
 
     if (activeTab === 'preview') {
@@ -8025,8 +8382,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         else if (templateType === 'weekly_verso_right') activeList = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
         else if (templateType === 'saturday') activeList = config.elementsSaturday || config.elements;
         else if (templateType === 'sunday') activeList = config.elementsSunday || config.elements;
+        else if (templateType === 'weekend_transition') activeList = config.elementsWeekendTransition ?? ((config.weekendTransitionConfig?.elements && config.weekendTransitionConfig.elements.length > 0) ? config.weekendTransitionConfig.elements : getWeekendTransitionElements(config));
         else if (templateType === 'top') activeList = config.elementsTop || config.elements;
         else if (templateType === 'bottom') activeList = config.elementsBottom || config.elements;
+        else if (templateType === 'verso') activeList = config.elementsVerso || config.elements;
         
         element = activeList.find(el => el.id === id);
     }
@@ -9223,7 +9582,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     pageNumber?: number, 
     pageWidth: number = 800, 
     pageHeight: number = 600,
-    templateType?: 'standard' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'cover',
+    templateType?: 'standard' | 'verso' | 'saturday' | 'sunday' | 'top' | 'bottom' | 'intro' | 'weekly_left' | 'weekly_right' | 'weekly_verso_left' | 'weekly_verso_right' | 'cover' | 'weekend_transition',
     introPageId?: string,
     weekDays?: DayData[]
   ) => {
@@ -9575,6 +9934,51 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
                         {(() => {
+                            const isDateElem = ['month_name', 'day_name', 'day_number', 'month_number'].includes(el.type) ||
+                                (el.type === 'date_placeholder' && ['month_name', 'day_name', 'day_number', 'month_number'].includes(el.style?.variant || ''));
+                            if (!isDateElem) return null;
+                            const isSimulating = Boolean(el.style.simulateMaxSpace);
+                            const isMonth = el.type === 'month_name' || el.style.variant === 'month_name';
+                            const isDay = el.type === 'day_name' || el.style.variant === 'day_name';
+                            const labelMax = isMonth ? 'Novembro' : isDay ? 'Segunda' : 'Dia 30';
+
+                            return (
+                                <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1 z-50 whitespace-nowrap select-none bg-white/95 backdrop-blur-xs p-0.5 px-2 rounded-full border border-indigo-200 shadow-md">
+                                    <span className="text-indigo-800 text-[9.5px] font-black flex items-center gap-1 mr-1">
+                                        <Sparkles className="w-2.5 h-2.5 text-indigo-600" /> {isMonth ? 'Mês' : isDay ? 'Dia' : 'Data'}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            autoFitElementToContent(el.id);
+                                        }}
+                                        className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 cursor-pointer transition-colors"
+                                        title="Ajusta o quadro com folga segura para que qualquer mês ou dia do ano caiba perfeitamente"
+                                    >
+                                        Ajustar p/ Ano Todo ✨
+                                    </button>
+                                    <div className="w-px h-3 bg-indigo-200 mx-0.5" />
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateElementStyle(el.id, { simulateMaxSpace: !isSimulating });
+                                        }}
+                                        className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                                            isSimulating
+                                                ? 'bg-amber-500 text-white shadow-2xs font-black'
+                                                : 'text-stone-600 hover:text-amber-700 hover:bg-amber-50'
+                                        }`}
+                                        title={isSimulating ? 'Voltar para visualização normal do início do ano' : `Testar visualmente como este elemento se comporta com o maior texto (${labelMax})`}
+                                    >
+                                        <Eye className="w-2.5 h-2.5" />
+                                        {isSimulating ? 'Voltar ao Início' : `Testar ${labelMax}`}
+                                    </button>
+                                </div>
+                            );
+                        })()}
+                        {(() => {
                             const isSingleLine = el.type === 'lines' && !el.style.showTimes && (
                                 el.h < 3 || 
                                 (!el.style.rowCount || el.style.rowCount === 0) ||
@@ -9909,8 +10313,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const renderEditorPage = () => {
-    let editorPageNum = (editorViewMode === 'weekly_left' || editorViewMode === 'verso') ? 2 : 1;
-    if (editorViewMode !== 'weekly_left') {
+    let editorPageNum = (editorViewMode === 'weekly_left' || editorViewMode === 'weekly_verso_left' || editorViewMode === 'verso') ? 2 : 1;
+    if (editorViewMode !== 'weekly_left' && editorViewMode !== 'weekly_verso_left' && editorViewMode !== 'verso') {
         const globalBgs = config.backgrounds && config.backgrounds.length > 0 ? config.backgrounds : (config.background ? [config.background] : []);
         const activeType = editMode === 'intro' ? 'intro' : editMode === 'monthly_intro' ? 'monthly_intro' : editMode === 'divider' ? 'divider' : 'daily';
         
@@ -10036,6 +10440,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     }
 
+    if (editMode === 'filler') {
+        const dummyDay = getProjectFirstDay(0);
+        return wrapWithRuler(
+            <div className={containerClass} style={containerStyle}>
+                {renderBackgroundsForPage('standard', editorPageNum, config.fillerPageBackground)}
+                <div className={usefulAreaClass}>
+                    {renderTemplate(getActiveElements(), dummyDay, true, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'filler_page')}
+                </div>
+            </div>
+        );
+    }
+
     if (editMode === 'cover') {
         const cover = config.cover || createDefaultCoverConfig(PAGE_WIDTH_MM, PAGE_HEIGHT_MM);
         const activeCoverPage = cover.pages.find(p => p.id === cover.activeCoverPageId) || cover.pages[0];
@@ -10104,13 +10520,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     if (config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.layoutType === 'devotional') {
         const maxOffset = getMaxDayIndex(activeElements);
-        const mockBatch: DayData[] = Array.from({ length: maxOffset + 1 }, (_, i) => getProjectFirstDay(i));
+        const isVerso = editorViewMode === 'verso';
+        const dayOffset = (isVerso && config.versoAdvancesSequence !== false) ? 1 : 0;
+        const mockBatch: DayData[] = Array.from({ length: maxOffset + 1 }, (_, i) => getProjectFirstDay(i + dayOffset));
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
-                    {renderTemplate(elementsToRenderInEditor, mockBatch[0], isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockBatch)}
+                    {renderTemplate(
+                        elementsToRenderInEditor, 
+                        mockBatch[0], 
+                        isInteractiveInEditor, 
+                        true, 
+                        editorPageNum, 
+                        EDITOR_WIDTH_PX, 
+                        EDITOR_HEIGHT_PX, 
+                        isVerso ? 'verso' : 'standard', 
+                        undefined, 
+                        mockBatch
+                    )}
                 </div>
             </div>
         );
@@ -10163,6 +10592,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === '1_per_page_weekend_shared') {
+        if (editorViewMode === 'verso') {
+            const mockWeekday: DayData = getProjectFirstDay(0);
+            const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                ? config.elementsVerso
+                : config.elements;
+            return wrapWithRuler(
+                <div className={containerClass} style={containerStyle}>
+                    {renderBackgroundsForPage('daily', 2)}
+                    <div className={usefulAreaClass}>
+                        {renderTemplate(versoElements, mockWeekday, true, true, 2, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'verso')}
+                    </div>
+                </div>
+            );
+        }
+
         let satDate = new Date(config.year, config.startMonth ?? 0, 1);
         while (satDate.getDay() !== 6) {
             satDate.setDate(satDate.getDate() + 1);
@@ -10200,21 +10644,69 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 </div>
             );
         }
-        
-        const elementsSat = config.elementsSaturday || config.elements;
-        const elementsSun = config.elementsSunday || config.elements;
+
+        const isTransition = editorViewMode === 'weekend_transition';
+        const isSat = editorViewMode === 'saturday';
+        const isSun = editorViewMode === 'sunday';
+
+        const elementsSat = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+        const elementsSun = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+        const transitionElements = config.elementsWeekendTransition ??
+            ((config.weekendTransitionConfig?.elements && config.weekendTransitionConfig.elements.length > 0)
+                ? config.weekendTransitionConfig.elements
+                : getWeekendTransitionElements(config));
+
+        const isTopActive = isSat;
+        const isBottomActive = isSun || isTransition;
+
+        const bottomElements = isTransition ? transitionElements : elementsSun;
+        const bottomDay = isTransition ? null : mockSun;
+        const bottomTemplateType: 'sunday' | 'weekend_transition' = isTransition ? 'weekend_transition' : 'sunday';
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={`${usefulAreaClass} flex flex-col`}>
-                    <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${editorViewMode === 'sunday' ? 'opacity-40 bg-gray-50' : ''}`}>
-                        {renderTemplate(elementsSat, mockSat, true, editorViewMode === 'saturday', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'saturday')}
-                        {editorViewMode === 'sunday' && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('saturday')} />}
+                    {/* Metade Superior (Sábado) */}
+                    <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${!isTopActive ? 'opacity-40 bg-gray-50' : ''}`}>
+                        {renderTemplate(
+                            shouldMirrorInEditor ? getMirroredElements(elementsSat) : elementsSat,
+                            mockSat,
+                            isInteractiveInEditor && isTopActive,
+                            isTopActive,
+                            undefined,
+                            EDITOR_WIDTH_PX,
+                            EDITOR_HEIGHT_PX / 2,
+                            'saturday'
+                        )}
+                        {!isTopActive && (
+                            <div 
+                                className="absolute inset-0 z-[100] cursor-pointer" 
+                                onClick={() => { setEditorViewMode('saturday'); setSelectedIds([]); }}
+                                title="Clique para editar a Parte Superior (Sábado)"
+                            />
+                        )}
                     </div>
-                    <div className={`flex-1 relative overflow-visible ${editorViewMode === 'saturday' ? 'opacity-40 bg-gray-50' : ''}`}>
-                        {renderTemplate(elementsSun, mockSun, true, editorViewMode === 'sunday', undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX / 2, 'sunday')}
-                        {editorViewMode === 'saturday' && <div className="absolute inset-0 z-[100] cursor-pointer" onClick={() => setEditorViewMode('sunday')} />}
+
+                    {/* Metade Inferior (Domingo ou Espaço Entre Meses) */}
+                    <div className={`flex-1 relative overflow-visible ${!isBottomActive ? 'opacity-40 bg-gray-50' : ''}`}>
+                        {renderTemplate(
+                            shouldMirrorInEditor ? getMirroredElements(bottomElements) : bottomElements,
+                            bottomDay,
+                            isInteractiveInEditor && isBottomActive,
+                            isBottomActive,
+                            undefined,
+                            EDITOR_WIDTH_PX,
+                            EDITOR_HEIGHT_PX / 2,
+                            bottomTemplateType
+                        )}
+                        {!isBottomActive && (
+                            <div 
+                                className="absolute inset-0 z-[100] cursor-pointer" 
+                                onClick={() => { setEditorViewMode('sunday'); setSelectedIds([]); }}
+                                title="Clique para editar a Parte Inferior (Domingo)"
+                            />
+                        )}
                     </div>
                 </div>
             </div>
@@ -10222,13 +10714,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
-        const mockWeek: DayData[] = getProjectFirstWeek(0);
+        const isVerso = editorViewMode === 'verso';
+        const weekOffset = (isVerso && config.versoAdvancesSequence !== false) ? 1 : 0;
+        const mockWeek: DayData[] = getProjectFirstWeek(weekOffset);
 
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
                 <div className={usefulAreaClass}>
-                    {renderTemplate(elementsToRenderInEditor, mockWeek[0], isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard', undefined, mockWeek)}
+                    {renderTemplate(
+                        elementsToRenderInEditor, 
+                        mockWeek[0], 
+                        isInteractiveInEditor, 
+                        true, 
+                        editorPageNum, 
+                        EDITOR_WIDTH_PX, 
+                        EDITOR_HEIGHT_PX, 
+                        isVerso ? 'verso' : 'standard', 
+                        undefined, 
+                        mockWeek
+                    )}
                 </div>
             </div>
         );
@@ -10748,43 +11253,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const printH = PAGE_HEIGHT_MM * PRINT_SCALE;
 
     const renderFillerPage = (pNum: number, fillerMonth?: number) => {
-        const content = config.fillerPageContent || 'blank';
         let elements: LayoutElement[] = [];
-        let fillerBg: BackgroundConfig | undefined = undefined;
+        let fillerBg: BackgroundConfig | undefined = config.fillerPageBackground ? getEffectiveBg(config.fillerPageBackground) : undefined;
         
-        if (content === 'notes') {
-            elements = [
-                { id: `filler-title-${pNum}`, type: 'text', name: 'Título', x: 10, y: 10, w: 80, h: 5, content: 'Anotações', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
-                { id: `filler-lines-${pNum}`, type: 'lines', name: 'Linhas', x: 10, y: 20, w: 80, h: 70, zIndex: 1, style: { lineSpacing: 25, color: '#e5e7eb' } }
-            ];
-        } else if (content === 'habit_tracker') {
-            elements = [
-                { id: `filler-title-${pNum}`, type: 'text', name: 'Título', x: 10, y: 10, w: 80, h: 5, content: 'Hábitos do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
-                { id: `filler-habit-${pNum}`, type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 20, w: 80, h: 70, zIndex: 1, style: { habitLabel: 'Meus Hábitos' } }
-            ];
-        } else if (content === 'quote') {
-            elements = [
-                { id: `filler-quote-${pNum}`, type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
-            ];
-        } else if (content !== 'blank') {
-            const introPage = config.introPages.find(p => p.id === content);
-            if (introPage) {
-                elements = introPage.elements;
-                fillerBg = getEffectiveBg(introPage.background);
-            } else {
-                const mPage = config.monthlyIntroPages?.find(p => p.id === content);
-                if (mPage) {
-                    elements = mPage.elements;
-                    fillerBg = getEffectiveBg(mPage.background);
+        if (config.fillerPageElements !== undefined) {
+            elements = config.fillerPageElements;
+        } else {
+            const content = config.fillerPageContent || 'blank';
+            if (content === 'notes') {
+                elements = [
+                    { id: `filler-title-${pNum}`, type: 'text', name: 'Título', x: 10, y: 10, w: 80, h: 5, content: 'Anotações', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                    { id: `filler-lines-${pNum}`, type: 'lines', name: 'Linhas', x: 10, y: 20, w: 80, h: 70, zIndex: 1, style: { lineSpacing: 25, color: '#e5e7eb' } }
+                ];
+            } else if (content === 'habit_tracker') {
+                elements = [
+                    { id: `filler-title-${pNum}`, type: 'text', name: 'Título', x: 10, y: 10, w: 80, h: 5, content: 'Hábitos do Mês', zIndex: 1, style: { fontSize: 18, fontWeight: 'bold', textAlign: 'center' } },
+                    { id: `filler-habit-${pNum}`, type: 'habit_tracker', name: 'Habit Tracker', x: 10, y: 20, w: 80, h: 70, zIndex: 1, style: { habitLabel: 'Meus Hábitos' } }
+                ];
+            } else if (content === 'quote') {
+                elements = [
+                    { id: `filler-quote-${pNum}`, type: 'quote', name: 'Frase', x: 15, y: 40, w: 70, h: 20, zIndex: 1, style: { fontSize: 20, fontWeight: 'italic', textAlign: 'center', verticalAlign: 'middle' } }
+                ];
+            } else if (content !== 'blank') {
+                const introPage = config.introPages.find(p => p.id === content);
+                if (introPage) {
+                    elements = introPage.elements;
+                    if (!fillerBg) fillerBg = getEffectiveBg(introPage.background);
+                } else {
+                    const mPage = config.monthlyIntroPages?.find(p => p.id === content);
+                    if (mPage) {
+                        elements = mPage.elements;
+                        if (!fillerBg) fillerBg = getEffectiveBg(mPage.background);
+                    }
                 }
             }
         }
 
         const isEven = pNum % 2 === 0;
         const elementsToRender = isEven ? getMirroredElements(elements) : elements;
+        const dummyDay = fillerMonth !== undefined ? getProjectFirstDay(fillerMonth) : null;
         
         return renderPageContainer(
-            renderTemplate(elementsToRender, null, false, false, pNum, printW, printH, (content !== 'blank' && content !== 'notes' && content !== 'habit_tracker' && content !== 'quote') ? 'intro' : undefined, (content !== 'blank' && content !== 'notes' && content !== 'habit_tracker' && content !== 'quote') ? content : undefined),
+            renderTemplate(elementsToRender, dummyDay, false, false, pNum, printW, printH, 'intro', 'filler_page'),
             `filler-${pNum}`,
             false,
             fillerBg,
@@ -10808,10 +11318,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     const { layoutType, projectType } = config;
 
+    const hasDividers = (config.includeMonthlyDividers !== false) && config.projectType !== 'notebook';
+    const hasIntroPagesData = Boolean(
+        config.projectType !== 'notebook' && 
+        config.monthlyIntroPages && 
+        config.monthlyIntroPages.length > 0
+    );
+    const hasIntroPages = hasIntroPagesData;
+
     const renderMonthPrelude = (currentMonth: number, currentYear: number) => {
-        const hasDividers = config.includeMonthlyDividers ?? true;
-        const hasIntroPages = config.includeMonthlyIntroPages ?? true;
-        const hasIntroPagesData = config.monthlyIntroPages && config.monthlyIntroPages.length > 0;
+        // Se o projeto não possui divisórias nem páginas introdutórias mensais ativas,
+        // não deve inserir prelúdio nem páginas de preenchimento/em branco no meio da sequência de páginas diárias!
+        if (!hasDividers && !hasIntroPagesData) {
+            return;
+        }
 
         if (hasDividers) {
             // A Divisória (Capa do Mês) deve sempre iniciar na PÁGINA DIREITA (Ímpar).
@@ -10827,7 +11347,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             // Rendendo o verso do divisor de mês conforme a preferência do usuário (padrão 'blank')
             const versoContent = config.monthlyDividerVersoContent || 'blank';
             
-            if (versoContent === 'monthly_intro_first' && hasIntroPages && hasIntroPagesData) {
+            if (versoContent === 'monthly_intro_first' && hasIntroPagesData) {
                 const monthDummyDay: DayData = {
                     dayOfMonth: 1,
                     month: currentMonth,
@@ -10858,7 +11378,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 }
 
                 // Renderiza as páginas introdutórias mensais se houverem, excluindo a própria página caso tenha sido usada como verso
-                if (hasIntroPages && hasIntroPagesData) {
+                if (hasIntroPagesData) {
                     const monthDummyDay: DayData = {
                         dayOfMonth: 1,
                         month: currentMonth,
@@ -10884,7 +11404,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     });
                 }
             }
-        } else if (hasIntroPages && hasIntroPagesData) {
+        } else if (hasIntroPagesData) {
             // Se não tem divisórias, mas tem páginas mensais ativas, inicia as páginas mensais na PÁGINA DIREITA (Ímpar)
             if (pageCount % 2 !== 0 && !config.disableSequenceSkip) {
                 const filler = renderFillerPage(pageCount + 1, currentMonth);
@@ -10914,9 +11434,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             });
         }
 
-        // Quando a opção de iniciar o mês na página direita estiver marcada, OU quando houver páginas mensais / divisórias ativas:
-        // Garantimos que o Dia 01 / miolo diário inicie em uma PÁGINA ÍMPAR (Direita), exceto se disableSequenceSkip estiver ativo.
-        const shouldStartMonthOnRight = (config.startMonthOnRightPage ?? true) && !config.disableSequenceSkip;
+        // Quando houver páginas mensais / divisórias ativas e a opção de iniciar o miolo na página direita estiver marcada:
+        // Garantimos que o miolo diário inicie em uma PÁGINA ÍMPAR (Direita), exceto se disableSequenceSkip estiver ativo.
+        const shouldStartMonthOnRight = (hasDividers || hasIntroPagesData) && (config.startMonthOnRightPage ?? true) && !config.disableSequenceSkip;
         if (shouldStartMonthOnRight) {
             if (pageCount % 2 !== 0) {
                 const filler = renderFillerPage(pageCount + 1, currentMonth);
@@ -10990,7 +11510,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     ? config.elementsVerso
                     : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                 const containerVerso = renderPageContainer(
-                    renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
+                    renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, config.customVerso ? 'verso' : 'standard', undefined, batch), 
                     `verso-${dateKey}-${i}`, 
                     false, 
                     undefined, 
@@ -11004,11 +11524,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 i += daysPerPage;
             } else {
                 const isEven = (pageCount + 1) % 2 === 0;
-                const elementsToRender = (isEven && config.customVerso && config.elementsVerso && config.elementsVerso.length > 0)
-                    ? config.elementsVerso
+                const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso && config.elementsVerso.length > 0);
+                const elementsToRender = isCustomVersoPage
+                    ? (config.elementsVerso as LayoutElement[])
                     : (isEven ? getMirroredElements(config.elements) : config.elements);
                 const container = renderPageContainer(
-                    renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard', undefined, batch), 
+                    renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, isCustomVersoPage ? 'verso' : 'standard', undefined, batch), 
                     `${dateKey}-${i}`, 
                     false, 
                     undefined, 
@@ -11085,7 +11606,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         let lastMonth = -1;
         while (i < effectiveDays.length) {
             const day = effectiveDays[i];
-            const isWeekend = day.dayOfWeek === 6;
+            const isSaturday = day.dayOfWeek === 6;
+            const isSundayAlone = day.dayOfWeek === 0;
             
             const currentMonth = day.month;
             const currentYear = day.year;
@@ -11097,58 +11619,227 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
 
             const isEven = (pageCount + 1) % 2 === 0;
+            const daySun = effectiveDays[i+1];
+            const hasMonthlyBreak = Boolean((hasDividers || hasIntroPagesData || config.splitWeekendAcrossMonths !== false) && daySun && daySun.month !== day.month);
+
+            const renderWeekendTransitionHalf = (defaultFallbackTitle: string = 'Anotações do Fim de Semana') => {
+                const transElements = getWeekendTransitionElements(config, defaultFallbackTitle);
+                const transToRender = isEven ? getMirroredElements(transElements) : transElements;
+                return (
+                    <div className={`w-full h-full ${borderStyle} print:border-none`}>
+                        {renderTemplate(transToRender, null, false, false, pageCount + 1, printW, printH / 2, 'weekend_transition')}
+                    </div>
+                );
+            };
             
-            if (isWeekend) {
-                const daySun = effectiveDays[i+1];
-                // Se o domingo pertencer a um mês diferente do sábado (ex: Sábado 31/Jan e Domingo 01/Fev):
-                // O sábado é renderizado sozinho na página de transição para que o Domingo inicie com o novo mês na próxima iteração!
-                if (daySun && daySun.month !== day.month) {
-                    const elementsSat = config.elementsSaturday || config.elements;
-                    const satToRender = isEven ? getMirroredElements(elementsSat) : elementsSat;
-                    
-                    const container = renderPageContainer(
-                        <div className="flex flex-col h-full">
-                            <div className="flex-1 relative overflow-visible">
-                                <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
-                            </div>
-                            <div className="flex-1 relative overflow-visible flex items-center justify-center text-gray-300 text-[10px] italic">
-                                Página de Transição
-                            </div>
-                        </div>
-                    , `we-trans-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
-                    if(container) pages.push(container);
-                    
-                    i += 1; // Consome apenas sábado; domingo será processado na próxima iteração
-                    continue;
-                }
-
-                if (!effectiveDays[i+1] && limitStart === undefined) break;
-
+            if (isSaturday) {
                 const elementsSat = config.elementsSaturday || config.elements;
                 const elementsSun = config.elementsSunday || config.elements;
                 
                 const satToRender = isEven ? getMirroredElements(elementsSat) : elementsSat;
                 const sunToRender = isEven ? getMirroredElements(elementsSun) : elementsSun;
 
-                const container = renderPageContainer(
-                    <div className="flex flex-col h-full">
-                        <div className="flex-1 relative overflow-visible">
-                            <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
+                if (hasMonthlyBreak) {
+                    // Quando o fim de semana abrange dois meses (ex: Sáb 31/Jul e Dom 01/Ago):
+                    // Sábado 31/Jul fica no topo e a parte inferior recebe o bloco de transição personalizado pelo usuário.
+                    // Em seguida, o prelúdio do novo mês será renderizado e Domingo 01/Ago iniciará o novo mês!
+                    if (config.customVerso && config.versoAdvancesSequence === false) {
+                        const containerFrente = renderPageContainer(
+                            <div className="flex flex-col h-full">
+                                <div className="flex-1 relative overflow-visible">
+                                    <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
+                                </div>
+                                <div className="flex-1 relative overflow-visible">
+                                    {renderWeekendTransitionHalf('Anotações do Fim de Semana')}
+                                </div>
+                            </div>
+                        , `we-trans-sat-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
+                        if (containerFrente) pages.push(containerFrente);
+
+                        const isEvenVerso = (pageCount + 1) % 2 === 0;
+                        const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                            ? config.elementsVerso
+                            : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
+                        const containerVerso = renderPageContainer(
+                            renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, config.customVerso ? 'verso' : 'standard'),
+                            `we-trans-verso-${i}`,
+                            false,
+                            undefined,
+                            undefined,
+                            'daily',
+                            day.month,
+                            getBadgeForDay(day)
+                        );
+                        if (containerVerso) pages.push(containerVerso);
+                    } else {
+                        const container = renderPageContainer(
+                            <div className="flex flex-col h-full">
+                                <div className="flex-1 relative overflow-visible">
+                                    <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
+                                </div>
+                                <div className="flex-1 relative overflow-visible">
+                                    {renderWeekendTransitionHalf('Anotações do Fim de Semana')}
+                                </div>
+                            </div>
+                        , `we-trans-sat-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
+                        if (container) pages.push(container);
+                    }
+                    i += 1;
+                    continue;
+                }
+
+                if (config.customVerso && config.versoAdvancesSequence === false) {
+                    // Frente: Sábado e Domingo na mesma página
+                    const containerFrente = renderPageContainer(
+                        <div className="flex flex-col h-full">
+                            <div className="flex-1 relative overflow-visible">
+                                <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
+                            </div>
+                            <div className="flex-1 relative overflow-visible">
+                                {daySun ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, daySun, false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
+                            </div>
                         </div>
-                        <div className="flex-1 relative overflow-visible">
-                            {effectiveDays[i+1] ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, effectiveDays[i+1], false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
+                    , `we-frente-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day) || getBadgeForDay(daySun));
+                    if (containerFrente) pages.push(containerFrente);
+
+                    // Verso correspondente do fim de semana com a mesma data/conteúdo
+                    const isEvenVerso = (pageCount + 1) % 2 === 0;
+                    const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                        ? config.elementsVerso
+                        : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
+                    const containerVerso = renderPageContainer(
+                        renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, config.customVerso ? 'verso' : 'standard'),
+                        `we-verso-${i}`,
+                        false,
+                        undefined,
+                        undefined,
+                        'daily',
+                        day.month,
+                        getBadgeForDay(day) || getBadgeForDay(daySun)
+                    );
+                    if (containerVerso) pages.push(containerVerso);
+                    i += (daySun ? 2 : 1);
+                    if (daySun && daySun.month !== day.month && !hasDividers && !hasIntroPagesData) {
+                        lastMonth = daySun.month;
+                    }
+                } else {
+                    const container = renderPageContainer(
+                        <div className="flex flex-col h-full">
+                            <div className="flex-1 relative overflow-visible">
+                                <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(satToRender, day, false, false, pageCount + 1, printW, printH / 2, 'saturday')}</div>
+                            </div>
+                            <div className="flex-1 relative overflow-visible">
+                                {daySun ? (<div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, daySun, false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>) : null}
+                            </div>
                         </div>
-                    </div>
-                , `we-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day) || getBadgeForDay(daySun));
-                if(container) pages.push(container);
-                i += 2;
-            } else {
-                const elementsToRender = (isEven && config.customVerso && config.elementsVerso)
-                    ? config.elementsVerso
-                    : (isEven ? getMirroredElements(config.elements) : config.elements);
-                const container = renderPageContainer(renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, 'standard'), day.date.toISOString(), false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
-                if(container) pages.push(container);
+                    , `we-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day) || getBadgeForDay(daySun));
+                    if(container) pages.push(container);
+                    i += (daySun ? 2 : 1);
+                    if (daySun && daySun.month !== day.month && !hasDividers && !hasIntroPagesData) {
+                        lastMonth = daySun.month;
+                    }
+                }
+            } else if (isSundayAlone) {
+                // Domingo isolado no início do mês/ano sem sábado anterior:
+                // Parte superior recebe o espaço complementar de transição e parte inferior recebe o Domingo
+                const elementsSun = config.elementsSunday || config.elements;
+                const sunToRender = isEven ? getMirroredElements(elementsSun) : elementsSun;
+
+                if (config.customVerso && config.versoAdvancesSequence === false) {
+                    const containerFrente = renderPageContainer(
+                        <div className="flex flex-col h-full">
+                            <div className="flex-1 relative overflow-visible">
+                                {renderWeekendTransitionHalf('Metas da Semana')}
+                            </div>
+                            <div className="flex-1 relative overflow-visible">
+                                <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, day, false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>
+                            </div>
+                        </div>
+                    , `sun-start-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
+                    if (containerFrente) pages.push(containerFrente);
+
+                    const isEvenVerso = (pageCount + 1) % 2 === 0;
+                    const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                        ? config.elementsVerso
+                        : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
+                    const containerVerso = renderPageContainer(
+                        renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, config.customVerso ? 'verso' : 'standard'),
+                        `sun-verso-${i}`,
+                        false,
+                        undefined,
+                        undefined,
+                        'daily',
+                        day.month,
+                        getBadgeForDay(day)
+                    );
+                    if (containerVerso) pages.push(containerVerso);
+                } else {
+                    const container = renderPageContainer(
+                        <div className="flex flex-col h-full">
+                            <div className="flex-1 relative overflow-visible">
+                                {renderWeekendTransitionHalf('Metas da Semana')}
+                            </div>
+                            <div className="flex-1 relative overflow-visible">
+                                <div className={`w-full h-full ${borderStyle} print:border-none`}>{renderTemplate(sunToRender, day, false, false, pageCount + 1, printW, printH / 2, 'sunday')}</div>
+                            </div>
+                        </div>
+                    , `sun-start-${i}`, false, undefined, undefined, 'daily', day.month, getBadgeForDay(day));
+                    if (container) pages.push(container);
+                }
                 i += 1;
+            } else {
+                // Dias de semana (Segunda a Sexta)
+                if (config.customVerso && config.versoAdvancesSequence === false) {
+                    // Frente
+                    const isEvenFrente = (pageCount + 1) % 2 === 0;
+                    const frenteElements = isEvenFrente ? getMirroredElements(config.elements) : config.elements;
+                    const containerFrente = renderPageContainer(
+                        renderTemplate(frenteElements, day, false, false, pageCount + 1, printW, printH, 'standard'),
+                        `frente-${day.date.toISOString()}`,
+                        false,
+                        undefined,
+                        undefined,
+                        'daily',
+                        day.month,
+                        getBadgeForDay(day)
+                    );
+                    if (containerFrente) pages.push(containerFrente);
+
+                    // Verso com mesma data
+                    const isEvenVerso = (pageCount + 1) % 2 === 0;
+                    const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                        ? config.elementsVerso
+                        : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
+                    const containerVerso = renderPageContainer(
+                        renderTemplate(versoElements, day, false, false, pageCount + 1, printW, printH, config.customVerso ? 'verso' : 'standard'),
+                        `verso-${day.date.toISOString()}`,
+                        false,
+                        undefined,
+                        undefined,
+                        'daily',
+                        day.month,
+                        getBadgeForDay(day)
+                    );
+                    if (containerVerso) pages.push(containerVerso);
+                    i += 1;
+                } else {
+                    const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso && config.elementsVerso.length > 0);
+                    const elementsToRender = isCustomVersoPage
+                        ? (config.elementsVerso as LayoutElement[])
+                        : (isEven ? getMirroredElements(config.elements) : config.elements);
+                    const container = renderPageContainer(
+                        renderTemplate(elementsToRender, day, false, false, pageCount + 1, printW, printH, isCustomVersoPage ? 'verso' : 'standard'),
+                        day.date.toISOString(),
+                        false,
+                        undefined,
+                        undefined,
+                        'daily',
+                        day.month,
+                        getBadgeForDay(day)
+                    );
+                    if(container) pages.push(container);
+                    i += 1;
+                }
             }
         }
     } else if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
@@ -11210,7 +11901,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                 const containerVerso = renderPageContainer(
                     <div className="w-full h-full relative overflow-visible">
-                        {renderTemplate(versoElements, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
+                        {renderTemplate(versoElements, null, false, false, pageCount + 1, printW, printH, config.customVerso ? 'verso' : 'standard', undefined, week)}
                     </div>,
                     `week-single-verso-${weekIndex}`,
                     false, undefined, undefined, 'daily', currentMonth
@@ -11218,12 +11909,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 if (containerVerso) pages.push(containerVerso);
             } else {
                 const isEven = (pageCount + 1) % 2 === 0;
-                const elementsToRender = (isEven && config.customVerso && config.elementsVerso && config.elementsVerso.length > 0)
-                    ? config.elementsVerso
+                const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso && config.elementsVerso.length > 0);
+                const elementsToRender = isCustomVersoPage
+                    ? (config.elementsVerso as LayoutElement[])
                     : (isEven ? getMirroredElements(config.elements) : config.elements);
                 const container = renderPageContainer(
                     <div className="w-full h-full relative overflow-visible">
-                        {renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, 'standard', undefined, week)}
+                        {renderTemplate(elementsToRender, null, false, false, pageCount + 1, printW, printH, isCustomVersoPage ? 'verso' : 'standard', undefined, week)}
                     </div>,
                     `week-single-${weekIndex}`,
                     false,
@@ -11880,7 +12572,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [
     generatedData.length,
     config.introPages.length,
-    config.monthlyIntroPages?.length,
+    config.monthlyIntroPages,
+    config.includeMonthlyIntroPages,
     config.includeMonthlyDividers,
     config.monthlyDividerStyle?.versoElements?.length,
     config.monthlyDividerStyle?.elements?.length,
@@ -13132,6 +13825,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           onToggleShowBadges={(show) => setConfig(prev => ({ ...prev, showSpecialDateBadges: show }))}
       />
 
+
       <FavoriteColorsModal
           isOpen={showFavoriteColorsModal}
           onClose={() => setShowFavoriteColorsModal(false)}
@@ -13944,8 +14638,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 ? 'O verso de cada dia/semana manterá a mesma data/conteúdo da frente.' 
                                                 : 'Cada página (frente e verso) avançará para o próximo dia/semana na sequência.'}
                                         </p>
+                                    </div>
+                                )}
 
-                                        <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                                {/* Transição & Páginas de Preenchimento do Projeto */}
+                                {config.projectType !== 'notebook' && config.projectType !== 'devotional' && (
+                                    <div className="mt-3 pt-3 border-t-2 border-gray-200 space-y-2.5">
+                                        <label className="flex items-center gap-2.5 cursor-pointer">
                                             <input 
                                                 type="checkbox" 
                                                 checked={!!config.disableSequenceSkip} 
@@ -13954,9 +14653,77 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             />
                                             <span className="text-xs font-black text-gray-950">Não inserir páginas de preenchimento</span>
                                         </label>
-                                        <p className="text-[10px] text-gray-800 font-semibold">
-                                            Desativa páginas em branco/preenchimento automáticas ao alinhar divisórias de mês.
+                                        <p className="text-[10px] text-gray-700 font-semibold">
+                                            Desativa páginas automáticas de alinhamento e transição entre meses e divisórias.
                                         </p>
+
+                                        {!config.disableSequenceSkip && (
+                                            <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-200 space-y-1.5">
+                                                <label className="block text-[11px] font-black text-gray-900 uppercase">
+                                                    Página de Preenchimento do Projeto
+                                                </label>
+                                                <select 
+                                                    value={config.fillerPageContent || 'blank'} 
+                                                    onChange={(e) => setConfig(prev => ({ ...prev, fillerPageContent: e.target.value as any }))}
+                                                    className="w-full text-xs p-2 border-2 border-indigo-300 rounded-lg bg-white shadow-2xs font-bold text-gray-950 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none cursor-pointer"
+                                                >
+                                                    <option value="blank">📄 Página em Branco (100% limpa)</option>
+                                                    <option value="notes">📝 Anotações do Período (Pautada)</option>
+                                                    <option value="habit_tracker">📊 Controle de Hábitos (Habit Tracker)</option>
+                                                    <option value="quote">✨ Frase Motivacional</option>
+                                                    {config.introPages && config.introPages.length > 0 && (
+                                                        <optgroup label="Usar Página Inicial">
+                                                            {config.introPages.map(page => (
+                                                                <option key={page.id} value={page.id}>Inicial: {page.name}</option>
+                                                            ))}
+                                                        </optgroup>
+                                                    )}
+                                                    {config.monthlyIntroPages && config.monthlyIntroPages.length > 0 && (
+                                                        <optgroup label="Usar Página Mensal">
+                                                            {config.monthlyIntroPages.map(page => (
+                                                                <option key={page.id} value={page.id}>Mensal: {page.name}</option>
+                                                            ))}
+                                                        </optgroup>
+                                                    )}
+                                                </select>
+                                                <p className="text-[10px] text-indigo-900 font-medium leading-tight">
+                                                    Define o conteúdo das páginas inseridas para alinhamento quando um mês inicia à direita ou após divisórias.
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setEditMode('filler');
+                                                        setActiveTab('editor');
+                                                        setSelectedIds([]);
+                                                    }}
+                                                    className="w-full mt-2 py-1.5 px-3 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                                                >
+                                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                                    <span>Personalizar no Canvas</span>
+                                                </button>
+                                                {config.fillerPageElements !== undefined && (
+                                                    <div className="flex items-center justify-between text-[10px] text-indigo-700 bg-indigo-100/60 p-1.5 rounded-md font-semibold mt-1">
+                                                        <span>✨ Layout Customizado ({config.fillerPageElements.length} elementos)</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (window.confirm('Deseja restaurar para o modelo base selecionado? As alterações manuais no canvas serão limpas.')) {
+                                                                    setConfig(prev => ({
+                                                                        ...prev,
+                                                                        fillerPageElements: undefined,
+                                                                        fillerPageBackground: undefined
+                                                                    }));
+                                                                    setToastMessage('Página de preenchimento restaurada para o padrão.');
+                                                                }
+                                                            }}
+                                                            className="text-rose-600 hover:underline font-bold cursor-pointer"
+                                                        >
+                                                            Restaurar
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -14060,11 +14827,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                     <div className="p-4 border-b border-[#eedad5]">
                         <div className="flex items-center mb-3 text-[#9f3d4a] font-bold text-xs uppercase tracking-wider"><Book className="w-4 h-4 mr-2 text-[#b84a56]" /><span>Estrutura</span></div>
-                        <div className="flex bg-[#fdeeed] p-1 rounded-2xl gap-1 mb-2 border border-[#eedad5]">
-                            <button onClick={() => { setEditMode('daily'); setSelectedIds([]); }} className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'daily' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}>
+                        <div className="grid grid-cols-3 bg-[#fdeeed] p-1 rounded-2xl gap-1 mb-2 border border-[#eedad5]">
+                            <button onClick={() => { setEditMode('daily'); setSelectedIds([]); }} className={`py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate text-center cursor-pointer ${editMode === 'daily' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}>
                                 {config.projectType === 'notebook' || config.projectType === 'devotional' ? 'Miolo' : (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal' ? 'Semanal' : 'Diário')}
                             </button>
-                            <button onClick={() => { setEditMode('intro'); setSelectedIds([]); if (!currentIntroPageId && config.introPages.length > 0) setCurrentIntroPageId(config.introPages[0].id); }} className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'intro' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}>Iniciais</button>
+                            <button onClick={() => { setEditMode('intro'); setSelectedIds([]); if (!currentIntroPageId && config.introPages.length > 0) setCurrentIntroPageId(config.introPages[0].id); }} className={`py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate text-center cursor-pointer ${editMode === 'intro' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}>Iniciais</button>
                             <button 
                                 onClick={() => { 
                                     setEditMode('monthly_intro'); 
@@ -14075,7 +14842,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         setCurrentMonthlyIntroPageId('');
                                     }
                                 }} 
-                                className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'monthly_intro' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
+                                className={`py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate text-center cursor-pointer ${editMode === 'monthly_intro' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                             >
                                 Mensais
                             </button>
@@ -14117,9 +14884,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         }));
                                     }
                                 }} 
-                                className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'divider' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
+                                className={`py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate text-center cursor-pointer ${editMode === 'divider' ? 'bg-white shadow-xs text-[#b84a56]' : (config.includeMonthlyDividers === false ? 'text-slate-400 opacity-70' : 'text-slate-600 hover:text-slate-900')}`}
                             >
                                 Divisórias
+                            </button>
+                            <button 
+                                onClick={() => { 
+                                    setEditMode('filler'); 
+                                    setSelectedIds([]); 
+                                }} 
+                                className={`py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate text-center cursor-pointer ${editMode === 'filler' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
+                                title="Página de Preenchimento / Transição do Projeto"
+                            >
+                                Preench.
                             </button>
                             <button 
                                 onClick={() => { 
@@ -14132,7 +14909,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         }));
                                     }
                                 }} 
-                                className={`flex-1 py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate cursor-pointer ${editMode === 'cover' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
+                                className={`py-1.5 px-1 text-[9px] font-black uppercase rounded-xl transition-all truncate text-center cursor-pointer ${editMode === 'cover' ? 'bg-white shadow-xs text-[#b84a56]' : 'text-slate-600 hover:text-slate-900'}`}
                                 title="Studio de Capas & Cartonagem"
                             >
                                 Capas ✨
@@ -14346,19 +15123,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 )}
                                 {editMode === 'divider' && (
                                     <div className="space-y-3">
-                                        {config.includeMonthlyDividers === false && (
-                                            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
-                                                <p className="font-semibold text-[11px] mb-1">Divisórias desativadas no projeto</p>
-                                                <p className="text-[10px] text-amber-750 mb-2 leading-tight">As divisórias de meses não serão inseridas no PDF final com esta opção desativada.</p>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setConfig(prev => ({ ...prev, includeMonthlyDividers: true }))}
-                                                    className="w-full py-1 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
-                                                >
-                                                    Ativar Divisórias no Projeto
-                                                </button>
+                                        <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-base">📑</span>
+                                                    <div>
+                                                        <div className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                                                            Divisórias Mensais
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-500 font-medium">
+                                                            {config.includeMonthlyDividers !== false ? 'Ativas no projeto e no PDF' : 'Desativadas no projeto'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={config.includeMonthlyDividers !== false}
+                                                        onChange={(e) => setConfig(prev => ({ ...prev, includeMonthlyDividers: e.target.checked }))}
+                                                        className="sr-only peer"
+                                                    />
+                                                    <div className="w-10 h-5 bg-gray-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#b84a56]"></div>
+                                                </label>
                                             </div>
-                                        )}
+                                            {config.includeMonthlyDividers === false ? (
+                                                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] leading-snug">
+                                                    ⚠️ <strong>Divisórias desativadas:</strong> As capas de divisórias de meses não serão inseridas no miolo nem no PDF.
+                                                </div>
+                                            ) : (
+                                                <div className="flex justify-between items-center text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                                                    <span>12 divisórias no miolo</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConfig(prev => ({ ...prev, includeMonthlyDividers: false }))}
+                                                        className="text-[#b84a56] hover:underline font-bold cursor-pointer"
+                                                    >
+                                                        Desativar divisórias
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
 
                                         <div className="flex gap-1.5">
                                             <button 
@@ -14533,6 +15337,148 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         })()}
                                     </div>
                                 )}
+                                {editMode === 'filler' && (
+                                    <div className="space-y-3">
+                                        <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-base">📄</span>
+                                                    <div>
+                                                        <div className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                                                            Página de Preenchimento
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-500 font-medium">
+                                                            {config.disableSequenceSkip ? 'Preenchimento desativado' : 'Inserida na transição de meses'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <label className="relative inline-flex items-center cursor-pointer" title="Ativar ou desativar inserção automática de páginas de preenchimento">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={!config.disableSequenceSkip}
+                                                        onChange={(e) => setConfig(prev => ({ ...prev, disableSequenceSkip: !e.target.checked }))}
+                                                        className="sr-only peer"
+                                                    />
+                                                    <div className="w-10 h-5 bg-gray-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#b84a56]"></div>
+                                                </label>
+                                            </div>
+                                            {config.disableSequenceSkip ? (
+                                                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] leading-snug">
+                                                    ⚠️ <strong>Preenchimento desativado:</strong> Nenhuma página extra de alinhamento será inserida entre meses.
+                                                </div>
+                                            ) : (
+                                                <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                                                    Garante que o miolo de cada mês inicie na página correta (direita/ímpar) após as divisórias.
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="flex gap-1.5">
+                                            <button 
+                                                type="button"
+                                                onClick={() => { 
+                                                    setPdfImportInitialDestination('filler_page'); 
+                                                    setPdfImportModalOpen(true); 
+                                                }}
+                                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                title="Importar layout de PDF para a Página de Preenchimento"
+                                            >
+                                                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                                <span>Importar PDF</span>
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                onClick={() => {
+                                                    setTemplateCategory('intro');
+                                                    setTemplateModal(true);
+                                                }}
+                                                className="flex items-center justify-center gap-1 py-1.5 px-2.5 bg-gray-50 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                title="Modelos Prontos"
+                                            >
+                                                <Layout className="w-3.5 h-3.5 text-gray-600" />
+                                                <span>Modelos</span>
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-1.5 bg-gray-50/70 p-2.5 rounded-xl border border-gray-200">
+                                            <label className="block text-[11px] font-black text-gray-900 uppercase">
+                                                Modelo Base de Conteúdo
+                                            </label>
+                                            <select 
+                                                value={config.fillerPageContent || 'blank'} 
+                                                onChange={(e) => {
+                                                    const val = e.target.value as any;
+                                                    setConfig(prev => ({
+                                                        ...prev,
+                                                        fillerPageContent: val,
+                                                        fillerPageElements: undefined,
+                                                        fillerPageBackground: undefined
+                                                    }));
+                                                    setSelectedIds([]);
+                                                }}
+                                                className="w-full text-xs p-2 border-2 border-indigo-300 rounded-lg bg-white shadow-2xs font-bold text-gray-950 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none cursor-pointer"
+                                            >
+                                                <option value="blank">📄 Página em Branco (100% limpa)</option>
+                                                <option value="notes">📝 Anotações do Período (Pautada)</option>
+                                                <option value="habit_tracker">📊 Controle de Hábitos (Habit Tracker)</option>
+                                                <option value="quote">✨ Frase Motivacional</option>
+                                                {config.introPages && config.introPages.length > 0 && (
+                                                    <optgroup label="Usar Página Inicial">
+                                                        {config.introPages.map(page => (
+                                                            <option key={page.id} value={page.id}>Inicial: {page.name}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                )}
+                                                {config.monthlyIntroPages && config.monthlyIntroPages.length > 0 && (
+                                                    <optgroup label="Usar Página Mensal">
+                                                        {config.monthlyIntroPages.map(page => (
+                                                            <option key={page.id} value={page.id}>Mensal: {page.name}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                )}
+                                            </select>
+                                        </div>
+
+                                        {config.fillerPageElements !== undefined ? (
+                                            <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+                                                <div className="flex items-center justify-between text-emerald-900">
+                                                    <div className="flex items-center gap-1.5 text-xs font-bold">
+                                                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                                                        <span>Layout Personalizado</span>
+                                                    </div>
+                                                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                                                        {config.fillerPageElements.length} elementos
+                                                    </span>
+                                                </div>
+                                                <p className="text-[10px] text-emerald-800 leading-tight">
+                                                    Esta página possui edições exclusivas feitas no canvas. Você pode adicionar ou mover qualquer elemento livremente.
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (window.confirm('Deseja restaurar para o modelo base selecionado? As alterações manuais no canvas serão limpas.')) {
+                                                            setConfig(prev => ({
+                                                                ...prev,
+                                                                fillerPageElements: undefined,
+                                                                fillerPageBackground: undefined
+                                                            }));
+                                                            setSelectedIds([]);
+                                                            setToastMessage('Página de preenchimento restaurada para o padrão.');
+                                                        }
+                                                    }}
+                                                    className="w-full py-1 px-2 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                                >
+                                                    <RotateCcw className="w-3 h-3 text-emerald-700" />
+                                                    <span>Restaurar Modelo Base</span>
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="p-2 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[10px] text-indigo-900 leading-relaxed">
+                                                💡 <strong>Edição no Canvas:</strong> Selecione elementos no menu abaixo ou clique no canvas para mover, redimensionar e customizar livremente como desejar!
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                 
                     <div className="p-4 border-t border-gray-100">
@@ -14576,6 +15522,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     </div>
                                 </div>
                                 <p className="text-[10px] text-indigo-700">Clique em qualquer elemento abaixo para adicioná-lo à página do verso.</p>
+                            </div>
+                        )}
+                        {editMode === 'filler' && (
+                            <div className="mb-3 p-2.5 bg-indigo-50/90 border border-indigo-200 rounded-lg text-xs text-indigo-900 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                                        <span className="font-bold">Página de Preenchimento</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setQuotesModalOpen(true)}
+                                            className="px-2 py-0.5 bg-white text-indigo-700 hover:bg-indigo-50 text-[10px] font-bold rounded border border-indigo-200 flex items-center gap-1 shadow-2xs cursor-pointer"
+                                            title="Gerenciar Frases Motivacionais"
+                                        >
+                                            <Sparkles className="w-3 h-3 text-amber-500" />
+                                            Frases
+                                        </button>
+                                        {config.fillerPageElements !== undefined && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (window.confirm('Restaurar página de preenchimento para o padrão?')) {
+                                                        pushHistory();
+                                                        setConfig(prev => ({
+                                                            ...prev,
+                                                            fillerPageElements: undefined,
+                                                            fillerPageBackground: undefined
+                                                        }));
+                                                        setSelectedIds([]);
+                                                    }
+                                                }}
+                                                className="px-1.5 py-0.5 bg-white text-gray-500 hover:text-gray-700 text-[10px] rounded border border-gray-200 hover:bg-gray-50 shadow-2xs cursor-pointer flex items-center gap-1"
+                                                title="Restaurar layout padrão"
+                                            >
+                                                <RotateCcw className="w-3 h-3" />
+                                                Restaurar
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-indigo-700">Clique em qualquer elemento abaixo para adicioná-lo à página de preenchimento.</p>
                             </div>
                         )}
                         {editMode === 'cover' ? (
@@ -14939,14 +15928,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                         {config.layoutType === '1_per_page_weekend_shared' && editMode === 'daily' && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100 flex-wrap gap-y-1.5">
-                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Fim de Semana:</span>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Visualização:</span>
                                 <button 
                                     type="button"
                                     onClick={() => { setEditorViewMode('standard'); setSelectedIds([]); }} 
                                     className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
-                                    <span>📅 Dias da Semana (Seg-Sex)</span>
+                                    <span>📅 Seg-Sex {config.customVerso ? '(Frente)' : ''}</span>
                                 </button>
+                                {config.customVerso && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => { setEditorViewMode('verso'); setSelectedIds([]); }} 
+                                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'verso' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
+                                    >
+                                        <span>🔄 Verso</span>
+                                    </button>
+                                )}
                                 <button 
                                     type="button"
                                     onClick={() => { setEditorViewMode('saturday'); setSelectedIds([]); }} 
@@ -14961,28 +15959,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 >
                                     <span>⬇️ Domingo (Inferior)</span>
                                 </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => { setEditorViewMode('weekend_transition'); setSelectedIds([]); }} 
+                                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'weekend_transition' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    <span>🧩 Espaço Entre Meses</span>
+                                </button>
 
                                 <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block" />
 
-                                <button
-                                    type="button"
-                                    title="Copiar layout inferior (Domingo) e colar substituindo o layout superior (Sábado)"
-                                    onClick={copyWeekendBottomToTop}
-                                    className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                                >
-                                    <icons.ArrowUpToLine className="w-3.5 h-3.5 text-indigo-600" />
-                                    <span>Copiar Inferior (Dom) no Superior (Sáb)</span>
-                                </button>
-
-                                <button
-                                    type="button"
-                                    title="Copiar layout superior (Sábado) e colar substituindo o layout inferior (Domingo)"
-                                    onClick={copyWeekendTopToBottom}
-                                    className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                                >
-                                    <icons.ArrowDownToLine className="w-3.5 h-3.5 text-slate-500" />
-                                    <span>Copiar Superior (Sáb) no Inferior (Dom)</span>
-                                </button>
+                                {editorViewMode === 'weekend_transition' ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            title="Copiar layout do Sábado para o Espaço Entre Meses"
+                                            onClick={copySaturdayToTransition}
+                                            className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                        >
+                                            <icons.ArrowDownToLine className="w-3.5 h-3.5 text-slate-500" />
+                                            <span>Copiar Sábado no Espaço</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            title="Restaurar modelo padrão do Espaço Entre Meses"
+                                            onClick={restoreDefaultTransition}
+                                            className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                        >
+                                            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                                            <span>Restaurar Padrão</span>
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button
+                                            type="button"
+                                            title="Copiar layout inferior (Domingo) e colar substituindo o layout superior (Sábado)"
+                                            onClick={copyWeekendBottomToTop}
+                                            className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                        >
+                                            <icons.ArrowUpToLine className="w-3.5 h-3.5 text-indigo-600" />
+                                            <span>Copiar Inferior no Superior</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            title="Copiar layout superior (Sábado) e colar substituindo o layout inferior (Domingo)"
+                                            onClick={copyWeekendTopToBottom}
+                                            className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                        >
+                                            <icons.ArrowDownToLine className="w-3.5 h-3.5 text-slate-500" />
+                                            <span>Copiar Superior no Inferior</span>
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         )}
 
@@ -15283,17 +16312,69 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
-                        {editMode === 'daily' && config.customVerso && !config.layoutType.startsWith('weekly') && (
+                        {editMode === 'filler' && (
+                            <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100 flex-wrap gap-y-1">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Página de Preenchimento:</span>
+                                <span className="text-xs font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-md border border-indigo-200">
+                                    {config.fillerPageElements !== undefined ? '✨ Layout Customizado' : `Padrão: ${config.fillerPageContent === 'notes' ? 'Anotações' : config.fillerPageContent === 'habit_tracker' ? 'Hábitos' : config.fillerPageContent === 'quote' ? 'Frase' : config.fillerPageContent === 'blank' || !config.fillerPageContent ? 'Em Branco' : 'Página Importada'}`}
+                                </span>
+                                <div className="h-4 w-px bg-gray-200 mx-1 hidden sm:block"></div>
+                                <button
+                                    onClick={() => {
+                                        setPdfImportInitialDestination('filler_page');
+                                        setPdfImportModalOpen(true);
+                                    }}
+                                    className="px-2.5 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-indigo-600 hover:bg-indigo-50 border border-indigo-200 shadow-2xs"
+                                    title="Importar layout de PDF para a Página de Preenchimento"
+                                >
+                                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Importar PDF</span>
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setTemplateCategory('intro');
+                                        setTemplateModal(true);
+                                    }}
+                                    className="px-2.5 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-gray-700 hover:bg-gray-100 border border-gray-200 shadow-2xs"
+                                    title="Carregar Modelo Pronto"
+                                >
+                                    <Layout className="w-3.5 h-3.5 text-gray-600" />
+                                    <span>Modelos</span>
+                                </button>
+                                {config.fillerPageElements !== undefined && (
+                                    <button
+                                        onClick={() => {
+                                            if (window.confirm('Deseja restaurar esta página para o modelo padrão automático? Todas as edições manuais deste preenchimento serão limpas.')) {
+                                                setConfig(prev => ({
+                                                    ...prev,
+                                                    fillerPageElements: undefined,
+                                                    fillerPageBackground: undefined
+                                                }));
+                                                setSelectedIds([]);
+                                                setToastMessage('Página de preenchimento restaurada para o padrão.');
+                                            }
+                                        }}
+                                        className="px-2.5 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-rose-600 hover:bg-rose-50 border border-rose-200 shadow-2xs ml-auto"
+                                        title="Restaurar para o modelo automático"
+                                    >
+                                        <RotateCcw className="w-3 h-3 text-rose-600" />
+                                        <span>Restaurar Base</span>
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {editMode === 'daily' && config.customVerso && config.layoutType !== 'weekly_vertical' && config.layoutType !== 'weekly_horizontal' && config.layoutType !== '1_per_page_weekend_shared' && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Editando Página do Miolo:</span>
                                 <button 
-                                    onClick={() => setEditorViewMode('standard')} 
+                                    onClick={() => { setEditorViewMode('standard'); setSelectedIds([]); }} 
                                     className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'standard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
                                     <span>Frente (Ímpar)</span>
                                 </button>
                                 <button 
-                                    onClick={() => setEditorViewMode('verso')} 
+                                    onClick={() => { setEditorViewMode('verso'); setSelectedIds([]); }} 
                                     className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${editorViewMode === 'verso' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
                                 >
                                     <span>Verso / Costas (Par)</span>
@@ -15324,7 +16405,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             </div>
                         )}
 
-                        {editMode === 'daily' && config.mirrorEvenPages && !config.customVerso && !config.layoutType.startsWith('weekly') && (
+                        {editMode === 'daily' && config.mirrorEvenPages && !config.customVerso && config.layoutType !== 'weekly_vertical' && config.layoutType !== 'weekly_horizontal' && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Visualização do Miolo:</span>
                                 <button 
@@ -21808,7 +22889,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     </div>
                 )}
                 {activeTab === 'preview' && (
-                    <div className="flex-1 w-full overflow-auto p-8 custom-scrollbar bg-[#2b2224]">
+                    <div id="preview-scroll-container" className="flex-1 w-full overflow-auto p-4 sm:p-6 md:p-8 custom-scrollbar bg-[#2b2224]" style={{ overflowAnchor: 'none' }}>
                         <div className="max-w-[95vw] md:max-w-6xl mx-auto">
                             <div id="print-area">
                                 {generatedData.length === 0 ? (<div className="text-center py-20 text-white">Carregando visualização...</div>) : (

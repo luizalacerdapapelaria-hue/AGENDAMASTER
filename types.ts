@@ -568,6 +568,13 @@ export interface CustomTemplateItem extends IntroPage {
     elementsWeeklyRight?: LayoutElement[];
     elementsWeeklyVersoLeft?: LayoutElement[];
     elementsWeeklyVersoRight?: LayoutElement[];
+    elementsTop?: LayoutElement[];
+    elementsBottom?: LayoutElement[];
+    elementsSaturday?: LayoutElement[];
+    elementsSunday?: LayoutElement[];
+    elementsWeekendTransition?: LayoutElement[];
+    weekendTransitionContentType?: string;
+    customVerso?: boolean;
     projectType?: ProjectType;
     isPermanent?: boolean;
     createdAt?: string;
@@ -606,6 +613,24 @@ export interface MonthlyDividerStyle {
   versoElements?: LayoutElement[];
 }
 
+export type WeekendTransitionContentType = 'notes' | 'checklist' | 'habits' | 'grid' | 'quote' | 'blank' | 'custom';
+
+export interface WeekendTransitionConfig {
+  type?: WeekendTransitionContentType;
+  title?: string; // Título exibido no cabeçalho (ex: 'Anotações do Fim de Semana', 'Fechamento do Mês', 'Metas da Semana')
+  titleColor?: string; // Cor do título
+  linesCount?: number; // Quantidade de linhas (padrão: 6)
+  lineStyle?: 'dashed' | 'solid' | 'dotted'; // Estilo da linha
+  lineColor?: string; // Cor da linha (padrão: '#e5e7eb')
+  backgroundColor?: string; // Cor de fundo do bloco
+  checkboxStyle?: 'square' | 'round' | 'circle'; // Estilo do checkbox para checklist
+  customQuoteText?: string; // Frase personalizada quando tipo for 'quote'
+  quoteAuthor?: string; // Autor da frase quando tipo for 'quote'
+  showBorder?: boolean; // Se exibe borda ao redor do bloco
+  borderColor?: string; // Cor da borda
+  elements?: LayoutElement[]; // Elementos visuais totalmente personalizáveis se o usuário quiser editar livremente no canvas
+}
+
 export interface AgendaConfig {
   name?: string; // Nome do projeto
   projectType?: ProjectType; // Novo: Tipo de projeto
@@ -627,6 +652,8 @@ export interface AgendaConfig {
   includeMonthlyDividers?: boolean; // Nova: incluir divisórias mensais
   includeMonthlyIntroPages?: boolean; // Nova: incluir páginas mensais
   fillerPageContent?: 'notes' | 'habit_tracker' | 'quote' | 'blank' | string; // Conteúdo da página de transição (ou ID de introPage)
+  fillerPageElements?: LayoutElement[]; // Elementos personalizados para a página de transição / preenchimento no canvas
+  fillerPageBackground?: BackgroundConfig; // Plano de fundo personalizado para a página de transição
   monthlyDividerVersoContent?: 'blank' | 'notes' | 'habit_tracker' | 'quote' | 'monthly_intro_first' | string; // Verso das divisórias de meses
   monthlyDividerStyle?: MonthlyDividerStyle;
   margins: PageMargins;
@@ -642,10 +669,15 @@ export interface AgendaConfig {
   customVerso?: boolean; // Se true, permite personalizar o verso com um layout diferente da frente
   versoAdvancesSequence?: boolean; // Se false, mantém a mesma data da frente no verso (não pula a sequência de dias)
   disableSequenceSkip?: boolean; // Se true, não insere páginas em branco/preenchimento para alinhar sequência
+
   elements: LayoutElement[]; // Lista de elementos que compõem o template do dia / frente (MIOLO)
   elementsVerso?: LayoutElement[]; // Template específico para o Verso / Página Par (opcional)
   elementsSaturday?: LayoutElement[]; // Template específico para Sábado (opcional)
   elementsSunday?: LayoutElement[]; // Template específico para Domingo (opcional)
+  elementsWeekendTransition?: LayoutElement[]; // Template específico para o espaço complementar entre meses (com elementos do próprio sistema)
+  weekendTransitionContentType?: 'notes' | 'checklist' | 'habits' | 'grid' | 'quote' | 'blank' | 'custom' | string; // Modelo do espaço entre meses
+  weekendTransitionConfig?: WeekendTransitionConfig; // Configuração do bloco complementar quando fim de semana é dividido entre meses
+  splitWeekendAcrossMonths?: boolean; // Se true (padrão), divide o fim de semana em páginas separadas quando Sábado e Domingo caem em meses diferentes
   elementsTop?: LayoutElement[]; // Template específico para a parte superior (2 dias por página)
   elementsBottom?: LayoutElement[]; // Template específico para a parte inferior (2 dias por página)
   elementsWeeklyLeft?: LayoutElement[]; // Template para página esquerda do planner semanal (frente)
@@ -743,6 +775,7 @@ export type PdfImportDestination =
   | 'new_monthly_intro'  // Nova Página de Abertura Mensal
   | 'divider'            // Layout de Divisória Mensal (Frente / Capa)
   | 'divider_verso'      // Verso da Divisória Mensal
+  | 'filler_page'        // Página de Preenchimento / Transição do Projeto
   | 'replace'            // Substituir Página Atual
   | 'append'             // Adicionar à Página Atual
   | 'save_template'      // Salvar na Biblioteca de Modelos (Meus Modelos)

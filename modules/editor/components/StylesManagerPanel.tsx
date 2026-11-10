@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Palette,
   Type,
@@ -203,14 +203,25 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
     onToast?.(`Estilo de objeto "${objStyle.name}" aplicado em ${selectedElements.length} elemento(s)!`);
   };
 
+  const colorChangeRafRef = useRef<number | null>(null);
+  const pendingColorMapRef = useRef<Map<string, string>>(new Map());
+
   // ==================== COLOR STYLES HANDLERS ====================
   const handleColorChange = (id: string, newHex: string) => {
-    const nextColors = projectStyles.colorStyles.map(c =>
-      c.id === id ? { ...c, color: newHex } : c
-    );
-    updateStylesAndPropagate({
-      ...projectStyles,
-      colorStyles: nextColors,
+    pendingColorMapRef.current.set(id, newHex);
+    if (colorChangeRafRef.current) return;
+    colorChangeRafRef.current = requestAnimationFrame(() => {
+      colorChangeRafRef.current = null;
+      const updates = new Map<string, string>(pendingColorMapRef.current);
+      pendingColorMapRef.current.clear();
+      const nextColors = projectStyles.colorStyles.map(c => {
+        const hex = updates.get(c.id);
+        return (hex !== undefined) ? { ...c, color: hex } : c;
+      });
+      updateStylesAndPropagate({
+        ...projectStyles,
+        colorStyles: nextColors,
+      });
     });
   };
 
