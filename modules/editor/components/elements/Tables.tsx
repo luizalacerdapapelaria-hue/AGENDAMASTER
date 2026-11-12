@@ -239,11 +239,16 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const headerBgColor = (style.table as any)?.headerBackgroundColor || '#f3f4f6';
     const headerTxtColor = (style.table as any)?.headerTextColor;
     const borderColor = style.table?.borderColor || '#e5e7eb';
-    const borderWidth = style.table?.borderWidth !== undefined ? style.table.borderWidth : (style.borderWidth !== undefined ? style.borderWidth : 1);
-    const outerBorderWidth = style.table?.outerBorderWidth !== undefined ? style.table.outerBorderWidth : borderWidth;
-    const insideBorderWidth = style.table?.insideBorderWidth !== undefined ? style.table.insideBorderWidth : borderWidth;
+    const rawBorderWidth = Number(style.table?.borderWidth !== undefined ? style.table.borderWidth : (style.borderWidth !== undefined ? style.borderWidth : 1)) || 1;
+    const rawOuterWidth = style.table?.outerBorderWidth !== undefined ? Number(style.table.outerBorderWidth) : rawBorderWidth;
+    const rawInsideWidth = style.table?.insideBorderWidth !== undefined ? Number(style.table.insideBorderWidth) : rawBorderWidth;
+
+    // Clean values (integer or 0.5 steps) to prevent subpixel rasterization snapping where some lines become 2px and others 1px
+    const outerBorderWidth = Math.max(0, rawOuterWidth <= 0 ? 0 : (rawOuterWidth <= 1 ? 1 : Math.round(rawOuterWidth * 2) / 2));
+    const insideBorderWidth = Math.max(0, rawInsideWidth <= 0 ? 0 : (rawInsideWidth <= 1 ? 1 : Math.round(rawInsideWidth * 2) / 2));
     const borderStyle = style.table?.borderStyle || 'solid';
     const borderRadius = style.table?.borderRadius || 0;
+    const hasOuterContainerBorder = borderRadius > 0;
 
     const borders = style.table?.borders || {
         top: true,
@@ -365,12 +370,12 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             let cellBorderLeft: string | undefined = undefined;
                             let cellBorderRight: string | undefined = undefined;
 
-                            if (isFirstRow && borders.top && outerBorderWidth > 0) {
+                            if (isFirstRow && borders.top && outerBorderWidth > 0 && !hasOuterContainerBorder) {
                                 cellBorderTop = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
                             }
 
                             if (isLastRow) {
-                                if (borders.bottom && outerBorderWidth > 0) {
+                                if (borders.bottom && outerBorderWidth > 0 && !hasOuterContainerBorder) {
                                     cellBorderBottom = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
                                 }
                             } else if (hasHeader && isFirstRow) {
@@ -383,12 +388,12 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                                 }
                             }
 
-                            if (isFirstCol && borders.left && outerBorderWidth > 0) {
+                            if (isFirstCol && borders.left && outerBorderWidth > 0 && !hasOuterContainerBorder) {
                                 cellBorderLeft = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
                             }
 
                             if (isLastCol) {
-                                if (borders.right && outerBorderWidth > 0) {
+                                if (borders.right && outerBorderWidth > 0 && !hasOuterContainerBorder) {
                                     cellBorderRight = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
                                 }
                             } else {

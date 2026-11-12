@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   printToPDF: (options) => ipcRenderer.invoke('print-to-pdf', options),
   savePDFBase64: (base64String, defaultName) => ipcRenderer.invoke('save-pdf-base64', { base64String, defaultName }),
+  saveFileBase64: (base64String, defaultName, fileType) => ipcRenderer.invoke('save-file-base64', { base64String, defaultName, fileType }),
   getSystemFonts: () => ipcRenderer.invoke('get-system-fonts'),
   readFontFile: (filePath) => ipcRenderer.invoke('read-font-file', filePath),
   pickSystemFontFile: () => ipcRenderer.invoke('pick-system-font-file'),

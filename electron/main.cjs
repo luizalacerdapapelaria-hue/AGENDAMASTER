@@ -105,6 +105,38 @@ ipcMain.handle('save-pdf-base64', async (event, { base64String, defaultName }) =
   }
 });
 
+// IPC para salvar qualquer arquivo (imagens PNG/JPEG, vídeos MP4) em Base64 nativamente
+ipcMain.handle('save-file-base64', async (event, { base64String, defaultName, fileType }) => {
+  const webContents = event.sender;
+  const win = BrowserWindow.fromWebContents(webContents);
+  
+  try {
+    const buffer = Buffer.from(base64String, 'base64');
+    const ext = path.extname(defaultName || '').replace('.', '').toLowerCase() || 
+      (fileType?.includes('video') ? 'mp4' : 'png');
+    
+    const filters = ext === 'mp4' 
+      ? [{ name: 'Vídeo MP4', extensions: ['mp4'] }, { name: 'Todos os Arquivos', extensions: ['*'] }]
+      : [{ name: 'Imagens (PNG, JPEG)', extensions: ['png', 'jpg', 'jpeg'] }, { name: 'Todos os Arquivos', extensions: ['*'] }];
+
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: 'Salvar Arquivo',
+      defaultPath: defaultName || `Mockup.${ext}`,
+      filters
+    });
+
+    if (filePath) {
+      await fs.promises.writeFile(filePath, buffer);
+      shell.openPath(filePath); // Abrir arquivo automaticamente após salvar
+      return { success: true, filePath };
+    }
+    return { success: false, cancelled: true };
+  } catch (err) {
+    console.error('Erro ao salvar arquivo base64 no Electron:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
 // IPC para buscar lista de fontes instaladas no sistema operacional (Windows, macOS, Linux)
 ipcMain.handle('get-system-fonts', async () => {
   const fontDirs = [];

@@ -28,6 +28,7 @@ export const ImageElement: React.FC<BaseElementProps> = ({ element, isEditor, pa
       <img 
         src={imageSrc} 
         alt={element.name}
+        crossOrigin="anonymous"
         referrerPolicy="no-referrer"
         className="max-w-full max-h-full object-contain"
       />

@@ -919,6 +919,7 @@ const PageBackground: React.FC<PageBackgroundProps> = ({ bg, style, pageNumber }
         <img 
           src={imageUrl} 
           alt="Page Background" 
+          crossOrigin="anonymous"
           style={{ 
               width: '100%', 
               height: '100%', 
@@ -2465,10 +2466,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const pos = options.positionPreset === 'top'
       ? { x: 10, y: 6, w: 80, h: 5 }
       : options.positionPreset === 'card'
-      ? { x: 12, y: 72, w: 76, h: 14 }
+      ? { x: 12, y: 72, w: 76, h: 10 }
       : { x: 10, y: 92, w: 80, h: 6 };
-
-    const stylePreset = options.stylePreset || (options.positionPreset === 'card' ? 'divider_card' : 'quotation_marks');
 
     const getQuoteCategoryLabel = (cat: QuoteCategory) => {
       switch (cat) {
@@ -2485,17 +2484,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
     };
 
+    const initialText = options.fixedText || getRandomQuote(options.category, config.quoteCustomList || customQuotes);
+
     const newElement: LayoutElement = {
       id: `quote_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: getQuoteCategoryLabel(options.category),
       type: 'quote',
+      content: initialText,
       x: pos.x,
       y: pos.y,
       w: pos.w,
       h: pos.h,
       zIndex: 20,
       style: {
-        fontSize: options.positionPreset === 'card' ? 11 : 9.5,
+        fontSize: 10,
         fontFamily: 'Inter',
         fontWeight: 'normal',
         fontStyle: 'italic',
@@ -2504,10 +2506,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         color: '#4a3a37',
         backgroundColor: 'transparent',
         quoteCategory: options.category,
-        quoteDisplayMode: options.fixedText ? 'fixed' : 'daily_rotating',
-        quoteFixedText: options.fixedText,
-        quoteStylePreset: stylePreset,
-        showQuoteMarks: stylePreset === 'quotation_marks'
+        quoteFixedText: initialText
       }
     };
 
@@ -6606,9 +6605,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newElement.style.textAlign = (styleOverride as any)?.textAlign || 'center'; 
             newElement.style.borderWidth = 0; 
             newElement.style.quoteCategory = (styleOverride as any)?.quoteCategory || config.quoteCategory || 'feminine_strength';
-            newElement.style.quoteDisplayMode = (styleOverride as any)?.quoteDisplayMode || 'daily_rotating';
-            newElement.style.quoteStylePreset = (styleOverride as any)?.quoteStylePreset || 'quotation_marks';
-            newElement.style.showQuoteMarks = (styleOverride as any)?.showQuoteMarks ?? true;
+            const cat = newElement.style.quoteCategory as QuoteCategory;
+            const quoteText = (styleOverride as any)?.quoteFixedText || getRandomQuote(cat, config.quoteCustomList || customQuotes);
+            newElement.content = quoteText;
+            newElement.style.quoteFixedText = quoteText;
             newElement.name = (styleOverride as any)?.name || 'Frase Motivacional';
             setConfig(prev => ({ ...prev, includeQuotes: true }));
         }
@@ -9882,57 +9882,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 </button>
                             </div>
                         )}
-                        {el.type === 'quote' && (
-                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1 z-50 whitespace-nowrap select-none bg-white/95 backdrop-blur-xs p-0.5 px-2 rounded-full border border-[#eedad5] shadow-md">
-                                <span className="text-[#b84a56] text-[9.5px] font-black flex items-center gap-1 mr-1">
-                                    <Sparkles className="w-2.5 h-2.5 text-[#b84a56]" /> Frase
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const cur = typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10);
-                                        const next = Math.max(4, Math.round((cur - 0.5) * 10) / 10);
-                                        updateElementStyle(el.id, { fontSize: next });
-                                    }}
-                                    className="w-5 h-5 rounded-md bg-[#fff5f5] hover:bg-[#fdeeed] text-[#b84a56] font-black text-xs flex items-center justify-center cursor-pointer transition-colors active:scale-90"
-                                    title="Diminuir tamanho da letra (A-)"
-                                >
-                                    A-
-                                </button>
-                                <span className="text-[10px] font-mono font-bold text-slate-700 min-w-[28px] text-center">
-                                    {typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10)}pt
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const cur = typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10);
-                                        const next = Math.min(72, Math.round((cur + 0.5) * 10) / 10);
-                                        updateElementStyle(el.id, { fontSize: next });
-                                    }}
-                                    className="w-5 h-5 rounded-md bg-[#fff5f5] hover:bg-[#fdeeed] text-[#b84a56] font-black text-xs flex items-center justify-center cursor-pointer transition-colors active:scale-90"
-                                    title="Aumentar tamanho da letra (A+)"
-                                >
-                                    A+
-                                </button>
-                                <div className="w-px h-3 bg-[#eedad5] mx-0.5" />
-                                <button
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const cur = typeof el.style.fontSize === 'number' ? el.style.fontSize : (parseFloat(el.style.fontSize) || 10);
-                                        const presets = [8.5, 10, 11.5, 13, 16];
-                                        const next = presets.find(p => p > cur) || presets[0];
-                                        updateElementStyle(el.id, { fontSize: next });
-                                    }}
-                                    className="text-[9px] font-bold text-slate-500 hover:text-[#b84a56] px-1 py-0.5 rounded cursor-pointer"
-                                    title="Alternar entre tamanhos pré-definidos (8.5pt, 10pt, 11.5pt, 13pt, 16pt)"
-                                >
-                                    Preset
-                                </button>
-                            </div>
-                        )}
+
                         {(() => {
                             const isDateElem = ['month_name', 'day_name', 'day_number', 'month_number'].includes(el.type) ||
                                 (el.type === 'date_placeholder' && ['month_name', 'day_name', 'day_number', 'month_number'].includes(el.style?.variant || ''));
@@ -12845,6 +12795,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
+          *, *::before, *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
           body * { 
             visibility: hidden !important; 
           }
@@ -12866,8 +12820,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           .print-break-page {
             page-break-after: always !important;
             break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
             width: ${PAGE_WIDTH_MM}mm !important;
             height: ${PAGE_HEIGHT_MM}mm !important;
+            max-height: ${PAGE_HEIGHT_MM}mm !important;
             margin: 0 !important;
             box-shadow: none !important;
             border: none !important;
@@ -13091,13 +13048,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                               <li className="flex items-start gap-2.5">
                                                   <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
                                                   <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
-                                                      Marque/Ative a opção <strong>"Gráficos de Fundo"</strong> (Background Graphics) nas configurações de cabeçalhos/rodapés de impressão.
+                                                      Marque/Ative a opção <strong>"Gráficos de segundo plano"</strong> nas configurações de impressão (se desmarcada, cores e linhas de tabelas somem no PDF).
                                                   </p>
                                               </li>
                                               <li className="flex items-start gap-2.5">
                                                   <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
                                                   <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
-                                                      Defina as Margens como <strong>"Nenhuma"</strong> (None) para preservar o alinhamento exato de refile e sangria.
+                                                      Defina as Margens como <strong>"Nenhuma"</strong> (None). <em>(Se deixar em "Padrão", o navegador encolhe a folha e pode criar páginas em branco extras no PDF!)</em>
                                                   </p>
                                               </li>
                                           </ul>
@@ -14642,90 +14599,111 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 )}
 
                                 {/* Transição & Páginas de Preenchimento do Projeto */}
-                                {config.projectType !== 'notebook' && config.projectType !== 'devotional' && (
-                                    <div className="mt-3 pt-3 border-t-2 border-gray-200 space-y-2.5">
-                                        <label className="flex items-center gap-2.5 cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={!!config.disableSequenceSkip} 
-                                                onChange={(e) => setConfig({ ...config, disableSequenceSkip: e.target.checked })} 
-                                                className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-2 border-gray-400" 
-                                            />
-                                            <span className="text-xs font-black text-gray-950">Não inserir páginas de preenchimento</span>
-                                        </label>
-                                        <p className="text-[10px] text-gray-700 font-semibold">
-                                            Desativa páginas automáticas de alinhamento e transição entre meses e divisórias.
-                                        </p>
-
-                                        {!config.disableSequenceSkip && (
-                                            <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-200 space-y-1.5">
-                                                <label className="block text-[11px] font-black text-gray-900 uppercase">
-                                                    Página de Preenchimento do Projeto
+                                {config.projectType !== 'notebook' && config.projectType !== 'devotional' && (() => {
+                                    const isFillerActive = !config.disableSequenceSkip;
+                                    return (
+                                        <div className="mt-3 pt-3 border-t-2 border-gray-200">
+                                            <div className={`p-3 rounded-2xl border transition-all duration-200 ${
+                                                isFillerActive 
+                                                    ? 'bg-gradient-to-b from-indigo-50/80 via-white to-indigo-50/30 border-indigo-200 shadow-2xs' 
+                                                    : 'bg-gray-50/70 border-gray-200 hover:border-gray-300'
+                                            }`}>
+                                                <label className="flex items-center justify-between gap-2.5 cursor-pointer select-none">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                                                            isFillerActive ? 'bg-indigo-600 text-white shadow-2xs' : 'bg-gray-200 text-gray-500'
+                                                        }`}>
+                                                            <FileText className="w-3.5 h-3.5" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <span className="text-xs font-black text-gray-950 block leading-tight">
+                                                                Páginas de Preenchimento
+                                                            </span>
+                                                            <span className="text-[10px] text-gray-500 font-medium block leading-tight">
+                                                                {isFillerActive ? 'Alinhamento automático ativo' : 'Desativado'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={isFillerActive} 
+                                                        onChange={(e) => setConfig(prev => ({ ...prev, disableSequenceSkip: !e.target.checked }))} 
+                                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-2 border-gray-400 cursor-pointer accent-indigo-600" 
+                                                    />
                                                 </label>
-                                                <select 
-                                                    value={config.fillerPageContent || 'blank'} 
-                                                    onChange={(e) => setConfig(prev => ({ ...prev, fillerPageContent: e.target.value as any }))}
-                                                    className="w-full text-xs p-2 border-2 border-indigo-300 rounded-lg bg-white shadow-2xs font-bold text-gray-950 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none cursor-pointer"
-                                                >
-                                                    <option value="blank">📄 Página em Branco (100% limpa)</option>
-                                                    <option value="notes">📝 Anotações do Período (Pautada)</option>
-                                                    <option value="habit_tracker">📊 Controle de Hábitos (Habit Tracker)</option>
-                                                    <option value="quote">✨ Frase Motivacional</option>
-                                                    {config.introPages && config.introPages.length > 0 && (
-                                                        <optgroup label="Usar Página Inicial">
-                                                            {config.introPages.map(page => (
-                                                                <option key={page.id} value={page.id}>Inicial: {page.name}</option>
-                                                            ))}
-                                                        </optgroup>
-                                                    )}
-                                                    {config.monthlyIntroPages && config.monthlyIntroPages.length > 0 && (
-                                                        <optgroup label="Usar Página Mensal">
-                                                            {config.monthlyIntroPages.map(page => (
-                                                                <option key={page.id} value={page.id}>Mensal: {page.name}</option>
-                                                            ))}
-                                                        </optgroup>
-                                                    )}
-                                                </select>
-                                                <p className="text-[10px] text-indigo-900 font-medium leading-tight">
-                                                    Define o conteúdo das páginas inseridas para alinhamento quando um mês inicia à direita ou após divisórias.
-                                                </p>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setEditMode('filler');
-                                                        setActiveTab('editor');
-                                                        setSelectedIds([]);
-                                                    }}
-                                                    className="w-full mt-2 py-1.5 px-3 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
-                                                >
-                                                    <Sparkles className="w-3.5 h-3.5 text-white" />
-                                                    <span>Personalizar no Canvas</span>
-                                                </button>
-                                                {config.fillerPageElements !== undefined && (
-                                                    <div className="flex items-center justify-between text-[10px] text-indigo-700 bg-indigo-100/60 p-1.5 rounded-md font-semibold mt-1">
-                                                        <span>✨ Layout Customizado ({config.fillerPageElements.length} elementos)</span>
+
+                                                {/* Exibição condicional limpa: aparece APENAS quando a opção estiver ativada */}
+                                                {isFillerActive && (
+                                                    <div className="mt-2.5 pt-2.5 border-t border-indigo-100 space-y-2">
+                                                        <label className="block text-[10px] font-black text-indigo-950 uppercase tracking-wider">
+                                                            Conteúdo da Página
+                                                        </label>
+                                                        <select 
+                                                            value={config.fillerPageContent || 'blank'} 
+                                                            onChange={(e) => setConfig(prev => ({ ...prev, fillerPageContent: e.target.value as any }))}
+                                                            className="w-full text-xs p-2 border-2 border-indigo-200 rounded-xl bg-white shadow-2xs font-bold text-gray-950 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none cursor-pointer"
+                                                        >
+                                                            <option value="blank">📄 Página em Branco (100% limpa)</option>
+                                                            <option value="notes">📝 Anotações do Período (Pautada)</option>
+                                                            <option value="habit_tracker">📊 Controle de Hábitos (Habit Tracker)</option>
+                                                            <option value="quote">✨ Frase Motivacional</option>
+                                                            {config.introPages && config.introPages.length > 0 && (
+                                                                <optgroup label="Usar Página Inicial">
+                                                                    {config.introPages.map(page => (
+                                                                        <option key={page.id} value={page.id}>Inicial: {page.name}</option>
+                                                                    ))}
+                                                                </optgroup>
+                                                            )}
+                                                            {config.monthlyIntroPages && config.monthlyIntroPages.length > 0 && (
+                                                                <optgroup label="Usar Página Mensal">
+                                                                    {config.monthlyIntroPages.map(page => (
+                                                                        <option key={page.id} value={page.id}>Mensal: {page.name}</option>
+                                                                    ))}
+                                                                </optgroup>
+                                                            )}
+                                                        </select>
+                                                        <p className="text-[10px] text-gray-600 leading-tight">
+                                                            Define o conteúdo das páginas inseridas para alinhamento quando um mês inicia à direita ou após divisórias.
+                                                        </p>
                                                         <button
                                                             type="button"
                                                             onClick={() => {
-                                                                if (window.confirm('Deseja restaurar para o modelo base selecionado? As alterações manuais no canvas serão limpas.')) {
-                                                                    setConfig(prev => ({
-                                                                        ...prev,
-                                                                        fillerPageElements: undefined,
-                                                                        fillerPageBackground: undefined
-                                                                    }));
-                                                                    setToastMessage('Página de preenchimento restaurada para o padrão.');
-                                                                }
+                                                                setEditMode('filler');
+                                                                setActiveTab('editor');
+                                                                setSelectedIds([]);
                                                             }}
-                                                            className="text-rose-600 hover:underline font-bold cursor-pointer"
+                                                            className="w-full py-1.5 px-3 bg-[#b84a56] hover:bg-[#9f3d4a] text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
                                                         >
-                                                            Restaurar
+                                                            <Sparkles className="w-3.5 h-3.5 text-white" />
+                                                            <span>Personalizar no Canvas</span>
                                                         </button>
+                                                        {config.fillerPageElements !== undefined && (
+                                                            <div className="flex items-center justify-between text-[10px] text-indigo-700 bg-indigo-100/60 p-2 rounded-lg font-semibold">
+                                                                <span>✨ Layout Customizado ({config.fillerPageElements.length} elementos)</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (window.confirm('Deseja restaurar para o modelo base selecionado? As alterações manuais no canvas serão limpas.')) {
+                                                                            setConfig(prev => ({
+                                                                                ...prev,
+                                                                                fillerPageElements: undefined,
+                                                                                fillerPageBackground: undefined
+                                                                            }));
+                                                                            setToastMessage('Página de preenchimento restaurada para o padrão.');
+                                                                        }
+                                                                    }}
+                                                                    className="text-rose-600 hover:underline font-bold cursor-pointer"
+                                                                >
+                                                                    Restaurar
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
-                                        )}
-                                    </div>
-                                )}
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             {(config.projectType === 'notebook' || config.projectType === 'devotional') && (
@@ -14747,77 +14725,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 </div>
                             )}
 
-                            {(hasVerseElement || hasQuoteElement) && (
+                            {hasVerseElement && (
                                 <div className="pt-3 border-t-2 border-gray-200 mt-3 text-left space-y-2.5">
-                                    {hasVerseElement && (
-                                        <div>
-                                            <label className="block text-[11px] font-black text-gray-900 uppercase mb-1.5 align-middle">Versículos das Páginas</label>
-                                            <div className="bg-indigo-50/70 rounded-xl p-3 border-2 border-indigo-200 flex flex-col gap-2">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs font-black text-gray-900">Fonte ativa:</span>
-                                                    {customVerses.length > 0 ? (
-                                                        <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-black border border-emerald-300">Importados ({customVerses.length})</span>
-                                                    ) : (
-                                                        <span className="text-[10px] bg-gray-200 text-gray-900 px-2 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
-                                                    )}
-                                                </div>
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => setVersesModalOpen(true)}
-                                                    className="w-full py-2 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg justify-center font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
-                                                >
-                                                    <BookOpen className="w-3.5 h-3.5 text-white" />
-                                                    <span>Personalizar Bíblia</span>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {hasQuoteElement && (
-                                        <div>
-                                            <label className="block text-[11px] font-black text-gray-900 uppercase mb-1.5 align-middle">Mensagens Motivacionais</label>
-                                            <div className="bg-amber-50/70 rounded-xl p-3 border-2 border-amber-200 flex flex-col gap-2">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs font-black text-gray-900">Fonte ativa:</span>
-                                                    {customQuotes.length > 0 ? (
-                                                        <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-black border border-emerald-300">Importadas ({customQuotes.length})</span>
-                                                    ) : (
-                                                        <span className="text-[10px] bg-gray-200 text-gray-900 px-2 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
-                                                    )}
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-1.5">
-                                                    <button 
-                                                        type="button"
-                                                        onClick={() => { setQuotesModalInitialTab('custom'); setQuotesModalOpen(true); }}
-                                                        className="w-full py-2 px-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg justify-center font-black text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
-                                                        title="Subir arquivo ou colar frases do Excel"
-                                                    >
-                                                        <Upload className="w-3.5 h-3.5 text-white" />
-                                                        <span>Subir Frases</span>
-                                                    </button>
-                                                    <button 
-                                                        type="button"
-                                                        onClick={() => { setQuotesModalInitialTab('feminine_strength'); setQuotesModalOpen(true); }}
-                                                        className="w-full py-2 px-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg justify-center font-black text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
-                                                        title="Explorar categorias e frases prontas"
-                                                    >
-                                                        <Sparkles className="w-3.5 h-3.5 text-white" />
-                                                        <span>Catálogo</span>
-                                                    </button>
-                                                </div>
-                                                {customQuotes.length > 0 && (
-                                                    <button 
-                                                        type="button"
-                                                        onClick={clearCustomQuotes}
-                                                        className="text-[10px] font-bold text-red-500 hover:text-red-700 hover:bg-red-50 py-1 rounded transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                                    >
-                                                        <Trash2 className="w-3 h-3" />
-                                                        <span>Voltar às frases originais</span>
-                                                    </button>
+                                    <div>
+                                        <label className="block text-[11px] font-black text-gray-900 uppercase mb-1.5 align-middle">Versículos das Páginas</label>
+                                        <div className="bg-indigo-50/70 rounded-xl p-3 border-2 border-indigo-200 flex flex-col gap-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-black text-gray-900">Fonte ativa:</span>
+                                                {customVerses.length > 0 ? (
+                                                    <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-black border border-emerald-300">Importados ({customVerses.length})</span>
+                                                ) : (
+                                                    <span className="text-[10px] bg-gray-200 text-gray-900 px-2 py-0.5 rounded-full font-bold">Padrão do Sistema</span>
                                                 )}
                                             </div>
+                                            <button 
+                                                type="button"
+                                                onClick={() => setVersesModalOpen(true)}
+                                                className="w-full py-2 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg justify-center font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                                            >
+                                                <BookOpen className="w-3.5 h-3.5 text-white" />
+                                                <span>Personalizar Bíblia</span>
+                                            </button>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                             )}
                                     </div>
@@ -15602,27 +15532,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         ) : (
                             <>
                                 {editMode === 'daily' && (
-                                    <div className="mb-2.5 p-2.5 rounded-xl border border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] shadow-2xs">
-                                        <div className="flex items-center justify-between gap-1 mb-1.5">
-                                            <div className="flex items-center gap-1.5 min-w-0">
-                                                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-[#b84a56] to-[#d98b95] text-white flex items-center justify-center shrink-0 shadow-2xs">
-                                                    <Sparkles className="w-3.5 h-3.5" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <span className="text-[11px] font-bold text-slate-800 block truncate">Frases Motivacionais</span>
-                                                    <span className="text-[9px] text-[#9f3d4a] font-semibold block truncate">
-                                                        {QUOTE_CATEGORIES_METADATA.find(c => c.id === (config.quoteCategory || 'feminine_strength'))?.shortName || 'Força Feminina'}
-                                                    </span>
-                                                </div>
+                                    <div className="mb-2.5 p-2 rounded-xl border border-[#eedad5] bg-gradient-to-r from-[#fff5f5] via-white to-[#fdeeed] shadow-2xs">
+                                        <div className="flex items-center gap-1.5 mb-1.5">
+                                            <div className="w-5 h-5 rounded-md bg-gradient-to-tr from-[#b84a56] to-[#d98b95] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                                                <Sparkles className="w-3 h-3" />
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => setQuotesModalOpen(true)}
-                                                className="px-2 py-0.5 bg-white hover:bg-[#fff5f5] text-[#9f3d4a] hover:text-[#7e2d38] border border-[#eedad5] rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1 shrink-0"
-                                                title="Escolher categoria ou ver todas as frases"
-                                            >
-                                                <span>Temas</span>
-                                            </button>
+                                            <div className="min-w-0 flex-1">
+                                                <span className="text-[11px] font-bold text-slate-800 block truncate">Frases Motivacionais</span>
+                                                <span className="text-[9px] text-[#9f3d4a] font-semibold block truncate">
+                                                    Configurações no menu à direita
+                                                </span>
+                                            </div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-[#eedad5]/60">
                                             <button
@@ -15690,7 +15610,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                                         <button onClick={() => addElement('image', 'Imagem')} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Upload de Imagem"><Upload className="w-4 h-4 text-indigo-600"/></button>
                                         <button onClick={() => addElement('verse', 'Versículo', { fontStyle: 'italic', textAlign: 'center' })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Versículo Bíblico"><BookOpen className="w-4 h-4 text-indigo-600"/></button>
-                                        <button onClick={() => setQuotesModalOpen(true)} className="h-10 flex items-center justify-center border border-[#eedad5] bg-[#fff5f5] hover:bg-[#fdeeed] hover:border-[#b84a56] rounded text-[#b84a56] transition-colors" title="Frases Motivacionais Diárias (Força Feminina, Fé, Motivação, Amor-Próprio...)"><Sparkles className="w-4 h-4 text-[#b84a56]"/></button>
+                                        <button 
+                                            onClick={() => handleInsertQuoteElement({ category: (config.quoteCategory as QuoteCategory) || 'feminine_strength', positionPreset: 'bottom' })} 
+                                            className="h-10 flex items-center justify-center border border-[#eedad5] bg-[#fff5f5] hover:bg-[#fdeeed] hover:border-[#b84a56] rounded text-[#b84a56] transition-colors cursor-pointer" 
+                                            title="Inserir Frase Motivacional (Configurações no menu à direita)"
+                                        >
+                                            <Sparkles className="w-4 h-4 text-[#b84a56]"/>
+                                        </button>
                                         
                                         <button onClick={() => addElement('lines', 'Divisória', { color: '#d1d5db', lineSpacing: 2, borderWidth: 1 }, { w: 50, h: 2 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Linha Divisória"><Minus className="w-4 h-4 text-indigo-600"/></button>
                                         <button onClick={() => addElement('permanent_day_header', 'Agenda Permanente', { variant: 'circles_outline', color: '#f472b6', fontSize: 10 })} className="h-10 flex items-center justify-center border rounded hover:bg-indigo-50" title="Agenda Permanente"><List className="w-4 h-4 text-indigo-600"/></button>
@@ -21341,327 +21267,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             <BookOpen className="w-3.5 h-3.5 text-emerald-600"/> Personalizar Versículos
                                                         </button>
                                                     )}
-                                                    {selectedElement.type === 'quote' && (
-                                                        <div className="space-y-2.5 mb-3 p-3 bg-gradient-to-b from-[#fff5f5] to-white rounded-2xl border border-[#eedad5] shadow-2xs">
-                                                            <div className="flex items-center justify-between pb-2 border-b border-[#eedad5]">
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <div className="w-5 h-5 rounded-md bg-[#b84a56] text-white flex items-center justify-center">
-                                                                        <Sparkles className="w-3 h-3 text-white" />
-                                                                    </div>
-                                                                    <span className="text-[11px] font-bold text-slate-800">Frase Motivacional</span>
-                                                                </div>
-                                                                <span className="text-[10px] text-slate-400 font-medium">366+ Frases / Ano</span>
-                                                            </div>
-
-                                                            {/* Botões de Ação Rápida: Subir Frases Próprias e Catálogo */}
-                                                            <div className="grid grid-cols-2 gap-1.5">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => { setQuotesModalInitialTab('custom'); setQuotesModalOpen(true); }}
-                                                                    className="w-full py-1.5 px-2 bg-emerald-50 text-emerald-800 text-xs font-bold rounded-lg border border-emerald-300 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                                                                    title="Subir arquivo ou colar frases do Excel"
-                                                                >
-                                                                    <Upload className="w-3.5 h-3.5 text-emerald-600"/>
-                                                                    <span>Subir Frases {customQuotes.length > 0 ? `(${customQuotes.length})` : ''}</span>
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => { 
-                                                                        setQuotesModalInitialTab((selectedElement.style.quoteCategory as QuoteCategory) || 'feminine_strength'); 
-                                                                        setQuotesModalOpen(true); 
-                                                                    }}
-                                                                    className="w-full py-1.5 px-2 bg-[#fff5f5] text-[#b84a56] text-xs font-bold rounded-lg border border-[#eedad5] hover:bg-[#fdeeed] transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                                                                    title="Explorar temas e catálogo de frases"
-                                                                >
-                                                                    <Sparkles className="w-3.5 h-3.5 text-[#b84a56]"/>
-                                                                    <span>Ver Catálogo</span>
-                                                                </button>
-                                                            </div>
-
-                                                            {/* Categoria do Tema */}
-                                                            <div className="space-y-1">
-                                                                <label className="block text-[10px] font-bold text-slate-600 uppercase">Tema / Categoria</label>
-                                                                <select
-                                                                    value={selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength'}
-                                                                    onChange={(e) => {
-                                                                        const newCat = e.target.value as QuoteCategory;
-                                                                        updateElementStyle(selectedElement.id, { quoteCategory: newCat });
-                                                                        if (newCat === 'custom' && customQuotes.length === 0) {
-                                                                            setQuotesModalInitialTab('custom');
-                                                                            setQuotesModalOpen(true);
-                                                                        }
-                                                                        if (selectedElement.style.quoteDisplayMode === 'fixed') {
-                                                                            const sample = getRandomQuote(newCat, config.quoteCustomList || customQuotes);
-                                                                            updateElementStyle(selectedElement.id, { quoteFixedText: sample });
-                                                                            updateElementContent(selectedElement.id, sample);
-                                                                        }
-                                                                    }}
-                                                                    className="w-full text-xs p-2 border border-[#eedad5] rounded-xl bg-white text-slate-800 font-medium focus:ring-1 focus:ring-[#b84a56] outline-none"
-                                                                >
-                                                                    <option value="custom" className="font-bold text-emerald-800 bg-emerald-50">
-                                                                        📝 Minhas Frases Importadas {customQuotes.length > 0 ? `(${customQuotes.length} salvas)` : '(Vazio - subir frases)'}
-                                                                    </option>
-                                                                    {QUOTE_CATEGORIES_METADATA.map(cat => (
-                                                                        <option key={cat.id} value={cat.id}>
-                                                                            {cat.icon} {cat.name}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            </div>
-
-                                                            {/* Modo de Exibição */}
-                                                            <div className="space-y-1">
-                                                                <label className="block text-[10px] font-bold text-slate-600 uppercase">Modo de Exibição</label>
-                                                                <div className="grid grid-cols-2 gap-1 p-1 bg-[#faf6f4] rounded-xl border border-[#eedad5]">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateElementStyle(selectedElement.id, { quoteDisplayMode: 'daily_rotating' })}
-                                                                        className={`py-1.5 px-1.5 text-[9.5px] font-bold rounded-lg transition-all cursor-pointer text-center ${
-                                                                            selectedElement.style.quoteDisplayMode !== 'fixed'
-                                                                                ? 'bg-[#b84a56] text-white shadow-2xs'
-                                                                                : 'text-slate-600 hover:text-slate-900'
-                                                                        }`}
-                                                                        title="Alterna uma frase diferente a cada um dos 365 dias do ano"
-                                                                    >
-                                                                        🔄 365 Dias (Rotativa)
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            const currentCat = selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength';
-                                                                            const text = selectedElement.style.quoteFixedText || selectedElement.content || getRandomQuote(currentCat, config.quoteCustomList || customQuotes);
-                                                                            updateElementStyle(selectedElement.id, { quoteDisplayMode: 'fixed', quoteFixedText: text });
-                                                                            updateElementContent(selectedElement.id, text);
-                                                                        }}
-                                                                        className={`py-1.5 px-1.5 text-[9.5px] font-bold rounded-lg transition-all cursor-pointer text-center ${
-                                                                            selectedElement.style.quoteDisplayMode === 'fixed'
-                                                                                ? 'bg-[#b84a56] text-white shadow-2xs'
-                                                                                : 'text-slate-600 hover:text-slate-900'
-                                                                        }`}
-                                                                        title="Mantém uma única frase fixa escolhida em todas as páginas"
-                                                                    >
-                                                                        📌 Frase Fixa
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-
-                                                            {/* Se modo fixo: Textarea de edição + botão sortear */}
-                                                            {selectedElement.style.quoteDisplayMode === 'fixed' ? (
-                                                                <div className="space-y-1.5">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <label className="text-[10px] font-bold text-slate-600 uppercase">Texto da Frase Fixa</label>
+                                                    {(selectedElement.type === 'quote' || selectedElement.type === 'text') && (
+                                                        <div className="space-y-1.5 mb-2.5">
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                                                                    {selectedElement.type === 'quote' ? 'Texto da Frase' : 'Texto Livre'}
+                                                                </label>
+                                                                {selectedElement.type === 'quote' && (
+                                                                    <div className="flex items-center gap-1.5">
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => {
-                                                                                const currentCat = selectedElement.style.quoteCategory || config.quoteCategory || 'feminine_strength';
-                                                                                const randomQ = getRandomQuote(currentCat, config.quoteCustomList || customQuotes);
-                                                                                updateElementStyle(selectedElement.id, { quoteFixedText: randomQ });
-                                                                                updateElementContent(selectedElement.id, randomQ);
+                                                                                const cat = (selectedElement.style.quoteCategory as QuoteCategory) || config.quoteCategory || 'feminine_strength';
+                                                                                const newQ = getRandomQuote(cat, config.quoteCustomList || customQuotes);
+                                                                                updateElementContent(selectedElement.id, newQ);
+                                                                                updateElementStyle(selectedElement.id, { quoteFixedText: newQ });
                                                                             }}
-                                                                            className="text-[10px] font-bold text-[#b84a56] hover:text-[#9f3d4a] flex items-center gap-1 cursor-pointer"
-                                                                            title="Sortear outra frase desta categoria"
+                                                                            className="text-[9.5px] font-bold text-[#b84a56] hover:text-[#9f3d4a] flex items-center gap-1 cursor-pointer transition-colors"
+                                                                            title="Sortear outra frase da biblioteca"
                                                                         >
                                                                             <span>🎲 Sortear</span>
                                                                         </button>
-                                                                    </div>
-                                                                    <textarea
-                                                                        rows={2}
-                                                                        value={selectedElement.style.quoteFixedText || selectedElement.content || ''}
-                                                                        onChange={(e) => {
-                                                                            const val = e.target.value;
-                                                                            updateElementStyle(selectedElement.id, { quoteFixedText: val });
-                                                                            updateElementContent(selectedElement.id, val);
-                                                                        }}
-                                                                        placeholder="Digite ou cole sua frase personalizada aqui..."
-                                                                        className="w-full text-xs p-2 border border-[#eedad5] rounded-xl bg-white text-slate-800 italic leading-relaxed focus:ring-1 focus:ring-[#b84a56] outline-none"
-                                                                    />
-                                                                </div>
-                                                            ) : (
-                                                                <div className="p-2 rounded-xl bg-white border border-[#eedad5] text-[10px] text-slate-600 space-y-1">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <span className="font-bold text-[#b84a56] flex items-center gap-1">
-                                                                            <span>✨ Rotação Diária Ativa</span>
-                                                                        </span>
                                                                         <button
                                                                             type="button"
-                                                                            onClick={() => setRenderedPreviewCount(prev => prev + 1)}
-                                                                            className="text-[9.5px] font-bold text-[#9f3d4a] hover:underline cursor-pointer"
-                                                                            title="Alternar frase na prévia"
+                                                                            onClick={() => setQuotesModalOpen(true)}
+                                                                            className="text-[9.5px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer transition-colors"
+                                                                            title="Ver catálogo de frases"
                                                                         >
-                                                                            Trocar prévia
+                                                                            <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
+                                                                            <span>Catálogo</span>
                                                                         </button>
                                                                     </div>
-                                                                    <p className="text-[9.5px] text-slate-500 leading-tight">
-                                                                        Cada dia do ano receberá automaticamente uma frase motivacional única da categoria selecionada.
-                                                                    </p>
-                                                                </div>
-                                                            )}
-
-                                                            {/* Estilo / Preset Visual */}
-                                                            <div className="space-y-1">
-                                                                <label className="block text-[10px] font-bold text-slate-600 uppercase">Estilo Visual</label>
-                                                                <div className="grid grid-cols-3 gap-1">
-                                                                    {[
-                                                                        { id: 'minimal', label: 'Minimalista' },
-                                                                        { id: 'quotation_marks', label: 'Com Aspas “ ”' },
-                                                                        { id: 'divider_card', label: 'Cartão ✦' }
-                                                                    ].map(preset => {
-                                                                        const activePreset = selectedElement.style.quoteStylePreset || 'quotation_marks';
-                                                                        const isSelected = activePreset === preset.id;
-                                                                        return (
-                                                                            <button
-                                                                                key={preset.id}
-                                                                                type="button"
-                                                                                onClick={() => updateElementStyle(selectedElement.id, {
-                                                                                    quoteStylePreset: preset.id as any,
-                                                                                    showQuoteMarks: preset.id === 'quotation_marks'
-                                                                                })}
-                                                                                className={`py-1 px-1 text-[9px] font-bold rounded-lg border transition-all text-center truncate cursor-pointer ${
-                                                                                    isSelected
-                                                                                        ? 'bg-[#fff5f5] text-[#b84a56] border-[#b84a56]'
-                                                                                        : 'bg-white text-slate-600 border-[#eedad5] hover:bg-[#faf6f4]'
-                                                                                }`}
-                                                                            >
-                                                                                {preset.label}
-                                                                            </button>
-                                                                        );
-                                                                    })}
-                                                                </div>
+                                                                )}
                                                             </div>
-
-                                                            {/* Tamanho da Fonte da Frase (Resposta Instantânea) */}
-                                                            <div className="space-y-1.5 p-2 bg-[#fffbf9] rounded-xl border border-[#eedad5]">
-                                                                <div className="flex items-center justify-between">
-                                                                    <label className="text-[10px] font-bold text-slate-700 uppercase flex items-center gap-1">
-                                                                        <icons.Type className="w-3.5 h-3.5 text-[#b84a56]" /> Tamanho da Letra
-                                                                    </label>
-                                                                    <span className="text-[10px] font-mono font-bold text-[#b84a56] bg-white px-2 py-0.5 rounded-full border border-[#eedad5]">
-                                                                        {typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10)} pt
-                                                                    </span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            const cur = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
-                                                                            const next = Math.max(4, Math.round((cur - 0.5) * 10) / 10);
-                                                                            updateElementStyle(selectedElement.id, { fontSize: next });
-                                                                        }}
-                                                                        className="w-8 h-8 rounded-lg bg-white border border-[#eedad5] hover:bg-[#fff5f5] text-[#b84a56] font-black text-sm flex items-center justify-center cursor-pointer transition-colors active:scale-95 shadow-2xs"
-                                                                        title="Diminuir fonte em 0.5"
-                                                                    >
-                                                                        -
-                                                                    </button>
-                                                                    <input 
-                                                                        type="number"
-                                                                        step="0.5"
-                                                                        min="4"
-                                                                        max="72"
-                                                                        value={typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10)}
-                                                                        onChange={(e) => {
-                                                                            const val = parseFloat(e.target.value);
-                                                                            if (!isNaN(val)) updateElementStyle(selectedElement.id, { fontSize: val });
-                                                                        }}
-                                                                        className="flex-1 text-center font-bold text-xs p-1.5 h-8 border border-[#eedad5] rounded-lg bg-white text-slate-800 focus:ring-1 focus:ring-[#b84a56] outline-none"
-                                                                    />
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            const cur = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
-                                                                            const next = Math.min(72, Math.round((cur + 0.5) * 10) / 10);
-                                                                            updateElementStyle(selectedElement.id, { fontSize: next });
-                                                                        }}
-                                                                        className="w-8 h-8 rounded-lg bg-white border border-[#eedad5] hover:bg-[#fff5f5] text-[#b84a56] font-black text-sm flex items-center justify-center cursor-pointer transition-colors active:scale-95 shadow-2xs"
-                                                                        title="Aumentar fonte em 0.5"
-                                                                    >
-                                                                        +
-                                                                    </button>
-                                                                </div>
-                                                                {/* Atalhos de Tamanhos Rápidos */}
-                                                                <div className="grid grid-cols-4 gap-1 pt-1">
-                                                                    {[
-                                                                        { label: '8.5 pt', val: 8.5 },
-                                                                        { label: '10 pt', val: 10 },
-                                                                        { label: '11.5 pt', val: 11.5 },
-                                                                        { label: '13 pt', val: 13 }
-                                                                    ].map(preset => {
-                                                                        const currentSize = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
-                                                                        const isCur = Math.abs(currentSize - preset.val) < 0.1;
-                                                                        return (
-                                                                            <button
-                                                                                key={preset.val}
-                                                                                type="button"
-                                                                                onClick={() => updateElementStyle(selectedElement.id, { fontSize: preset.val })}
-                                                                                className={`py-1 text-[9px] font-bold rounded-md border transition-all cursor-pointer text-center ${
-                                                                                    isCur
-                                                                                        ? 'bg-[#b84a56] text-white border-[#b84a56] shadow-2xs'
-                                                                                        : 'bg-white text-slate-600 border-[#eedad5] hover:bg-[#faf6f4]'
-                                                                                }`}
-                                                                            >
-                                                                                {preset.label}
-                                                                            </button>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                                {/* Sincronizar com todas as frases do miolo */}
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        const currentSize = typeof selectedElement.style.fontSize === 'number' ? selectedElement.style.fontSize : (parseFloat(selectedElement.style.fontSize) || 10);
-                                                                        const currentFont = selectedElement.style.fontFamily || 'Inter';
-                                                                        const currentWeight = selectedElement.style.fontWeight || 'normal';
-                                                                        const currentStyle = selectedElement.style.fontStyle || 'italic';
-                                                                        const currentColor = selectedElement.style.color || '#4a3a37';
-                                                                        
-                                                                        const syncInList = (list?: LayoutElement[]) => list?.map(el => {
-                                                                            if (el.type === 'quote') {
-                                                                                return {
-                                                                                    ...el,
-                                                                                    style: {
-                                                                                        ...el.style,
-                                                                                        fontSize: currentSize,
-                                                                                        fontFamily: currentFont,
-                                                                                        fontWeight: currentWeight,
-                                                                                        fontStyle: currentStyle,
-                                                                                        color: currentColor
-                                                                                    }
-                                                                                };
-                                                                            }
-                                                                            return el;
-                                                                        });
-
-                                                                        setConfig(prev => ({
-                                                                            ...prev,
-                                                                            elements: syncInList(prev.elements) || prev.elements,
-                                                                            elementsVerso: syncInList(prev.elementsVerso),
-                                                                            elementsTop: syncInList(prev.elementsTop),
-                                                                            elementsBottom: syncInList(prev.elementsBottom),
-                                                                            elementsSaturday: syncInList(prev.elementsSaturday),
-                                                                            elementsSunday: syncInList(prev.elementsSunday),
-                                                                            elementsWeeklyLeft: syncInList(prev.elementsWeeklyLeft),
-                                                                            elementsWeeklyRight: syncInList(prev.elementsWeeklyRight),
-                                                                            elementsWeeklyVersoLeft: syncInList(prev.elementsWeeklyVersoLeft),
-                                                                            elementsWeeklyVersoRight: syncInList(prev.elementsWeeklyVersoRight)
-                                                                        }));
-                                                                        setToastMessage(`✓ Tamanho (${currentSize}pt) e fonte aplicados a todas as frases do miolo!`);
-                                                                    }}
-                                                                    className="w-full mt-1 py-1 px-2 text-[9px] font-bold text-[#b84a56] hover:bg-[#fdeeed] rounded-lg transition-colors border border-dashed border-[#eedad5] flex items-center justify-center gap-1 cursor-pointer"
-                                                                    title="Aplica este mesmo tamanho e fonte a todas as frases motivacionais existentes nas outras páginas do miolo"
-                                                                >
-                                                                    <Sparkles className="w-2.5 h-2.5 text-amber-500" />
-                                                                    <span>Aplicar Tamanho em Todas as Frases</span>
-                                                                </button>
-                                                            </div>
-
-                                                            {/* Botão de Ação: Abrir Modal Completo */}
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setQuotesModalOpen(true)}
-                                                                className="w-full py-1.5 px-2 bg-gradient-to-r from-[#b84a56] to-[#d98b95] hover:from-[#9f3d4a] hover:to-[#b84a56] text-white text-[10.5px] font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
-                                                            >
-                                                                <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
-                                                                <span>Abrir Catálogo Completo & Categorias</span>
-                                                            </button>
+                                                            <textarea
+                                                                rows={selectedElement.type === 'quote' ? 2 : 3}
+                                                                value={selectedElement.content || selectedElement.style?.quoteFixedText || ''}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    updateElementContent(selectedElement.id, val);
+                                                                    updateElementStyle(selectedElement.id, { quoteFixedText: val });
+                                                                }}
+                                                                placeholder={selectedElement.type === 'quote' ? "Digite a frase motivacional..." : "Digite o texto aqui..."}
+                                                                className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-white text-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none leading-relaxed resize-y"
+                                                            />
                                                         </div>
                                                     )}
                                                     {renderTypographyControls({

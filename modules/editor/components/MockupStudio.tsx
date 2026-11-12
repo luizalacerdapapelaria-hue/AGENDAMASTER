@@ -1552,6 +1552,113 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     );
   }, [showCornerProtectors, wireoStyles, COVER_HERO_W_PX, cbWidthMm]);
 
+  // Converts a base64 Data URL to a clean binary Blob
+  const base64DataUrlToBlob = (dataUrl: string): Blob => {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
+    const binaryStr = atob(parts[1]);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  };
+
+  // Safely extracts a Blob from an HTMLCanvasElement with fallback to dataURL -> binary Blob
+  const canvasToBlobSafe = (canvas: HTMLCanvasElement): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob((blob) => {
+          if (blob && blob.size > 0) {
+            resolve(blob);
+          } else {
+            try {
+              const dataUrl = canvas.toDataURL('image/png');
+              resolve(base64DataUrlToBlob(dataUrl));
+            } catch (fallbackErr) {
+              reject(fallbackErr);
+            }
+          }
+        }, 'image/png');
+      } catch (toBlobErr) {
+        try {
+          const dataUrl = canvas.toDataURL('image/png');
+          resolve(base64DataUrlToBlob(dataUrl));
+        } catch (fallbackErr) {
+          reject(fallbackErr);
+        }
+      }
+    });
+  };
+
+  // Universal cross-environment file downloader (Browser, Iframe, Chrome, Electron)
+  const triggerUniversalDownload = async (blob: Blob, filename: string, mimeType = 'image/png') => {
+    const winAny = window as any;
+
+    // 1. Desktop Electron: Native OS Save Dialog
+    if (winAny?.electronAPI?.isElectron) {
+      try {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve, reject) => {
+          reader.onloadend = () => {
+            const res = (reader.result as string) || '';
+            resolve(res.split(',')[1] || res);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        if (typeof winAny.electronAPI.saveFileBase64 === 'function') {
+          const result = await winAny.electronAPI.saveFileBase64(base64, filename, mimeType);
+          if (result && !result.cancelled) {
+            return;
+          }
+          if (result?.cancelled) return;
+        } else if (typeof winAny.electronAPI.savePDFBase64 === 'function') {
+          const result = await winAny.electronAPI.savePDFBase64(base64, filename);
+          if (result && !result.cancelled) {
+            return;
+          }
+          if (result?.cancelled) return;
+        }
+      } catch (electronErr) {
+        console.warn('[MockupStudio] Electron save failed, falling back to browser download:', electronErr);
+      }
+    }
+
+    // 2. Standard Browser / Webview: Blob URL with off-screen anchor click
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    link.rel = 'noopener';
+    // Position offscreen instead of display:none to prevent browser click suppression
+    link.style.position = 'fixed';
+    link.style.left = '-9999px';
+    link.style.top = '-9999px';
+    link.style.opacity = '0';
+    link.style.pointerEvents = 'none';
+    
+    document.body.appendChild(link);
+
+    try {
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    } catch (_) {
+      link.click();
+    }
+
+    // Defer DOM cleanup and URL revocation
+    setTimeout(() => {
+      try {
+        if (link.parentNode) {
+          document.body.removeChild(link);
+        }
+        URL.revokeObjectURL(blobUrl);
+      } catch (_) {}
+    }, 60000);
+  };
+
   // Export Mockup as High-Res PNG (Single reliable download handler with multi-layer fallback)
   const handleExportPNG = async () => {
     const surface = mockupSurfaceRef.current;
@@ -1560,79 +1667,65 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     setIsExporting(true);
     showToast('Gerando mockup em alta resolução...');
 
+    const filename = mockupSubject === 'cover'
+      ? `Mockup-Capa-Dura-${coverViewMode}.png`
+      : mockupMode === 'spread'
+      ? `Mockup-Agenda-Paginas-${leftPageNum}-${rightPageNum}.png`
+      : `Mockup-Agenda-Pagina-${singlePageNum}.png`;
+
     try {
       const html2canvasModule = await import('html2canvas');
       const html2canvas = (html2canvasModule as any).default || html2canvasModule;
       
       const isTransparent = backgroundType === 'transparent';
-      const canvas = await html2canvas(surface, {
-        scale: 2, // 2x crisp HD resolution
-        useCORS: true,
-        allowTaint: false, // Must be false to prevent canvas tainting SecurityErrors on toBlob/toDataURL
-        backgroundColor: isTransparent ? null : undefined,
-        logging: false,
-        onclone: (clonedDoc: Document) => {
-          applyHtml2CanvasTextStrokeFallback(clonedDoc);
-          const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
-          if (clonedSurface) {
-            clonedSurface.style.transform = 'none';
-            clonedSurface.style.animation = 'none';
-            clonedSurface.style.transition = 'none';
-          }
-          clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
-            el.style.display = 'none';
-          });
+      const commonOnClone = (clonedDoc: Document) => {
+        applyHtml2CanvasTextStrokeFallback(clonedDoc);
+        const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
+        if (clonedSurface) {
+          clonedSurface.style.transform = 'none';
+          clonedSurface.style.animation = 'none';
+          clonedSurface.style.transition = 'none';
         }
-      });
-
-      const filename = mockupSubject === 'cover'
-        ? `Mockup-Capa-Dura-${coverViewMode}.png`
-        : mockupMode === 'spread'
-        ? `Mockup-Agenda-Paginas-${leftPageNum}-${rightPageNum}.png`
-        : `Mockup-Agenda-Pagina-${singlePageNum}.png`;
-
-      // Reliable cross-environment trigger for downloading files
-      const triggerFileDownload = (href: string, isBlob: boolean) => {
-        const link = document.createElement('a');
-        link.style.display = 'none';
-        link.setAttribute('href', href);
-        link.setAttribute('download', filename);
-        link.setAttribute('target', '_self');
-        document.body.appendChild(link);
-        link.click();
-        
-        // Defer DOM cleanup and URL revocation so browser download manager has time to complete
-        setTimeout(() => {
-          try {
-            document.body.removeChild(link);
-            if (isBlob) {
-              URL.revokeObjectURL(href);
-            }
-          } catch (_) {}
-        }, 60000);
+        clonedDoc.querySelectorAll('img').forEach((img: HTMLImageElement) => {
+          img.crossOrigin = 'anonymous';
+        });
+        clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
+          el.style.display = 'none';
+        });
       };
 
+      let canvas: HTMLCanvasElement;
       try {
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const blobUrl = URL.createObjectURL(blob);
-            triggerFileDownload(blobUrl, true);
-            setIsExporting(false);
-            showToast('✨ Mockup baixado com sucesso!');
-          } else {
-            const dataUrl = canvas.toDataURL('image/png');
-            triggerFileDownload(dataUrl, false);
-            setIsExporting(false);
-            showToast('✨ Mockup baixado com sucesso!');
-          }
-        }, 'image/png');
-      } catch (blobErr) {
-        console.warn('[Mockup Download] toBlob falhou, usando toDataURL:', blobErr);
-        const dataUrl = canvas.toDataURL('image/png');
-        triggerFileDownload(dataUrl, false);
-        setIsExporting(false);
-        showToast('✨ Mockup baixado com sucesso!');
+        // Attempt 1: Crisp 2x HD resolution with strict CORS
+        canvas = await html2canvas(surface, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: isTransparent ? null : undefined,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: commonOnClone
+        });
+      } catch (firstPassErr) {
+        console.warn('[Mockup Download] Primeira tentativa estrita falhou, usando modo tolerante a taint:', firstPassErr);
+        // Attempt 2: Resilient fallback
+        canvas = await html2canvas(surface, {
+          scale: 1.5,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: isTransparent ? null : undefined,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: commonOnClone
+        });
       }
+
+      const blob = await canvasToBlobSafe(canvas);
+      await triggerUniversalDownload(blob, filename, 'image/png');
+      setIsExporting(false);
+      showToast('✨ Mockup baixado com sucesso!');
     } catch (err: any) {
       console.error('Erro ao exportar mockup:', err);
       showToast('Ocorreu um erro ao gerar a imagem. Tente novamente ou use o botão Copiar.');
@@ -1653,51 +1746,61 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       const html2canvas = (html2canvasModule as any).default || html2canvasModule;
       
       const isTransparent = backgroundType === 'transparent';
-      const canvas = await html2canvas(surface, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: isTransparent ? null : undefined,
-        logging: false,
-        onclone: (clonedDoc: Document) => {
-          applyHtml2CanvasTextStrokeFallback(clonedDoc);
-          const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
-          if (clonedSurface) {
-            clonedSurface.style.transform = 'none';
-            clonedSurface.style.animation = 'none';
-            clonedSurface.style.transition = 'none';
-          }
-          clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
-            el.style.display = 'none';
-          });
+      const commonOnClone = (clonedDoc: Document) => {
+        applyHtml2CanvasTextStrokeFallback(clonedDoc);
+        const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
+        if (clonedSurface) {
+          clonedSurface.style.transform = 'none';
+          clonedSurface.style.animation = 'none';
+          clonedSurface.style.transition = 'none';
         }
-      });
+        clonedDoc.querySelectorAll('img').forEach((img: HTMLImageElement) => {
+          img.crossOrigin = 'anonymous';
+        });
+        clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
+          el.style.display = 'none';
+        });
+      };
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          showToast('Erro ao processar imagem.');
-          setIsExporting(false);
-          return;
-        }
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = await html2canvas(surface, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: isTransparent ? null : undefined,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: commonOnClone
+        });
+      } catch (firstErr) {
+        canvas = await html2canvas(surface, {
+          scale: 1.5,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: isTransparent ? null : undefined,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: commonOnClone
+        });
+      }
 
-        try {
-          if (navigator.clipboard && (window as any).ClipboardItem) {
-            await navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': blob })
-            ]);
-            showToast('📋 Mockup copiado! Cole direto no WhatsApp, Canva ou Photoshop!');
-          } else {
-            showToast('Navegador não suporta cópia direta. Use o botão Baixar.');
-          }
-        } catch (clipErr) {
-          showToast('Permissão de clipboard não concedida. Use o botão Baixar.');
-        } finally {
-          setIsExporting(false);
-        }
-      }, 'image/png');
+      const blob = await canvasToBlobSafe(canvas);
+      if (navigator.clipboard && (window as any).ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+        showToast('📋 Mockup copiado! Cole direto no WhatsApp, Canva ou Photoshop!');
+      } else {
+        showToast('Navegador não suporta cópia direta. Use o botão Baixar.');
+      }
     } catch (err) {
+      console.error('Erro ao copiar mockup:', err);
+      showToast('Permissão de clipboard não concedida ou erro ao gerar. Use o botão Baixar.');
+    } finally {
       setIsExporting(false);
-      showToast('Não foi possível copiar a imagem.');
     }
   };
 
@@ -1834,20 +1937,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   const previewStepsCount = useMemo(() => buildVideoSteps().length, [buildVideoSteps]);
 
   const triggerVideoFileDownload = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.style.display = 'none';
-    link.href = url;
-    link.download = filename;
-    link.target = '_self';
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      try {
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } catch (_) {}
-    }, 60000);
+    triggerUniversalDownload(blob, filename, 'video/mp4');
   };
 
   const handleGenerateVideoMP4 = async () => {

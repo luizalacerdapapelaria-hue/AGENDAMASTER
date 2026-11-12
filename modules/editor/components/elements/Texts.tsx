@@ -344,16 +344,13 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
     }
 
     if (element.type === 'quote') {
-        const isFixed = element.style?.quoteDisplayMode === 'fixed';
-        let rawQuote = isFixed
-            ? (element.style?.quoteFixedText || element.content || (isEditor ? 'Frase Fixa' : ''))
-            : (quote || (isEditor ? 'Frase Inspiradora' : ''));
+        const rawQuote = element.content || element.style?.quoteFixedText || quote || (isEditor ? 'Frase Motivacional' : '');
 
         if (isEditor && isSelected && isEditing) {
             return (
                 <div style={{...alignmentStyles, width: '100%', height: '100%'}}>
                     <textarea 
-                        value={element.style?.quoteFixedText || element.content || rawQuote} 
+                        value={element.content || element.style?.quoteFixedText || rawQuote} 
                         onChange={(e) => onContentChange && onContentChange(element.id, e.target.value)} 
                         onBlur={() => setIsEditing(false)}
                         onKeyDown={(e) => {
@@ -384,12 +381,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
             );
         }
 
-        const quotePreset = (style as any).quoteStylePreset || (style as any).preset || 'default';
-        const showMarks = Boolean((style as any).showQuoteMarks || quotePreset === 'quotation_marks');
         const displayContent = isSentenceOrCapitalize ? applyTextTransform(rawQuote, textTransform) : rawQuote;
-        const formattedQuote = showMarks && displayContent && !displayContent.startsWith('“') && !displayContent.startsWith('"')
-            ? `“${displayContent}”`
-            : displayContent;
 
         return (
             <div 
@@ -411,14 +403,7 @@ export const TextElement: React.FC<TextElementProps> = ({ element, dayData, quot
                     overflow: hasStroke ? 'visible' : undefined
                 }}
             >
-                {quotePreset === 'divider_card' ? (
-                    <div className="w-full h-full p-2 rounded-xl border border-[#eedad5] bg-[#fffbf9] flex flex-col justify-center items-center text-center shadow-2xs">
-                        <span className="text-[9px] text-[#b84a56] font-bold uppercase tracking-wider mb-0.5">✦ Inspiração ✦</span>
-                        <div className="italic" style={{ fontSize: style.fontSize, ...strokeCss }}>{formattedQuote}</div>
-                    </div>
-                ) : (
-                    <span style={{ fontSize: style.fontSize, ...strokeCss }}>{formattedQuote}</span>
-                )}
+                <span style={{ fontSize: style.fontSize, ...strokeCss }}>{displayContent}</span>
             </div>
         );
     }

@@ -130,9 +130,16 @@ const scaleStyle = (style: any, scaleFactor: number) => {
         scaled.table = {
             ...style.table,
             rowHeight: typeof style.table.rowHeight === 'number' ? style.table.rowHeight * scaleFactor : style.table.rowHeight,
-            borderWidth: typeof style.table.borderWidth === 'number' ? style.table.borderWidth * scaleFactor : style.table.borderWidth,
-            outerBorderWidth: typeof style.table.outerBorderWidth === 'number' ? style.table.outerBorderWidth * scaleFactor : style.table.outerBorderWidth,
-            insideBorderWidth: typeof style.table.insideBorderWidth === 'number' ? style.table.insideBorderWidth * scaleFactor : style.table.insideBorderWidth,
+            // Border widths must remain consistent crisp values without fractional scaling to prevent subpixel rasterization inconsistencies in PDF
+            borderWidth: typeof style.table.borderWidth === 'number' 
+                ? (style.table.borderWidth <= 1 ? style.table.borderWidth : Math.round(style.table.borderWidth)) 
+                : style.table.borderWidth,
+            outerBorderWidth: typeof style.table.outerBorderWidth === 'number' 
+                ? (style.table.outerBorderWidth <= 1 ? style.table.outerBorderWidth : Math.round(style.table.outerBorderWidth)) 
+                : style.table.outerBorderWidth,
+            insideBorderWidth: typeof style.table.insideBorderWidth === 'number' 
+                ? (style.table.insideBorderWidth <= 1 ? style.table.insideBorderWidth : Math.round(style.table.insideBorderWidth)) 
+                : style.table.insideBorderWidth,
             borderRadius: typeof style.table.borderRadius === 'number' ? style.table.borderRadius * scaleFactor : style.table.borderRadius,
         };
         if (style.table.textStyle) {
