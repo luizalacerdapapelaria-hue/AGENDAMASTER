@@ -155,7 +155,7 @@ export function loadGoogleFontFallback(fontFamily: string): void {
   link.id = linkId;
   link.rel = 'stylesheet';
   const encoded = encodeURIComponent(clean).replace(/%20/g, '+');
-  link.href = `https://fonts.googleapis.com/css2?family=${encoded}:ital,wght@0,300..900;1,300..900&display=swap`;
+  link.href = `https://fonts.googleapis.com/css2?family=${encoded}&display=swap`;
   link.crossOrigin = 'anonymous';
   document.head.appendChild(link);
 }

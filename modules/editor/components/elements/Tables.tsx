@@ -243,9 +243,9 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const rawOuterWidth = style.table?.outerBorderWidth !== undefined ? Number(style.table.outerBorderWidth) : rawBorderWidth;
     const rawInsideWidth = style.table?.insideBorderWidth !== undefined ? Number(style.table.insideBorderWidth) : rawBorderWidth;
 
-    // Clean values (integer or 0.5 steps) to prevent subpixel rasterization snapping where some lines become 2px and others 1px
-    const outerBorderWidth = Math.max(0, rawOuterWidth <= 0 ? 0 : (rawOuterWidth <= 1 ? 1 : Math.round(rawOuterWidth * 2) / 2));
-    const insideBorderWidth = Math.max(0, rawInsideWidth <= 0 ? 0 : (rawInsideWidth <= 1 ? 1 : Math.round(rawInsideWidth * 2) / 2));
+    // Strict integer pixel values to prevent subpixel rasterization snapping where lines have different thicknesses
+    const outerBorderWidth = Math.max(0, rawOuterWidth <= 0 ? 0 : Math.round(rawOuterWidth));
+    const insideBorderWidth = Math.max(0, rawInsideWidth <= 0 ? 0 : Math.round(rawInsideWidth));
     const borderStyle = style.table?.borderStyle || 'solid';
     const borderRadius = style.table?.borderRadius || 0;
     const hasOuterContainerBorder = borderRadius > 0;
@@ -297,19 +297,34 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
             }}
         >
             {/* Table Content Grid with native CSS borders for bulletproof PDF/print rendering */}
-            {Array(rows).fill(0).map((_, r) => {
-                const rowHPercent = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
-                const rowHeightStyle = `${rowHPercent}%`;
-                const rowHeightPx = Math.max(2, (rowHPercent / 100) * effectiveTableHeightPx);
-                const isFirstRow = r === 0;
-                const isLastRow = r === rows - 1;
-                
-                return (
-                    <div 
-                        key={r} 
-                        className="flex w-full relative shrink-0" 
-                        style={{ height: rowHeightStyle, minHeight: 0, overflow: 'hidden' }}
-                    >
+            {(() => {
+                // Pre-calculate exact integer pixel heights for each row to ensure all dividers align with pixel grid
+                let accumulatedPx = 0;
+                const rowPixelHeights = Array(rows).fill(0).map((_, r) => {
+                    const pct = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
+                    if (effectiveTableHeightPx > 0) {
+                        const targetCumulative = Math.round(((r + 1) / rows) * effectiveTableHeightPx);
+                        const h = Math.max(2, targetCumulative - accumulatedPx);
+                        accumulatedPx += h;
+                        return h;
+                    }
+                    return null;
+                });
+
+                return Array(rows).fill(0).map((_, r) => {
+                    const rowHPercent = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
+                    const integerH = rowPixelHeights[r];
+                    const rowHeightStyle = integerH !== null ? `${integerH}px` : `${rowHPercent}%`;
+                    const rowHeightPx = integerH !== null ? integerH : Math.max(2, (rowHPercent / 100) * effectiveTableHeightPx);
+                    const isFirstRow = r === 0;
+                    const isLastRow = r === rows - 1;
+                    
+                    return (
+                        <div 
+                            key={r} 
+                            className="flex w-full relative shrink-0" 
+                            style={{ height: rowHeightStyle, minHeight: 0, overflow: 'hidden' }}
+                        >
                         {Array(columns).fill(0).map((_, c) => {
                             const isFirstCol = c === 0;
                             const isLastCol = c === columns - 1;
@@ -454,7 +469,8 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                         })}
                     </div>
                 );
-            })}
+            });
+        })()}
 
             {/* Interactive Grid Resizers Overlay (Draggable Borders for Columns and Rows) */}
             {isEditor && (

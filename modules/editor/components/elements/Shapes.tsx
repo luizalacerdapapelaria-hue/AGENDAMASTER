@@ -29,17 +29,36 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
     };
 
     if (element.type === 'lines') {
-        const borderWidthVal = style.borderWidth !== undefined ? style.borderWidth : 0.5;
+        const rawBorderW = Number(style.borderWidth !== undefined ? style.borderWidth : 1) || 1;
+        const borderWidthVal = Math.max(1, Math.round(rawBorderW));
         const borderStyleVal = style.borderStyle || 'solid';
         const isVertical = element.w < element.h && element.w < 2;
         const isSingleLine = !style.showTimes && (isVertical || element.h < 3 || (style.lineSpacing && element.h / 100 * pageHeight <= style.lineSpacing));
-        const dashArray = borderStyleVal === 'dashed' ? '5,5' : (borderStyleVal === 'dotted' ? `${Math.max(1, borderWidthVal)},${Math.max(2, borderWidthVal * 2)}` : 'none');
+        const isSolid = borderStyleVal === 'solid' || !borderStyleVal;
+        const dashArray = borderStyleVal === 'dashed' ? '5,5' : (borderStyleVal === 'dotted' ? `${borderWidthVal},${borderWidthVal * 2}` : 'none');
         const strokeColor = style.hideLines ? 'transparent' : (style.borderColor || style.color || '#d1d5db');
         
         if (isSingleLine) {
+            if (isSolid) {
+                return (
+                    <div className="w-full h-full flex items-center justify-center">
+                        <div 
+                            style={isVertical ? {
+                                width: `${borderWidthVal}px`,
+                                height: '100%',
+                                backgroundColor: strokeColor
+                            } : {
+                                width: '100%',
+                                height: `${borderWidthVal}px`,
+                                backgroundColor: strokeColor
+                            }}
+                        />
+                    </div>
+                );
+            }
             return (
                 <div className="w-full h-full flex items-center justify-center">
-                    <svg className="w-full h-full overflow-visible">
+                    <svg className="w-full h-full overflow-visible" style={{ shapeRendering: 'crispEdges' }}>
                         <line 
                             x1={isVertical ? "50%" : "0"} 
                             y1={isVertical ? "0" : "50%"} 
@@ -57,7 +76,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         
         const heightPx = (element.h / 100 * pageHeight);
         let lineCount = 0;
-        let finalLineSpacing = style.lineSpacing || 24;
+        let finalLineSpacing = Math.round(style.lineSpacing || 24);
         const timesList: string[] = [];
 
         if (style.showTimes) {
@@ -79,13 +98,13 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             }
             lineCount = timesList.length;
             if (lineCount > 0 && heightPx > 0) {
-                finalLineSpacing = Math.max(16, heightPx / lineCount);
+                finalLineSpacing = Math.max(16, Math.round(heightPx / lineCount));
             }
         } else if (style.rowCount && style.rowCount > 0) {
             lineCount = style.rowCount;
-            finalLineSpacing = Math.max(16, heightPx / lineCount);
+            finalLineSpacing = Math.max(16, Math.round(heightPx / lineCount));
         } else {
-            // Ensure lines have at least 16px spacing so written text and lines are clearly legible
+            // Ensure lines have at least 16px integer spacing so lines are crisp and uniform
             finalLineSpacing = Math.max(16, finalLineSpacing);
             lineCount = Math.floor((heightPx - 1) / finalLineSpacing);
         }
@@ -191,18 +210,29 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         >
                             {timeNode && timePosition === 'left' && timeNode}
                             {checkboxNode}
-                            <div className="flex-1 self-end relative w-full flex items-center" style={{ height: `${Math.max(1, borderWidthVal)}px` }}>
-                                <svg className="w-full h-full overflow-visible">
-                                    <line 
-                                        x1="0" 
-                                        y1="50%" 
-                                        x2="100%" 
-                                        y2="50%" 
-                                        stroke={strokeColor} 
-                                        strokeWidth={borderWidthVal} 
-                                        strokeDasharray={dashArray} 
+                            <div className="flex-1 self-end relative w-full flex items-center" style={{ height: `${borderWidthVal}px` }}>
+                                {isSolid ? (
+                                    <div 
+                                        style={{ 
+                                            width: '100%', 
+                                            height: `${borderWidthVal}px`, 
+                                            backgroundColor: strokeColor 
+                                        }} 
                                     />
-                                </svg>
+                                ) : (
+                                    <svg className="w-full h-full overflow-visible" style={{ shapeRendering: 'crispEdges' }}>
+                                        <line 
+                                            x1="0" 
+                                            y1="50%" 
+                                            x2="100%" 
+                                            y2="50%" 
+                                            stroke={strokeColor} 
+                                            strokeWidth={borderWidthVal} 
+                                            strokeDasharray={dashArray} 
+                                            shapeRendering="crispEdges"
+                                        />
+                                    </svg>
+                                )}
                             </div>
                             {timeNode && timePosition === 'right' && timeNode}
                         </div>

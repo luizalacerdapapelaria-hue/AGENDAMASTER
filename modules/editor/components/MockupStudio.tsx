@@ -5,11 +5,12 @@ import {
   ZoomIn, ZoomOut, Maximize2, BookOpen, FileText, CheckCheck, Loader2,
   Bookmark, Edit3, Monitor, Grid, Compass, Box, X, Calendar,
   Play, Pause, Volume2, VolumeX, FastForward, PlayCircle,
-  Video, Film, Share2, Smartphone, BookMarked, Shield, Ruler, ArrowLeftRight
+  Video, Film, Share2, Smartphone, BookMarked, Shield, Ruler, ArrowLeftRight,
+  ExternalLink, CheckCircle2
 } from 'lucide-react';
 import { AgendaConfig, DayData, CoverProjectConfig } from '../../../types';
 import { getMonthName } from '../../../core/backend/calendar';
-import { applyHtml2CanvasTextStrokeFallback } from '../../../core/logic/textStroke';
+import { applyHtml2CanvasTextStrokeFallback, prepareClonedDocForHtml2Canvas } from '../../../core/logic/textStroke';
 import {
   createDefaultCoverConfig,
   CARDBOARD_PRESETS,
@@ -21,7 +22,8 @@ import {
   encodeMockupVideoMP4,
   SpreadStep,
   VideoFormatPreset,
-  VideoPagePreset
+  VideoPagePreset,
+  renderMockupVideoFrame
 } from '../utils/mockupVideoGenerator';
 
 export interface CoverRenderResult {
@@ -216,6 +218,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
   const [generatedVideoBlob, setGeneratedVideoBlob] = useState<Blob | null>(null);
   const [generatedVideoFilename, setGeneratedVideoFilename] = useState<string>('');
   const [stagingPageNum, setStagingPageNum] = useState<number | null>(null);
+  const [exportedImagePreview, setExportedImagePreview] = useState<{ url: string; filename: string; blob: Blob } | null>(null);
 
   const mockupSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoStagingPageRef = useRef<HTMLDivElement | null>(null);
@@ -1612,12 +1615,14 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
         if (typeof winAny.electronAPI.saveFileBase64 === 'function') {
           const result = await winAny.electronAPI.saveFileBase64(base64, filename, mimeType);
           if (result && !result.cancelled) {
+            setExportedImagePreview({ url: URL.createObjectURL(blob), filename, blob });
             return;
           }
           if (result?.cancelled) return;
         } else if (typeof winAny.electronAPI.savePDFBase64 === 'function') {
           const result = await winAny.electronAPI.savePDFBase64(base64, filename);
           if (result && !result.cancelled) {
+            setExportedImagePreview({ url: URL.createObjectURL(blob), filename, blob });
             return;
           }
           if (result?.cancelled) return;
@@ -1627,13 +1632,15 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       }
     }
 
-    // 2. Standard Browser / Webview: Blob URL with off-screen anchor click
+    // 2. Standard Browser / Webview: Blob URL with anchor click
     const blobUrl = URL.createObjectURL(blob);
+    setExportedImagePreview({ url: blobUrl, filename, blob });
+
     const link = document.createElement('a');
     link.href = blobUrl;
     link.download = filename;
-    link.rel = 'noopener';
-    // Position offscreen instead of display:none to prevent browser click suppression
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     link.style.position = 'fixed';
     link.style.left = '-9999px';
     link.style.top = '-9999px';
@@ -1645,21 +1652,43 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     try {
       link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     } catch (_) {
-      link.click();
+      try {
+        link.click();
+      } catch (_) {}
     }
 
-    // Defer DOM cleanup and URL revocation
     setTimeout(() => {
       try {
         if (link.parentNode) {
           document.body.removeChild(link);
         }
-        URL.revokeObjectURL(blobUrl);
       } catch (_) {}
     }, 60000);
   };
 
-  // Export Mockup as High-Res PNG (Single reliable download handler with multi-layer fallback)
+  // Helper to pre-convert all rendered images in a container to Base64 data URLs
+  // This completely eliminates CORS reload errors and prevents tainted canvas exceptions in html2canvas.
+  const sanitizeImagesForExport = async (container: HTMLElement) => {
+    const imgs = Array.from(container.querySelectorAll('img'));
+    await Promise.all(imgs.map(async (img) => {
+      if (!img.src || img.src.startsWith('data:')) return;
+      try {
+        if (img.complete && img.naturalWidth > 0) {
+          const offscreen = document.createElement('canvas');
+          offscreen.width = img.naturalWidth;
+          offscreen.height = img.naturalHeight;
+          const ctx = offscreen.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = offscreen.toDataURL('image/png');
+            img.src = dataUrl;
+          }
+        }
+      } catch (_) {}
+    }));
+  };
+
+  // Export Mockup as High-Res PNG (Bulletproof multi-tier engine with Canvas 2D fallback)
   const handleExportPNG = async () => {
     const surface = mockupSurfaceRef.current;
     if (!surface) return;
@@ -1674,29 +1703,16 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
       : `Mockup-Agenda-Pagina-${singlePageNum}.png`;
 
     try {
+      await sanitizeImagesForExport(surface);
+
       const html2canvasModule = await import('html2canvas');
       const html2canvas = (html2canvasModule as any).default || html2canvasModule;
-      
       const isTransparent = backgroundType === 'transparent';
-      const commonOnClone = (clonedDoc: Document) => {
-        applyHtml2CanvasTextStrokeFallback(clonedDoc);
-        const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
-        if (clonedSurface) {
-          clonedSurface.style.transform = 'none';
-          clonedSurface.style.animation = 'none';
-          clonedSurface.style.transition = 'none';
-        }
-        clonedDoc.querySelectorAll('img').forEach((img: HTMLImageElement) => {
-          img.crossOrigin = 'anonymous';
-        });
-        clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
-          el.style.display = 'none';
-        });
-      };
 
-      let canvas: HTMLCanvasElement;
+      let canvas: HTMLCanvasElement | null = null;
+
+      // Tier 1: High-fidelity html2canvas capture (strict allowTaint: false)
       try {
-        // Attempt 1: Crisp 2x HD resolution with strict CORS
         canvas = await html2canvas(surface, {
           scale: 2,
           useCORS: true,
@@ -1705,24 +1721,132 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
           logging: false,
           scrollX: 0,
           scrollY: 0,
-          onclone: commonOnClone
+          imageTimeout: 10000,
+          onclone: (clonedDoc: Document) => {
+            prepareClonedDocForHtml2Canvas(clonedDoc);
+            const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
+            if (clonedSurface) {
+              clonedSurface.style.transform = 'none';
+              clonedSurface.style.animation = 'none';
+              clonedSurface.style.transition = 'none';
+            }
+            clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
+              el.style.display = 'none';
+            });
+          }
         });
-      } catch (firstPassErr) {
-        console.warn('[Mockup Download] Primeira tentativa estrita falhou, usando modo tolerante a taint:', firstPassErr);
-        // Attempt 2: Resilient fallback
-        canvas = await html2canvas(surface, {
-          scale: 1.5,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: isTransparent ? null : undefined,
-          logging: false,
-          scrollX: 0,
-          scrollY: 0,
-          onclone: commonOnClone
-        });
+      } catch (tier1Err) {
+        console.warn('[Mockup Export] Tentativa 1 falhou, acionando fallback robusto:', tier1Err);
+      }
+
+      // Tier 2: Resilient fallback if html2canvas threw or returned empty canvas
+      if (!canvas || canvas.width === 0 || canvas.height === 0) {
+        if (mockupSubject === 'miolo') {
+          // Pre-populate page texture cache if missing
+          const pagesToWarm = [leftPageNum, rightPageNum, singlePageNum].filter(p => p > 0 && !pageCanvasCacheRef.current.has(p));
+          for (const p of pagesToWarm) {
+            setStagingPageNum(p);
+            await new Promise(r => setTimeout(r, 60));
+            const stagingEl = videoStagingPageRef.current;
+            if (stagingEl) {
+              try {
+                const pCanvas = await html2canvas(stagingEl, {
+                  scale: 1.5,
+                  useCORS: true,
+                  allowTaint: false,
+                  backgroundColor: '#ffffff',
+                  logging: false,
+                  onclone: (clonedDoc: Document) => {
+                    prepareClonedDocForHtml2Canvas(clonedDoc);
+                  }
+                });
+                pageCanvasCacheRef.current.set(p, pCanvas);
+              } catch (_) {}
+            }
+          }
+          setStagingPageNum(null);
+
+          const fallbackCanvas = document.createElement('canvas');
+          fallbackCanvas.width = 1920;
+          fallbackCanvas.height = 1080;
+          const ctx = fallbackCanvas.getContext('2d');
+          if (ctx) {
+            const frameState = {
+              currentStep: {
+                leftPage: leftPageNum,
+                rightPage: rightPageNum,
+                singlePage: singlePageNum
+              },
+              nextStep: null,
+              flipProgress: 0,
+              globalProgress: 0
+            };
+            renderMockupVideoFrame(
+              ctx,
+              {
+                width: 1920,
+                height: 1080,
+                pageAspect: PAGE_HEIGHT_MM / PAGE_WIDTH_MM,
+                pageWidthMm: PAGE_WIDTH_MM,
+                pageHeightMm: PAGE_HEIGHT_MM,
+                cardboardWidthMm: cbWidthMm,
+                cardboardHeightMm: cbHeightMm,
+                showHardcoverBacking,
+                mockupMode,
+                perspective,
+                customAngleX,
+                customAngleY,
+                customAngleZ,
+                wireoFinish,
+                backgroundType,
+                showRibbon,
+                ribbonColor,
+                showPen,
+                showPaperclip,
+                coverThickness,
+                shadowIntensity,
+                showPageBadge: false
+              },
+              frameState,
+              pageCanvasCacheRef.current
+            );
+            canvas = fallbackCanvas;
+          }
+        } else {
+          // For cover, flatten 3D rotation in cloned DOM to avoid matrix3d calculation crashes
+          canvas = await html2canvas(surface, {
+            scale: 1.5,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: isTransparent ? null : undefined,
+            logging: false,
+            scrollX: 0,
+            scrollY: 0,
+            onclone: (clonedDoc: Document) => {
+              prepareClonedDocForHtml2Canvas(clonedDoc);
+              const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
+              if (clonedSurface) {
+                clonedSurface.style.transform = 'none';
+              }
+              clonedDoc.querySelectorAll<HTMLElement>('[style*="preserve-3d"]').forEach((el) => {
+                el.style.transformStyle = 'flat';
+                el.style.transform = 'none';
+              });
+              clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
+                el.style.display = 'none';
+              });
+            }
+          });
+        }
+      }
+
+      if (!canvas) {
+        throw new Error('Falha ao processar o mockup');
       }
 
       const blob = await canvasToBlobSafe(canvas);
+      const previewUrl = URL.createObjectURL(blob);
+      setExportedImagePreview({ url: previewUrl, filename, blob });
       await triggerUniversalDownload(blob, filename, 'image/png');
       setIsExporting(false);
       showToast('✨ Mockup baixado com sucesso!');
@@ -1742,27 +1866,13 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
     showToast('Preparando imagem para a área de transferência...');
 
     try {
+      await sanitizeImagesForExport(surface);
+
       const html2canvasModule = await import('html2canvas');
       const html2canvas = (html2canvasModule as any).default || html2canvasModule;
-      
       const isTransparent = backgroundType === 'transparent';
-      const commonOnClone = (clonedDoc: Document) => {
-        applyHtml2CanvasTextStrokeFallback(clonedDoc);
-        const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
-        if (clonedSurface) {
-          clonedSurface.style.transform = 'none';
-          clonedSurface.style.animation = 'none';
-          clonedSurface.style.transition = 'none';
-        }
-        clonedDoc.querySelectorAll('img').forEach((img: HTMLImageElement) => {
-          img.crossOrigin = 'anonymous';
-        });
-        clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
-          el.style.display = 'none';
-        });
-      };
 
-      let canvas: HTMLCanvasElement;
+      let canvas: HTMLCanvasElement | null = null;
       try {
         canvas = await html2canvas(surface, {
           scale: 2,
@@ -1772,20 +1882,69 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
           logging: false,
           scrollX: 0,
           scrollY: 0,
-          onclone: commonOnClone
+          onclone: (clonedDoc: Document) => {
+            prepareClonedDocForHtml2Canvas(clonedDoc);
+            const clonedSurface = clonedDoc.getElementById('mockup-render-surface');
+            if (clonedSurface) {
+              clonedSurface.style.transform = 'none';
+            }
+            clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
+              el.style.display = 'none';
+            });
+          }
         });
       } catch (firstErr) {
-        canvas = await html2canvas(surface, {
-          scale: 1.5,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: isTransparent ? null : undefined,
-          logging: false,
-          scrollX: 0,
-          scrollY: 0,
-          onclone: commonOnClone
-        });
+        if (mockupSubject === 'miolo') {
+          const fallbackCanvas = document.createElement('canvas');
+          fallbackCanvas.width = 1920;
+          fallbackCanvas.height = 1080;
+          const ctx = fallbackCanvas.getContext('2d');
+          if (ctx) {
+            const frameState = {
+              currentStep: {
+                leftPage: leftPageNum,
+                rightPage: rightPageNum,
+                singlePage: singlePageNum
+              },
+              nextStep: null,
+              flipProgress: 0,
+              globalProgress: 0
+            };
+            renderMockupVideoFrame(
+              ctx,
+              {
+                width: 1920,
+                height: 1080,
+                pageAspect: PAGE_HEIGHT_MM / PAGE_WIDTH_MM,
+                pageWidthMm: PAGE_WIDTH_MM,
+                pageHeightMm: PAGE_HEIGHT_MM,
+                cardboardWidthMm: cbWidthMm,
+                cardboardHeightMm: cbHeightMm,
+                showHardcoverBacking,
+                mockupMode,
+                perspective,
+                customAngleX,
+                customAngleY,
+                customAngleZ,
+                wireoFinish,
+                backgroundType,
+                showRibbon,
+                ribbonColor,
+                showPen,
+                showPaperclip,
+                coverThickness,
+                shadowIntensity,
+                showPageBadge: false
+              },
+              frameState,
+              pageCanvasCacheRef.current
+            );
+            canvas = fallbackCanvas;
+          }
+        }
       }
+
+      if (!canvas) throw new Error('Não foi possível gerar canvas para cópia');
 
       const blob = await canvasToBlobSafe(canvas);
       if (navigator.clipboard && (window as any).ClipboardItem) {
@@ -1794,11 +1953,13 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
         ]);
         showToast('📋 Mockup copiado! Cole direto no WhatsApp, Canva ou Photoshop!');
       } else {
-        showToast('Navegador não suporta cópia direta. Use o botão Baixar.');
+        const blobUrl = URL.createObjectURL(blob);
+        setExportedImagePreview({ url: blobUrl, filename: 'Mockup.png', blob });
+        showToast('Navegador não suporta cópia direta. Imagem disponível para download.');
       }
     } catch (err) {
       console.error('Erro ao copiar mockup:', err);
-      showToast('Permissão de clipboard não concedida ou erro ao gerar. Use o botão Baixar.');
+      showToast('Permissão de clipboard não concedida ou erro ao gerar.');
     } finally {
       setIsExporting(false);
     }
@@ -1991,7 +2152,7 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
               backgroundColor: '#ffffff',
               logging: false,
               onclone: (clonedDoc: Document) => {
-                applyHtml2CanvasTextStrokeFallback(clonedDoc);
+                prepareClonedDocForHtml2Canvas(clonedDoc);
               }
             });
             pageCanvasCacheRef.current.set(pNum, pageCanvas);
@@ -4983,6 +5144,110 @@ export const MockupStudio: React.FC<MockupStudioProps> = ({
               {stagingPageNum !== null ? getPageNode(stagingPageNum) : null}
             </div>
           </div>
+
+          {/* EXPORTED IMAGE PREVIEW & DOWNLOAD MODAL */}
+          {exportedImagePreview && (
+            <div
+              className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+              onClick={() => setExportedImagePreview(null)}
+            >
+              <div
+                className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden text-slate-100 my-auto animate-fade-in"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="px-5 py-4 bg-gradient-to-r from-orange-950/80 via-slate-900 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-600/25">
+                      <CheckCircle2 className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                        <span>Mockup em Alta Resolução Gerado!</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          HD 100%
+                        </span>
+                      </h2>
+                      <p className="text-[11px] text-slate-400">
+                        O download do arquivo <strong>{exportedImagePreview.filename}</strong> foi iniciado.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setExportedImagePreview(null)}
+                    className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Modal Body: Image Preview */}
+                <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                  <div className="relative rounded-xl overflow-hidden bg-slate-950/60 border border-slate-800 flex items-center justify-center p-3">
+                    <img 
+                      src={exportedImagePreview.url} 
+                      alt="Mockup Gerado" 
+                      className="max-h-[48vh] w-auto max-w-full object-contain rounded-lg shadow-md"
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+                    💡 Dica: Se o seu navegador ou janela bloqueou o download automático, você também pode clicar com o botão direito na imagem acima e escolher <strong>"Salvar imagem como..."</strong> ou <strong>"Copiar imagem"</strong>.
+                  </p>
+
+                  <div className="flex flex-wrap gap-2.5 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const link = document.createElement('a');
+                        link.href = exportedImagePreview.url;
+                        link.download = exportedImagePreview.filename;
+                        link.target = '_blank';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        showToast('Download acionado!');
+                      }}
+                      className="flex-1 min-w-[140px] py-2.5 px-4 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-orange-600/20 transition-all active:scale-98"
+                    >
+                      <Download className="w-4 h-4" /> Baixar Novamente
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (navigator.clipboard && (window as any).ClipboardItem) {
+                            await navigator.clipboard.write([
+                              new ClipboardItem({ 'image/png': exportedImagePreview.blob })
+                            ]);
+                            showToast('📋 Mockup copiado para a área de transferência!');
+                          } else {
+                            showToast('Copiar não é suportado pelo seu navegador.');
+                          }
+                        } catch (_) {
+                          showToast('Erro ao copiar. Use o botão Baixar ou botão direito.');
+                        }
+                      }}
+                      className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-700 transition-all"
+                    >
+                      <Copy className="w-4 h-4 text-indigo-400" /> Copiar Imagem
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.open(exportedImagePreview.url, '_blank');
+                      }}
+                      className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-700 transition-all"
+                    >
+                      <ExternalLink className="w-4 h-4 text-slate-400" /> Abrir em Nova Aba
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* MP4 VIDEO EXPORT MODAL FOR WHATSAPP */}
           {videoModalOpen && (

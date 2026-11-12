@@ -29,7 +29,7 @@ import { StylesManagerPanel, ElementQuickStylesBar, StyleTabType } from './compo
 import { FavoriteColorsModal } from './components/FavoriteColorsModal';
 import { FavoriteColorSwatches } from './components/FavoriteColorSwatches';
 import { getProjectStyles, applyColorStyleToElement } from '../../core/logic/styleSystem';
-import { applyHtml2CanvasTextStrokeFallback } from '../../core/logic/textStroke';
+import { applyHtml2CanvasTextStrokeFallback, prepareClonedDocForHtml2Canvas } from '../../core/logic/textStroke';
 import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBounds } from './components/elements/vectorShapesData';
 import * as icons from 'lucide-react';
 import { CoverCanvasOverlay } from './components/cover/CoverCanvasOverlay';
@@ -1788,7 +1788,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         logging: false,
         backgroundColor: '#ffffff',
         onclone: (clonedDoc) => {
-          applyHtml2CanvasTextStrokeFallback(clonedDoc);
+          prepareClonedDocForHtml2Canvas(clonedDoc);
         },
         ignoreElements: (element) => {
           if (includeGuides) return false;
@@ -12576,15 +12576,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               compress: true
           });
           
-          // Determine scale and quality settings based on selected mode
-          let selectedScale = 1.5;
-          let jpegQuality = 0.90;
+          // Integer scale factors (1.0x, 2.0x, 3.0x) are strictly required to guarantee that 1px and 2px lines
+          // rasterize with 100% consistent pixel thickness across all pages and tables without subpixel aliasing.
+          let selectedScale = 2.0;
+          let jpegQuality = 0.96;
           if (pdfScaleMode === 'fast') {
               selectedScale = 1.0;
-              jpegQuality = 0.85;
+              jpegQuality = 0.92;
           } else if (pdfScaleMode === 'high') {
-              selectedScale = 2.22;
-              jpegQuality = 0.93;
+              selectedScale = 3.0; // 300+ DPI print grade with crisp 3-pixel rasterization
+              jpegQuality = 0.98;
           }
           
           // Process pages in parallel batches of 4 to maximize rendering speed under safety limits
@@ -12617,10 +12618,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                       useCORS: true,
                       logging: false,
                       backgroundColor: '#ffffff',
-                      allowTaint: true,
+                      allowTaint: false,
                       imageTimeout: 15000,
                       onclone: (clonedDoc) => {
-                          applyHtml2CanvasTextStrokeFallback(clonedDoc);
+                          prepareClonedDocForHtml2Canvas(clonedDoc);
+                          const crispStyle = clonedDoc.createElement('style');
+                          crispStyle.textContent = `
+                              * { -webkit-font-smoothing: antialiased; }
+                              svg line, svg rect, svg path { shape-rendering: crispEdges !important; }
+                          `;
+                          clonedDoc.head.appendChild(crispStyle);
                           const clonedPrintContainer = clonedDoc.getElementById('print-container');
                           if (clonedPrintContainer) {
                               clonedPrintContainer.style.opacity = '1';
@@ -13106,7 +13113,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                       <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Mais estável</span>
                                                   </div>
                                                   <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
-                                                      Resolução otimizada para telas e leitura digital (Escala 1.5x) e arquivos mais leves. Rapidez combinada a uma excelente nitidez.
+                                                      Resolução com escala inteira uniforme (Escala 2.0x) para linhas e tabelas com traços 100% homogêneos e nítidos.
                                                   </p>
                                               </div>
                                           </button>
@@ -13127,7 +13134,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                       <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Alta Resolução</span>
                                                   </div>
                                                   <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
-                                                      Suporte de alta fidelidade e escala máxima (2.22x) idêntico ao original. O processamento consome mais recursos e tempo.
+                                                      Suporte de alta fidelidade e escala máxima (Escala 3.0x, 300+ DPI) para impressão profissional perfeita.
                                                   </p>
                                               </div>
                                           </button>

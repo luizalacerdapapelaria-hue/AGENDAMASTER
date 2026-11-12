@@ -179,3 +179,114 @@ export function applyHtml2CanvasTextStrokeFallback(clonedDoc: Document): void {
     el.style.textShadow = buildRoundedTextShadow(radius, strokeColor, el.style.textShadow);
   });
 }
+
+/**
+ * Bulletproof polyfill for HTML5 CanvasGradient and CanvasRenderingContext2D.
+ * Prevents html2canvas from throwing:
+ * "TypeError: Failed to execute 'addColorStop' on 'CanvasGradient': The provided double value is non-finite."
+ * when parsing CSS linear/radial gradients on elements with 0 width/height, subpixel angles, or NaN stops.
+ */
+export function installSafeCanvasPolyfill(targetWin?: Window | null): void {
+  const win = targetWin || (typeof window !== 'undefined' ? window : null);
+  if (!win) return;
+
+  try {
+    // 1. Safe addColorStop on CanvasGradient
+    const gradProto = (win as any).CanvasGradient?.prototype;
+    if (gradProto && !gradProto.__safeAddColorStopInstalled) {
+      const origAddColorStop = gradProto.addColorStop;
+      gradProto.addColorStop = function (offset: number, color: string) {
+        let safeOffset = Number(offset);
+        if (!Number.isFinite(safeOffset) || isNaN(safeOffset)) {
+          safeOffset = 0;
+        } else if (safeOffset < 0) {
+          safeOffset = 0;
+        } else if (safeOffset > 1) {
+          safeOffset = 1;
+        }
+        try {
+          return origAddColorStop.call(this, safeOffset, color || '#000000');
+        } catch (_) {
+          try {
+            return origAddColorStop.call(this, 0, '#000000');
+          } catch (__) {
+            // Silently absorb unparseable color strings
+          }
+        }
+      };
+      gradProto.__safeAddColorStopInstalled = true;
+    }
+
+    // 2. Safe createLinearGradient & createRadialGradient on CanvasRenderingContext2D
+    const ctxProto = (win as any).CanvasRenderingContext2D?.prototype;
+    if (ctxProto && !ctxProto.__safeGradientsInstalled) {
+      const origCreateLinear = ctxProto.createLinearGradient;
+      ctxProto.createLinearGradient = function (x0: number, y0: number, x1: number, y1: number) {
+        const sX0 = Number.isFinite(x0) ? x0 : 0;
+        const sY0 = Number.isFinite(y0) ? y0 : 0;
+        const sX1 = Number.isFinite(x1) ? x1 : 1;
+        const sY1 = Number.isFinite(y1) ? y1 : 1;
+        return origCreateLinear.call(this, sX0, sY0, sX1, sY1);
+      };
+
+      const origCreateRadial = ctxProto.createRadialGradient;
+      ctxProto.createRadialGradient = function (x0: number, y0: number, r0: number, x1: number, y1: number, r1: number) {
+        const sX0 = Number.isFinite(x0) ? x0 : 0;
+        const sY0 = Number.isFinite(y0) ? y0 : 0;
+        const sR0 = Math.max(0, Number.isFinite(r0) ? r0 : 0);
+        const sX1 = Number.isFinite(x1) ? x1 : 0;
+        const sY1 = Number.isFinite(y1) ? y1 : 0;
+        const sR1 = Math.max(0.1, Number.isFinite(r1) ? r1 : 1);
+        return origCreateRadial.call(this, sX0, sY0, sR0, sX1, sY1, sR1);
+      };
+
+      ctxProto.__safeGradientsInstalled = true;
+    }
+  } catch (_) {}
+}
+
+// Auto-install immediately on the main window
+installSafeCanvasPolyfill();
+
+/**
+ * Prepares a cloned document for html2canvas capture:
+ * - Installs the CanvasGradient & 2D Context polyfill on both the cloned window and the main window.
+ * - Applies the text-stroke to text-shadow conversion.
+ * - Disables broken Google Fonts links that cause net::ERR_FAILED 400.
+ * - Cleans up zero-width / zero-height elements with CSS gradients so html2canvas doesn't produce NaN.
+ */
+export function prepareClonedDocForHtml2Canvas(clonedDoc: Document): void {
+  if (!clonedDoc) return;
+  const win = clonedDoc.defaultView;
+  installSafeCanvasPolyfill(win);
+  installSafeCanvasPolyfill(typeof window !== 'undefined' ? window : null);
+
+  // Apply text stroke shadow polyfill
+  applyHtml2CanvasTextStrokeFallback(clonedDoc);
+
+  // Disable cross-origin link stylesheets that trigger CORS/400 errors during html2canvas parsing
+  try {
+    const links = clonedDoc.querySelectorAll('link[rel="stylesheet"]');
+    links.forEach((l: any) => {
+      const href = l.getAttribute('href') || '';
+      if (href.includes('fonts.googleapis.com') && (href.includes('wght@0,300..900') || href.includes(':ital,wght@'))) {
+        l.remove();
+      }
+    });
+  } catch (_) {}
+
+  // Sanitize elements with zero-dimensions and CSS gradients to prevent division-by-zero
+  try {
+    const allEls = clonedDoc.querySelectorAll<HTMLElement>('*');
+    allEls.forEach((el) => {
+      const bg = el.style.backgroundImage || el.style.background || '';
+      if (bg.includes('gradient')) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || el.offsetWidth <= 0 || el.offsetHeight <= 0) {
+          el.style.backgroundImage = 'none';
+          el.style.background = 'transparent';
+        }
+      }
+    });
+  } catch (_) {}
+}
