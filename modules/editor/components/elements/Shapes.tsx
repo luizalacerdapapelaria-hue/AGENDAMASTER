@@ -30,7 +30,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
 
     if (element.type === 'lines') {
         const rawBorderW = Number(style.borderWidth !== undefined ? style.borderWidth : 1) || 1;
-        const borderWidthVal = Math.max(1, Math.round(rawBorderW));
+        const borderWidthVal = Math.max(0.1, Math.round(rawBorderW * 100) / 100);
         const borderStyleVal = style.borderStyle || 'solid';
         const isVertical = element.w < element.h && element.w < 2;
         const isSingleLine = !style.showTimes && (isVertical || element.h < 3 || (style.lineSpacing && element.h / 100 * pageHeight <= style.lineSpacing));

@@ -9592,17 +9592,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
     const globalStyle = getGlobalCalendarStyle();
     
-    // Obter índices calculados (auto ou explícitos)
-    const effectiveIndices = getEffectiveDayIndices(elements, templateType);
+    // Obter índices calculados (auto ou explícitos) e remover linhas verticais avulsas sobre nomes de mês (inclusive clones sem ID original)
+    const monthNameEls = elements.filter(e => e.type === 'month_name');
+    const sanitizedElements = elements.filter(el => {
+        if (el.id === 'mc-sep' || el.id === 'spl-sep') return false;
+        if (el.type === 'lines' && !el.style?.showTimes && el.w <= 2 && el.h > el.w && el.h <= 18 && monthNameEls.length > 0) {
+            const overlapsMonthName = monthNameEls.some(m =>
+                el.x >= m.x - 1.5 &&
+                el.x <= m.x + m.w &&
+                el.y < m.y + m.h &&
+                el.y + el.h > m.y
+            );
+            const isLegacyHeaderSeparator = el.w <= 1 && el.y >= 4 && el.y <= 10 && el.h >= 6 && el.h <= 10 &&
+                ((el.x >= 21 && el.x <= 26) || (el.x >= 73 && el.x <= 78));
+            if (overlapsMonthName || isLegacyHeaderSeparator) return false;
+        }
+        return true;
+    });
+    const effectiveIndices = getEffectiveDayIndices(sanitizedElements, templateType);
     const miniCalendarIndexMap = new Map<string, number>();
     let miniCalCounter = 0;
-    elements.forEach(el => {
+    sanitizedElements.forEach(el => {
         if (el.type === 'mini_calendar') {
             miniCalendarIndexMap.set(el.id, miniCalCounter++);
         }
     });
 
-    const elementsWithIndices = elements.map(el => {
+    const elementsWithIndices = sanitizedElements.map(el => {
         const assignedDay = effectiveIndices[el.id] ?? el.style.dayIndex ?? 0;
         let finalStyle = {
             ...el.style,

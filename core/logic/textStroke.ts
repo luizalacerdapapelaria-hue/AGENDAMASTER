@@ -289,4 +289,10 @@ export function prepareClonedDocForHtml2Canvas(clonedDoc: Document): void {
       }
     });
   } catch (_) {}
+
+  // Clean up any obsolete stray separator lines from templates over titles
+  try {
+    const strayLines = clonedDoc.querySelectorAll('[data-element-id="mc-sep"], [data-element-id="spl-sep"]');
+    strayLines.forEach(l => l.remove());
+  } catch (_) {}
 }

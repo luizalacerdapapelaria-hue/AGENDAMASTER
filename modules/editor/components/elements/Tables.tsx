@@ -184,30 +184,35 @@ const TableCell = memo(({ r, c, content, isEditor, isHeaderCell, style, textStro
     );
 });
 
-export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, style, pageHeight, onTableResizeStart, onTableRowResizeStart, onTableCellChange, onTableCellFocus, activeTableCell }) => {
+export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, style, pageHeight, pageWidth, onTableResizeStart, onTableRowResizeStart, onTableCellChange, onTableCellFocus, activeTableCell }) => {
     const tableContainerRef = useRef<HTMLDivElement>(null);
-    const [measuredTableHeight, setMeasuredTableHeight] = useState<number>(0);
+    const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
     useLayoutEffect(() => {
         const el = tableContainerRef.current;
         if (!el) return;
-        const updateHeight = () => {
+        const updateSize = () => {
+            const w = el.clientWidth;
             const h = el.clientHeight;
-            if (h > 0) setMeasuredTableHeight(h);
+            if (w > 0 && h > 0) {
+                setMeasuredSize(prev => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+            }
         };
-        updateHeight();
-        const observer = new ResizeObserver(updateHeight);
+        updateSize();
+        const observer = new ResizeObserver(updateSize);
         observer.observe(el);
         return () => observer.disconnect();
-    }, [element.h, pageHeight, style.table?.rows]);
+    }, [element.w, element.h, pageWidth, pageHeight, style.table?.rows, style.table?.cols]);
 
     const rows = style.table?.rows || 10;
     const columns = style.table?.cols || 2;
     const hasHeader = style.table?.headerRow;
     const columnWidths = style.table?.columnWidths || Array(columns).fill(100 / columns);
     const rowHeights = style.table?.rowHeights || Array(rows).fill(100 / rows);
-    const estimatedTableHeightPx = ((element.h || 50) / 100) * ((pageHeight || 567) * 0.85);
-    const effectiveTableHeightPx = measuredTableHeight > 0 ? measuredTableHeight : estimatedTableHeightPx;
+    const estimatedTableHeightPx = Math.round(((element.h || 50) / 100) * (pageHeight || 567));
+    const estimatedTableWidthPx = Math.round(((element.w || 50) / 100) * (pageWidth || 400));
+    const effectiveTableHeightPx = measuredSize.height > 0 ? measuredSize.height : estimatedTableHeightPx;
+    const effectiveTableWidthPx = measuredSize.width > 0 ? measuredSize.width : estimatedTableWidthPx;
     
     const globalTextStyle = {
         fontFamily: style.table?.textStyle?.fontFamily || style.fontFamily || 'Inter',
@@ -243,12 +248,12 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const rawOuterWidth = style.table?.outerBorderWidth !== undefined ? Number(style.table.outerBorderWidth) : rawBorderWidth;
     const rawInsideWidth = style.table?.insideBorderWidth !== undefined ? Number(style.table.insideBorderWidth) : rawBorderWidth;
 
-    // Strict integer pixel values to prevent subpixel rasterization snapping where lines have different thicknesses
-    const outerBorderWidth = Math.max(0, rawOuterWidth <= 0 ? 0 : Math.round(rawOuterWidth));
-    const insideBorderWidth = Math.max(0, rawInsideWidth <= 0 ? 0 : Math.round(rawInsideWidth));
+    // Preserves exact user decimal strokes (e.g. 1.4px, 0.75px, 1.5px) without forced integer truncation
+    const outerBorderWidth = Math.max(0, rawOuterWidth <= 0 ? 0 : Math.round(rawOuterWidth * 100) / 100);
+    const insideBorderWidth = Math.max(0, rawInsideWidth <= 0 ? 0 : Math.round(rawInsideWidth * 100) / 100);
     const borderStyle = style.table?.borderStyle || 'solid';
     const borderRadius = style.table?.borderRadius || 0;
-    const hasOuterContainerBorder = borderRadius > 0;
+    const useContainerBorder = borderRadius > 0 || borderStyle !== 'solid';
 
     const borders = style.table?.borders || {
         top: true,
@@ -260,9 +265,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
         headerSeparator: true
     };
 
-    const dashArray = borderStyle === 'dashed' ? '4 4' : borderStyle === 'dotted' ? '2 2' : 'none';
-
-    // Calculate cumulative positions for dividers
+    // Calculate cumulative positions for resizer handles
     const colDividerPositions: number[] = [];
     let accX = 0;
     for (let c = 0; c < columns - 1; c++) {
@@ -277,10 +280,71 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
         rowDividerPositions.push(accY);
     }
 
-    const borderCssTop = borders.top && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
-    const borderCssBottom = borders.bottom && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
-    const borderCssLeft = borders.left && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
-    const borderCssRight = borders.right && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : 'none';
+    const borderCssTop = borders.top && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
+    const borderCssBottom = borders.bottom && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
+    const borderCssLeft = borders.left && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
+    const borderCssRight = borders.right && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
+
+    // Pre-calculate exact integer pixel heights for each row honoring custom rowHeights
+    const totalRowPct = Array.from({ length: rows }).reduce<number>((sum, _, r) => {
+        const val = (rowHeights && rowHeights[r] !== undefined) ? Number(rowHeights[r]) : (100 / rows);
+        return sum + (val > 0 ? val : 100 / rows);
+    }, 0) || 100;
+    let accRowPct = 0;
+    let accumulatedRowPx = 0;
+    const rowPixelHeights: number[] = Array(rows).fill(0).map((_, r) => {
+        const pct = (rowHeights && rowHeights[r] !== undefined) ? Number(rowHeights[r]) : (100 / rows);
+        accRowPct += (pct > 0 ? pct : 100 / rows);
+        const targetCumulative = (r === rows - 1)
+            ? Math.round(effectiveTableHeightPx)
+            : Math.round((accRowPct / totalRowPct) * effectiveTableHeightPx);
+        const h = Math.max(2, targetCumulative - accumulatedRowPx);
+        accumulatedRowPx += h;
+        return h;
+    });
+
+    // Pre-calculate exact integer pixel widths for each column honoring columnWidths
+    const totalColPct = Array.from({ length: columns }).reduce<number>((sum, _, c) => {
+        const val = (columnWidths && columnWidths[c] !== undefined) ? Number(columnWidths[c]) : (100 / columns);
+        return sum + (val > 0 ? val : 100 / columns);
+    }, 0) || 100;
+    let accColPct = 0;
+    let accumulatedColPx = 0;
+    const colPixelWidths: number[] = Array(columns).fill(0).map((_, c) => {
+        const pct = (columnWidths && columnWidths[c] !== undefined) ? Number(columnWidths[c]) : (100 / columns);
+        accColPct += (pct > 0 ? pct : 100 / columns);
+        const targetCumulative = (c === columns - 1)
+            ? Math.round(effectiveTableWidthPx)
+            : Math.round((accColPct / totalColPct) * effectiveTableWidthPx);
+        const w = Math.max(2, targetCumulative - accumulatedColPx);
+        accumulatedColPx += w;
+        return w;
+    });
+
+    // Compute exact integer Y coordinates for horizontal dividers
+    const horizontalDividers: { y: number; key: string }[] = [];
+    let cumY = 0;
+    for (let r = 0; r < rows - 1; r++) {
+        cumY += rowPixelHeights[r];
+        const isHeaderRow = hasHeader && r === 0;
+        const shouldDraw = isHeaderRow ? Boolean(borders.headerSeparator) : Boolean(borders.insideHorizontal);
+        if (shouldDraw && insideBorderWidth > 0) {
+            horizontalDividers.push({ y: cumY, key: `h-${r}` });
+        }
+    }
+
+    // Compute exact integer X coordinates for vertical dividers
+    const verticalDividers: { x: number; key: string }[] = [];
+    let cumX = 0;
+    for (let c = 0; c < columns - 1; c++) {
+        cumX += colPixelWidths[c];
+        if (borders.insideVertical && insideBorderWidth > 0) {
+            verticalDividers.push({ x: cumX, key: `v-${c}` });
+        }
+    }
+
+    const isSolidBorder = borderStyle === 'solid';
+    const outerSnapOffset = Math.ceil(outerBorderWidth);
 
     return (
         <div 
@@ -288,189 +352,189 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
             className="w-full h-full relative select-none"
             style={{
                 borderRadius: borderRadius > 0 ? `${borderRadius}px` : undefined,
-                borderTop: borderRadius > 0 ? borderCssTop : undefined,
-                borderBottom: borderRadius > 0 ? borderCssBottom : undefined,
-                borderLeft: borderRadius > 0 ? borderCssLeft : undefined,
-                borderRight: borderRadius > 0 ? borderCssRight : undefined,
+                borderTop: useContainerBorder ? borderCssTop : undefined,
+                borderBottom: useContainerBorder ? borderCssBottom : undefined,
+                borderLeft: useContainerBorder ? borderCssLeft : undefined,
+                borderRight: useContainerBorder ? borderCssRight : undefined,
                 boxSizing: 'border-box',
                 overflow: 'hidden',
             }}
         >
-            {/* Table Content Grid with native CSS borders for bulletproof PDF/print rendering */}
-            {(() => {
-                // Pre-calculate exact integer pixel heights for each row to ensure all dividers align with pixel grid
-                let accumulatedPx = 0;
-                const rowPixelHeights = Array(rows).fill(0).map((_, r) => {
-                    const pct = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
-                    if (effectiveTableHeightPx > 0) {
-                        const targetCumulative = Math.round(((r + 1) / rows) * effectiveTableHeightPx);
-                        const h = Math.max(2, targetCumulative - accumulatedPx);
-                        accumulatedPx += h;
-                        return h;
-                    }
-                    return null;
-                });
-
-                return Array(rows).fill(0).map((_, r) => {
-                    const rowHPercent = (rowHeights && rowHeights[r] !== undefined) ? rowHeights[r] : (100 / rows);
-                    const integerH = rowPixelHeights[r];
-                    const rowHeightStyle = integerH !== null ? `${integerH}px` : `${rowHPercent}%`;
-                    const rowHeightPx = integerH !== null ? integerH : Math.max(2, (rowHPercent / 100) * effectiveTableHeightPx);
-                    const isFirstRow = r === 0;
-                    const isLastRow = r === rows - 1;
-                    
-                    return (
-                        <div 
-                            key={r} 
-                            className="flex w-full relative shrink-0" 
-                            style={{ height: rowHeightStyle, minHeight: 0, overflow: 'hidden' }}
-                        >
-                        {Array(columns).fill(0).map((_, c) => {
-                            const isFirstCol = c === 0;
-                            const isLastCol = c === columns - 1;
-                            const cellKey = `${r}-${c}`;
-                            const cellKeyAlt = `${r}_${c}`;
-                            const content = style.table?.cellContent?.[cellKey] ?? style.table?.cellContent?.[cellKeyAlt] ?? (style.table as any)?.data?.[r]?.[c] ?? '';
-                            const isHeaderCell = hasHeader && r === 0;
-                            const headerFallbackStyle = isHeaderCell
-                                ? {
-                                    fontWeight: 'bold',
-                                    verticalAlign: 'middle',
-                                    ...(headerTxtColor ? { color: headerTxtColor } : {})
-                                }
-                                : {};
-                            const cellCustomStyle = filterDefined(cellStyles[cellKey] || cellStyles[cellKeyAlt] || {});
-                            const tStyle = { ...globalTextStyle, ...headerFallbackStyle, ...filterDefined(rowStyles[r]), ...filterDefined(colStyles[c]), ...cellCustomStyle };
-                            const va = (tStyle.verticalAlign as string) || 'top';
-                            
-                            const rawFontSize = typeof tStyle.fontSize === 'number' ? tStyle.fontSize : (parseFloat(String(tStyle.fontSize)) || 10);
-                            const rawPadding = tStyle.cellPadding !== undefined ? Number(tStyle.cellPadding) : 4;
-                            const rawLineHeight = Number(tStyle.lineHeight) || 1.2;
-
-                            // Detect compact rows (e.g. 30-min schedule with skipped lines = 45-46 rows)
-                            const neededSingleLineH = (rawFontSize * rawLineHeight) + (rawPadding * 2);
-                            const isCompactRow = rowHeightPx < neededSingleLineH + 2;
-
-                            const effectiveLineHeight = isCompactRow
-                                ? (rowHeightPx < rawFontSize * 1.25 ? 1.0 : Math.min(rawLineHeight, 1.1))
-                                : rawLineHeight;
-                            const maxFittingFont = Math.max(4.5, Math.floor((rowHeightPx - 1) * 0.82 * 2) / 2);
-                            const effectiveFontSize = Math.min(rawFontSize, maxFittingFont);
-
-                            const singleLineTextH = effectiveFontSize * effectiveLineHeight;
-                            const availVertSpace = Math.max(0, rowHeightPx - singleLineTextH - 0.5);
-                            const padY = Math.max(0, Math.min(rawPadding, Math.floor(availVertSpace / 2)));
-                            const padX = isCompactRow && rowHeightPx < 14 ? Math.min(rawPadding, 2) : rawPadding;
-
-                            const effectiveVa = (isCompactRow && va === 'top') ? 'middle' : va;
-                            let justifyContent = 'flex-start';
-                            if (effectiveVa === 'middle' || effectiveVa === 'center') justifyContent = 'center';
-                            if (effectiveVa === 'bottom') justifyContent = 'flex-end';
-                            
-                            const customBg = tStyle.backgroundColor;
-                            let defaultBg = 'transparent';
-                            if (isHeaderCell) {
-                                defaultBg = headerBgColor;
-                            } else if (zebraRows) {
-                                const dataRowIdx = hasHeader ? r - 1 : r;
-                                if (dataRowIdx % 2 === 1) {
-                                    defaultBg = zebraColor;
-                                }
+            {/* Table Cells (Backgrounds + Content only; borders drawn uniformly in overlay) */}
+            {Array(rows).fill(0).map((_, r) => {
+                const rowHeightPx = rowPixelHeights[r];
+                const useMeasuredCols = measuredSize.width > 0;
+                
+                return (
+                    <div 
+                        key={r} 
+                        className="flex w-full relative shrink-0" 
+                        style={{ height: `${rowHeightPx}px`, minHeight: 0, overflow: 'hidden' }}
+                    >
+                    {Array(columns).fill(0).map((_, c) => {
+                        const cellKey = `${r}-${c}`;
+                        const cellKeyAlt = `${r}_${c}`;
+                        const content = style.table?.cellContent?.[cellKey] ?? style.table?.cellContent?.[cellKeyAlt] ?? (style.table as any)?.data?.[r]?.[c] ?? '';
+                        const isHeaderCell = hasHeader && r === 0;
+                        const headerFallbackStyle = isHeaderCell
+                            ? {
+                                fontWeight: 'bold',
+                                verticalAlign: 'middle',
+                                ...(headerTxtColor ? { color: headerTxtColor } : {})
                             }
-                            const cellBg = (customBg && customBg !== 'transparent') ? customBg : defaultBg;
+                            : {};
+                        const cellCustomStyle = filterDefined(cellStyles[cellKey] || cellStyles[cellKeyAlt] || {});
+                        const tStyle = { ...globalTextStyle, ...headerFallbackStyle, ...filterDefined(rowStyles[r]), ...filterDefined(colStyles[c]), ...cellCustomStyle };
+                        const va = (tStyle.verticalAlign as string) || 'top';
+                        
+                        const rawFontSize = typeof tStyle.fontSize === 'number' ? tStyle.fontSize : (parseFloat(String(tStyle.fontSize)) || 10);
+                        const rawPadding = tStyle.cellPadding !== undefined ? Number(tStyle.cellPadding) : 4;
+                        const rawLineHeight = Number(tStyle.lineHeight) || 1.2;
 
-                            // Calculate individual cell borders with fallback for robust cross-engine rendering
-                            let cellBorderTop: string | undefined = undefined;
-                            let cellBorderBottom: string | undefined = undefined;
-                            let cellBorderLeft: string | undefined = undefined;
-                            let cellBorderRight: string | undefined = undefined;
+                        // Detect compact rows (e.g. 30-min schedule with skipped lines = 45-46 rows)
+                        const neededSingleLineH = (rawFontSize * rawLineHeight) + (rawPadding * 2);
+                        const isCompactRow = rowHeightPx < neededSingleLineH + 2;
 
-                            if (isFirstRow && borders.top && outerBorderWidth > 0 && !hasOuterContainerBorder) {
-                                cellBorderTop = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
+                        const effectiveLineHeight = isCompactRow
+                            ? (rowHeightPx < rawFontSize * 1.25 ? 1.0 : Math.min(rawLineHeight, 1.1))
+                            : rawLineHeight;
+                        const maxFittingFont = Math.max(4.5, Math.floor((rowHeightPx - 1) * 0.82 * 2) / 2);
+                        const effectiveFontSize = Math.min(rawFontSize, maxFittingFont);
+
+                        const singleLineTextH = effectiveFontSize * effectiveLineHeight;
+                        const availVertSpace = Math.max(0, rowHeightPx - singleLineTextH - 0.5);
+                        const padY = Math.max(0, Math.min(rawPadding, Math.floor(availVertSpace / 2)));
+                        const padX = isCompactRow && rowHeightPx < 14 ? Math.min(rawPadding, 2) : rawPadding;
+
+                        const effectiveVa = (isCompactRow && va === 'top') ? 'middle' : va;
+                        let justifyContent = 'flex-start';
+                        if (effectiveVa === 'middle' || effectiveVa === 'center') justifyContent = 'center';
+                        if (effectiveVa === 'bottom') justifyContent = 'flex-end';
+                        
+                        const customBg = tStyle.backgroundColor;
+                        let defaultBg = 'transparent';
+                        if (isHeaderCell) {
+                            defaultBg = headerBgColor;
+                        } else if (zebraRows) {
+                            const dataRowIdx = hasHeader ? r - 1 : r;
+                            if (dataRowIdx % 2 === 1) {
+                                defaultBg = zebraColor;
                             }
+                        }
+                        const cellBg = (customBg && customBg !== 'transparent') ? customBg : defaultBg;
 
-                            if (isLastRow) {
-                                if (borders.bottom && outerBorderWidth > 0 && !hasOuterContainerBorder) {
-                                    cellBorderBottom = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
-                                }
-                            } else if (hasHeader && isFirstRow) {
-                                if (borders.headerSeparator && insideBorderWidth > 0) {
-                                    cellBorderBottom = `${insideBorderWidth}px ${borderStyle} ${borderColor}`;
-                                }
-                            } else {
-                                if (borders.insideHorizontal && insideBorderWidth > 0) {
-                                    cellBorderBottom = `${insideBorderWidth}px ${borderStyle} ${borderColor}`;
-                                }
-                            }
+                        const cellStyle: React.CSSProperties = { 
+                            width: useMeasuredCols ? `${colPixelWidths[c]}px` : `${columnWidths[c]}%`, 
+                            height: '100%', 
+                            backgroundColor: cellBg, 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            justifyContent: justifyContent, 
+                            alignItems: 'stretch', 
+                            fontFamily: tStyle.fontFamily, 
+                            fontSize: `${effectiveFontSize}px`, 
+                            fontWeight: tStyle.fontWeight, 
+                            fontStyle: tStyle.fontStyle || 'normal',
+                            lineHeight: effectiveLineHeight,
+                            color: tStyle.color, 
+                            textAlign: tStyle.textAlign as any, 
+                            verticalAlign: effectiveVa as any, 
+                            textTransform: tStyle.textTransform as any, 
+                            letterSpacing: `${tStyle.letterSpacing}px`,
+                            textWrap: tStyle.textWrap as any,
+                            padding: `${padY}px ${padX}px`,
+                            boxSizing: 'border-box',
+                            overflow: 'hidden',
+                            flexShrink: 0,
+                        };
 
-                            if (isFirstCol && borders.left && outerBorderWidth > 0 && !hasOuterContainerBorder) {
-                                cellBorderLeft = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
-                            }
+                        const cellTextStrokeCss = getTextStrokeCss(tStyle, tStyle.color || '#666666');
+                        const isActive = activeTableCell?.elementId === element.id && activeTableCell?.r === r && activeTableCell?.c === c;
+                        const isCompactSingleLine = isCompactRow && rowHeightPx < effectiveFontSize * 2.1 && !String(content).includes('\n');
 
-                            if (isLastCol) {
-                                if (borders.right && outerBorderWidth > 0 && !hasOuterContainerBorder) {
-                                    cellBorderRight = `${outerBorderWidth}px ${borderStyle} ${borderColor}`;
-                                }
-                            } else {
-                                if (borders.insideVertical && insideBorderWidth > 0) {
-                                    cellBorderRight = `${insideBorderWidth}px ${borderStyle} ${borderColor}`;
-                                }
-                            }
-
-                            const cellStyle: React.CSSProperties = { 
-                                width: `${columnWidths[c]}%`, 
-                                height: '100%', 
-                                backgroundColor: cellBg, 
-                                display: 'flex', 
-                                flexDirection: 'column', 
-                                justifyContent: justifyContent, 
-                                alignItems: 'stretch', 
-                                fontFamily: tStyle.fontFamily, 
-                                fontSize: `${effectiveFontSize}px`, 
-                                fontWeight: tStyle.fontWeight, 
-                                fontStyle: tStyle.fontStyle || 'normal',
-                                lineHeight: effectiveLineHeight,
-                                color: tStyle.color, 
-                                textAlign: tStyle.textAlign as any, 
-                                verticalAlign: effectiveVa as any, 
-                                textTransform: tStyle.textTransform as any, 
-                                letterSpacing: `${tStyle.letterSpacing}px`,
-                                textWrap: tStyle.textWrap as any,
-                                padding: `${padY}px ${padX}px`,
-                                boxSizing: 'border-box',
-                                overflow: 'hidden',
-                                borderTop: cellBorderTop,
-                                borderBottom: cellBorderBottom,
-                                borderLeft: cellBorderLeft,
-                                borderRight: cellBorderRight,
-                            };
-
-                            const cellTextStrokeCss = getTextStrokeCss(tStyle, tStyle.color || '#666666');
-                            const isActive = activeTableCell?.elementId === element.id && activeTableCell?.r === r && activeTableCell?.c === c;
-                            const isCompactSingleLine = isCompactRow && rowHeightPx < effectiveFontSize * 2.1 && !String(content).includes('\n');
-
-                            return (
-                                <TableCell 
-                                    key={c} 
-                                    r={r} 
-                                    c={c} 
-                                    elementId={element.id} 
-                                    content={content} 
-                                    isEditor={isEditor} 
-                                    isHeaderCell={isHeaderCell} 
-                                    style={cellStyle}
-                                    textStrokeStyle={cellTextStrokeCss}
-                                    isActive={isActive} 
-                                    isCompactSingleLine={isCompactSingleLine}
-                                    onTableCellChange={onTableCellChange} 
-                                    onTableCellFocus={onTableCellFocus} 
-                                />
-                            );
-                        })}
-                    </div>
+                        return (
+                            <TableCell 
+                                key={c} 
+                                r={r} 
+                                c={c} 
+                                elementId={element.id} 
+                                content={content} 
+                                isEditor={isEditor} 
+                                isHeaderCell={isHeaderCell} 
+                                style={cellStyle}
+                                textStrokeStyle={cellTextStrokeCss}
+                                isActive={isActive} 
+                                isCompactSingleLine={isCompactSingleLine}
+                                onTableCellChange={onTableCellChange} 
+                                onTableCellFocus={onTableCellFocus} 
+                            />
+                        );
+                    })}
+                </div>
                 );
-            });
-        })()}
+            })}
+
+            {/* Unified Pixel-Locked Borders Overlay — guarantees identical thickness across header & data rows */}
+            <div className="absolute inset-0 pointer-events-none z-20">
+                {!useContainerBorder && outerBorderWidth > 0 && (
+                    <>
+                        {borders.top && (
+                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                        )}
+                        {borders.bottom && (
+                            <div style={{ position: 'absolute', top: `${Math.max(0, Math.round(effectiveTableHeightPx) - outerSnapOffset)}px`, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                        )}
+                        {borders.left && (
+                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                        )}
+                        {borders.right && (
+                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${Math.max(0, Math.round(effectiveTableWidthPx) - outerSnapOffset)}px`, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                        )}
+                    </>
+                )}
+
+                {horizontalDividers.map(d => (
+                    <div
+                        key={d.key}
+                        style={isSolidBorder ? {
+                            position: 'absolute',
+                            top: `${d.y}px`,
+                            left: 0,
+                            right: 0,
+                            height: `${insideBorderWidth}px`,
+                            backgroundColor: borderColor,
+                        } : {
+                            position: 'absolute',
+                            top: `${d.y}px`,
+                            left: 0,
+                            right: 0,
+                            height: 0,
+                            borderTop: `${insideBorderWidth}px ${borderStyle} ${borderColor}`,
+                        }}
+                    />
+                ))}
+
+                {verticalDividers.map(d => (
+                    <div
+                        key={d.key}
+                        style={isSolidBorder ? {
+                            position: 'absolute',
+                            left: `${d.x}px`,
+                            top: 0,
+                            bottom: 0,
+                            width: `${insideBorderWidth}px`,
+                            backgroundColor: borderColor,
+                        } : {
+                            position: 'absolute',
+                            left: `${d.x}px`,
+                            top: 0,
+                            bottom: 0,
+                            width: 0,
+                            borderLeft: `${insideBorderWidth}px ${borderStyle} ${borderColor}`,
+                        }}
+                    />
+                ))}
+            </div>
 
             {/* Interactive Grid Resizers Overlay (Draggable Borders for Columns and Rows) */}
             {isEditor && (
