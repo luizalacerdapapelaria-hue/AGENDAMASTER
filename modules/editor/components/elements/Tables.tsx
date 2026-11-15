@@ -244,8 +244,9 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const headerBgColor = (style.table as any)?.headerBackgroundColor || '#f3f4f6';
     const headerTxtColor = (style.table as any)?.headerTextColor;
     const borderColor = style.table?.borderColor || '#e5e7eb';
-    const fallbackBorderW = style.table?.borderWidth !== undefined ? Number(style.table.borderWidth) : (style.borderWidth !== undefined ? Number(style.borderWidth) : 1);
-    const rawBorderWidth = Number.isFinite(fallbackBorderW) ? fallbackBorderW : 1;
+    const scaleFactor = (pageWidth || 400) / 400;
+    const fallbackBorderW = style.table?.borderWidth !== undefined ? Number(style.table.borderWidth) : (style.borderWidth !== undefined ? Number(style.borderWidth) : (1 * scaleFactor));
+    const rawBorderWidth = Number.isFinite(fallbackBorderW) ? fallbackBorderW : (1 * scaleFactor);
     const rawOuterWidth = style.table?.outerBorderWidth !== undefined ? Number(style.table.outerBorderWidth) : rawBorderWidth;
     const rawInsideWidth = style.table?.insideBorderWidth !== undefined ? Number(style.table.insideBorderWidth) : rawBorderWidth;
 

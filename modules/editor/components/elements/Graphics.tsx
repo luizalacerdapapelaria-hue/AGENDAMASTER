@@ -76,54 +76,65 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
     }
 
     if (element.type === 'habit_tracker') {
+        const scaleFactor = (pageWidth || 400) / 400;
         const markerType = style.habitMarkerType || 'square';
-        const markerSize = style.habitMarkerSize || 16;
-        const markerStroke = style.habitMarkerStroke || 1.5;
-        const spacing = style.habitSpacing || 4;
-        const rawHabitLineW = style.habitLineWidth !== undefined ? Number(style.habitLineWidth) : 1;
-        const lineWidth = Number.isFinite(rawHabitLineW) && rawHabitLineW >= 0 ? rawHabitLineW : 1;
+        const rawMarkerSize = style.habitMarkerSize !== undefined ? Number(style.habitMarkerSize) : (16 * scaleFactor);
+        const markerSize = Math.max(4, Math.round(Number.isFinite(rawMarkerSize) ? rawMarkerSize : 16 * scaleFactor));
+        const rawMarkerStroke = style.habitMarkerStroke !== undefined ? Number(style.habitMarkerStroke) : (1.5 * scaleFactor);
+        const markerStroke = Number.isFinite(rawMarkerStroke) && rawMarkerStroke >= 0 ? Math.round(rawMarkerStroke * 100) / 100 : (1.5 * scaleFactor);
+        const rawSpacing = style.habitSpacing !== undefined ? Number(style.habitSpacing) : (4 * scaleFactor);
+        const spacing = Math.max(0, Math.round(Number.isFinite(rawSpacing) ? rawSpacing : 4 * scaleFactor));
+        const rawHabitLineW = style.habitLineWidth !== undefined ? Number(style.habitLineWidth) : (1 * scaleFactor);
+        const lineWidth = Number.isFinite(rawHabitLineW) && rawHabitLineW >= 0 ? Math.round(rawHabitLineW * 100) / 100 : (1 * scaleFactor);
         const color = style.habitColor || style.color || '#d1d5db';
         const fillColor = style.habitFillColor || style.backgroundColor || 'transparent';
         const showLabel = style.habitShowLabel !== false;
         const label = style.habitLabel || 'Hábitos';
-        
-        // Calculate how many rows fit
-        const rowHeight = Math.max(markerSize, 12) + spacing;
-        const estimatedLabelHeight = showLabel ? (style.fontSize ? style.fontSize * 1.3 + 4 : 20) : 0;
+        const lineColor = style.borderColor || '#f3f4f6';
+
+        // Calculate integer-aligned row count & header height so guide lines never drift across subpixel phases
+        const labelFontSize = style.fontSize || (10 * scaleFactor);
+        const labelLineHeightPx = Math.round(labelFontSize * 1.25);
+        const labelMarginBottomPx = Math.max(2, Math.round(4 * scaleFactor));
+        const estimatedLabelHeight = showLabel ? (labelLineHeightPx + labelMarginBottomPx) : 0;
+        const rowHeight = Math.max(markerSize, Math.round(12 * scaleFactor)) + spacing;
         const availableHeight = (element.h / 100 * pageHeight) - estimatedLabelHeight;
-        
+
         // Use a small negative buffer to ensure we don't render a row that barely fits but might be cut by sub-pixel rendering
-        const habitCount = Math.max(0, Math.floor((availableHeight - 1) / rowHeight));
+        const habitCount = Math.max(0, Math.floor((availableHeight - 1) / Math.max(1, rowHeight)));
+        const markerMarginRight = Math.max(4, Math.round(8 * scaleFactor));
 
         const renderMarker = () => {
             if (markerType === 'dot') {
                 return (
-                    <svg viewBox="0 0 24 24" style={{ width: markerSize, height: markerSize }} className="mr-2 shrink-0">
-                        <circle cx="12" cy="12" r="10" stroke={color} strokeWidth={markerStroke} fill={fillColor} />
+                    <svg viewBox="0 0 24 24" style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }} className="shrink-0 overflow-visible">
+                        <circle cx="12" cy="12" r="10" stroke={color} strokeWidth={markerStroke} fill={fillColor} vectorEffect="non-scaling-stroke" />
                     </svg>
                 );
             }
             if (markerType === 'check') {
                 return (
-                    <svg viewBox="0 0 24 24" style={{ width: markerSize, height: markerSize }} className="mr-2 shrink-0">
-                        <rect x="2" y="2" width="20" height="20" rx="4" stroke={color} strokeWidth={markerStroke} fill={fillColor} />
-                        <path d="M7 12l3 3 7-7" stroke={color} strokeWidth={markerStroke} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                    <svg viewBox="0 0 24 24" style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }} className="shrink-0 overflow-visible">
+                        <rect x="2" y="2" width="20" height="20" rx="4" stroke={color} strokeWidth={markerStroke} fill={fillColor} vectorEffect="non-scaling-stroke" />
+                        <path d="M7 12l3 3 7-7" stroke={color} strokeWidth={markerStroke} fill="none" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                     </svg>
                 );
             }
             // Default square
             return (
-                <div 
-                    style={{ 
-                        width: markerSize, 
-                        height: markerSize, 
-                        borderColor: color, 
-                        borderWidth: markerStroke, 
-                        borderStyle: 'solid',
+                <div
+                    style={{
+                        width: markerSize,
+                        height: markerSize,
+                        marginRight: markerMarginRight,
+                        borderColor: color,
+                        borderWidth: markerStroke > 0 ? `${markerStroke}px` : 0,
+                        borderStyle: markerStroke > 0 ? 'solid' : 'none',
                         backgroundColor: fillColor,
-                        borderRadius: 2
-                    }} 
-                    className="mr-2 shrink-0"
+                        borderRadius: 2,
+                        boxSizing: 'border-box',
+                    }}
+                    className="shrink-0"
                 />
             );
         };
@@ -131,9 +142,11 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
         return (
             <div className="w-full h-full flex flex-col" style={{ opacity: style.opacity }}>
                 {showLabel && (
-                    <div 
-                        style={{ 
-                            fontSize: style.fontSize || 10, 
+                    <div
+                        style={{
+                            fontSize: labelFontSize,
+                            lineHeight: `${labelLineHeightPx}px`,
+                            marginBottom: `${labelMarginBottomPx}px`,
                             fontFamily: style.fontFamily,
                             fontWeight: style.fontWeight || 'bold',
                             fontStyle: style.fontStyle || 'normal',
@@ -142,23 +155,25 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
                             textTransform: (style.textTransform as any) || 'uppercase',
                             letterSpacing: `${style.letterSpacing || 0}px`,
                             ...getTextStrokeCss(style, style.color || '#6b7280'),
-                        }} 
-                        className="mb-1"
+                        }}
                     >
                         {label}
                     </div>
                 )}
-                <div className="flex-1 flex flex-col overflow-hidden" style={{ gap: spacing }}>
+                <div className="flex-1 flex flex-col overflow-hidden" style={{ gap: `${spacing}px` }}>
                     {Array(habitCount).fill(0).map((_, i) => (
-                        <div key={i} className="flex items-center shrink-0" style={{ height: markerSize }}>
+                        <div key={i} className="flex items-center shrink-0" style={{ height: `${markerSize}px` }}>
                             {renderMarker()}
-                            <div 
-                                className="w-full rounded" 
-                                style={{ 
-                                    height: lineWidth,
-                                    backgroundColor: style.borderColor || '#f3f4f6'
-                                }} 
-                            />
+                            {lineWidth > 0 && (
+                                <div
+                                    className="flex-1 min-w-0"
+                                    style={{
+                                        height: `${lineWidth}px`,
+                                        borderRadius: 0,
+                                        backgroundColor: lineColor,
+                                    }}
+                                />
+                            )}
                         </div>
                     ))}
                 </div>

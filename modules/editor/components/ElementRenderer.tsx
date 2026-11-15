@@ -94,8 +94,14 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     if (typeof style.habitMarkerSize === 'number') {
         scaled.habitMarkerSize = style.habitMarkerSize * scaleFactor;
     }
+    if (typeof style.habitMarkerStroke === 'number') {
+        scaled.habitMarkerStroke = style.habitMarkerStroke * scaleFactor;
+    }
     if (typeof style.habitSpacing === 'number') {
         scaled.habitSpacing = style.habitSpacing * scaleFactor;
+    }
+    if (typeof style.habitLineWidth === 'number') {
+        scaled.habitLineWidth = style.habitLineWidth * scaleFactor;
     }
     if (typeof style.gridSize === 'number') {
         scaled.gridSize = style.gridSize * scaleFactor;
@@ -130,10 +136,10 @@ const scaleStyle = (style: any, scaleFactor: number) => {
         scaled.table = {
             ...style.table,
             rowHeight: typeof style.table.rowHeight === 'number' ? style.table.rowHeight * scaleFactor : style.table.rowHeight,
-            // Preserve user-configured exact stroke widths (including decimals like 1.4px, 0.75px, etc.)
-            borderWidth: typeof style.table.borderWidth === 'number' ? style.table.borderWidth : style.table.borderWidth,
-            outerBorderWidth: typeof style.table.outerBorderWidth === 'number' ? style.table.outerBorderWidth : style.table.outerBorderWidth,
-            insideBorderWidth: typeof style.table.insideBorderWidth === 'number' ? style.table.insideBorderWidth : style.table.insideBorderWidth,
+            // Scale stroke widths proportionally across Editor/Zoom/PDF while preserving exact decimal precision
+            borderWidth: typeof style.table.borderWidth === 'number' ? style.table.borderWidth * scaleFactor : style.table.borderWidth,
+            outerBorderWidth: typeof style.table.outerBorderWidth === 'number' ? style.table.outerBorderWidth * scaleFactor : style.table.outerBorderWidth,
+            insideBorderWidth: typeof style.table.insideBorderWidth === 'number' ? style.table.insideBorderWidth * scaleFactor : style.table.insideBorderWidth,
             borderRadius: typeof style.table.borderRadius === 'number' ? style.table.borderRadius * scaleFactor : style.table.borderRadius,
         };
         if (style.table.textStyle) {
@@ -230,6 +236,13 @@ const scaleStyle = (style: any, scaleFactor: number) => {
                 fontSize: typeof style.fullCalendar.days.fontSize === 'number' ? Math.max(1, style.fullCalendar.days.fontSize * scaleFactor) : style.fullCalendar.days.fontSize,
                 letterSpacing: typeof style.fullCalendar.days.letterSpacing === 'number' ? style.fullCalendar.days.letterSpacing * scaleFactor : style.fullCalendar.days.letterSpacing,
                 textStrokeWidth: typeof style.fullCalendar.days.textStrokeWidth === 'number' ? style.fullCalendar.days.textStrokeWidth * scaleFactor : style.fullCalendar.days.textStrokeWidth,
+            };
+        }
+        if (style.fullCalendar.grid) {
+            scaled.fullCalendar.grid = {
+                ...style.fullCalendar.grid,
+                borderWidth: typeof style.fullCalendar.grid.borderWidth === 'number' ? style.fullCalendar.grid.borderWidth * scaleFactor : style.fullCalendar.grid.borderWidth,
+                dividerWidth: typeof style.fullCalendar.grid.dividerWidth === 'number' ? style.fullCalendar.grid.dividerWidth * scaleFactor : style.fullCalendar.grid.dividerWidth,
             };
         }
         if (style.fullCalendar.specialDays?.style) {

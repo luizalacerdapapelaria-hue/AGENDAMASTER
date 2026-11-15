@@ -16917,19 +16917,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                 type="range" 
                                                                                 min="0" 
                                                                                 max="20" 
-                                                                                step="0.5" 
+                                                                                step="0.1" 
                                                                                 value={selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
-                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { outerBorderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                                onChange={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    updateTableConfig(selectedElement.id, { outerBorderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                                }} 
                                                                                 className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
                                                                             />
                                                                             <input 
                                                                                 type="number" 
                                                                                 min="0" 
                                                                                 max="20" 
-                                                                                step="0.5" 
+                                                                                step="0.1" 
                                                                                 value={selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
-                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { outerBorderWidth: parseFloat(e.target.value) || 0 })} 
-                                                                                className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                                                onChange={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    updateTableConfig(selectedElement.id, { outerBorderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                                }} 
+                                                                                className="w-14 text-xs p-1 border rounded text-center font-mono" 
                                                                             />
                                                                         </div>
                                                                     </div>
@@ -16943,19 +16949,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                 type="range" 
                                                                                 min="0" 
                                                                                 max="10" 
-                                                                                step="0.5" 
+                                                                                step="0.1" 
                                                                                 value={selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
-                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { insideBorderWidth: parseFloat(e.target.value) || 0, borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                                onChange={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    const safeVal = Number.isFinite(val) ? Math.max(0, val) : 0;
+                                                                                    updateTableConfig(selectedElement.id, { insideBorderWidth: safeVal, borderWidth: safeVal });
+                                                                                }} 
                                                                                 className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
                                                                             />
                                                                             <input 
                                                                                 type="number" 
                                                                                 min="0" 
                                                                                 max="10" 
-                                                                                step="0.5" 
+                                                                                step="0.1" 
                                                                                 value={selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
-                                                                                onChange={(e) => updateTableConfig(selectedElement.id, { insideBorderWidth: parseFloat(e.target.value) || 0, borderWidth: parseFloat(e.target.value) || 0 })} 
-                                                                                className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                                                onChange={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    const safeVal = Number.isFinite(val) ? Math.max(0, val) : 0;
+                                                                                    updateTableConfig(selectedElement.id, { insideBorderWidth: safeVal, borderWidth: safeVal });
+                                                                                }} 
+                                                                                className="w-14 text-xs p-1 border rounded text-center font-mono" 
                                                                             />
                                                                         </div>
                                                                     </div>
@@ -18750,11 +18764,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Espessura Marcador</label>
                                                                 <input 
                                                                     type="number" 
-                                                                    min="0.5" 
-                                                                    max="5" 
-                                                                    step="0.5"
-                                                                    value={selectedElement.style.habitMarkerStroke || 1.5} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { habitMarkerStroke: parseFloat(e.target.value) })} 
+                                                                    min="0" 
+                                                                    max="10" 
+                                                                    step="0.1" 
+                                                                    value={selectedElement.style.habitMarkerStroke ?? 1.5} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, { habitMarkerStroke: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                    }} 
                                                                     className="w-full text-xs p-1.5 border border-gray-200 rounded" 
                                                                 />
                                                             </div>
@@ -18767,8 +18784,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     type="number" 
                                                                     min="0" 
                                                                     max="20" 
-                                                                    value={selectedElement.style.habitSpacing || 4} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { habitSpacing: parseInt(e.target.value) })} 
+                                                                    value={selectedElement.style.habitSpacing ?? 4} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseInt(e.target.value, 10);
+                                                                        updateElementStyle(selectedElement.id, { habitSpacing: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                    }} 
                                                                     className="w-full text-xs p-1.5 border border-gray-200 rounded" 
                                                                 />
                                                             </div>
@@ -18776,11 +18796,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Espessura Linha</label>
                                                                 <input 
                                                                     type="number" 
-                                                                    min="0.5" 
+                                                                    min="0" 
                                                                     max="10" 
-                                                                    step="0.5"
-                                                                    value={selectedElement.style.habitLineWidth || 1} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { habitLineWidth: parseFloat(e.target.value) })} 
+                                                                    step="0.1" 
+                                                                    value={selectedElement.style.habitLineWidth ?? 1} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, { habitLineWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                    }} 
                                                                     className="w-full text-xs p-1.5 border border-gray-200 rounded" 
                                                                 />
                                                             </div>

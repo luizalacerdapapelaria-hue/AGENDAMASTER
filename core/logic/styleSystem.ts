@@ -231,9 +231,18 @@ export function applyObjectStyleToElement(
     newStyle.table = {
       ...newStyle.table,
       ...(objStyle.borderColor ? { borderColor: objStyle.borderColor } : {}),
-      ...(objStyle.borderWidth !== undefined ? { borderWidth: objStyle.borderWidth } : {}),
+      ...(objStyle.borderWidth !== undefined ? {
+        borderWidth: objStyle.borderWidth,
+        outerBorderWidth: objStyle.borderWidth,
+        insideBorderWidth: objStyle.borderWidth,
+      } : {}),
       ...(objStyle.backgroundColor ? { zebraColor: objStyle.backgroundColor } : {}),
     };
+  }
+  if (el.type === 'habit_tracker') {
+    if (objStyle.borderWidth !== undefined) {
+      newStyle.habitLineWidth = objStyle.borderWidth;
+    }
   }
 
   return { ...el, style: newStyle };

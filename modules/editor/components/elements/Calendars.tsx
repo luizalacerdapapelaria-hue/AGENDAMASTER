@@ -1,9 +1,10 @@
 
-import React, { useRef, useLayoutEffect, useState } from 'react';
+import React, { useRef, useLayoutEffect, useEffect, useState } from 'react';
 import { CalendarElementProps } from './types';
 import { getMonthName, getDayName, generateMonthGrid, checkIsHoliday } from '../../../../core/backend/calendar';
 import { TextStyleConfig, Holiday, DayData, LayoutElement } from '../../../../types';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
 
 const applyTextTransform = (text: string, transform?: string) => {
     if (!text) return text;
@@ -26,6 +27,7 @@ interface SingleMonthProps {
     style: LayoutElement['style'];
     effectiveStyle: LayoutElement['style']['fullCalendar'];
     municipalHolidays?: Holiday[];
+    pageWidth?: number;
 }
 
 const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
@@ -36,6 +38,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
     style,
     effectiveStyle,
     municipalHolidays,
+    pageWidth,
 }) => {
     const gridBoxRef = useRef<HTMLDivElement>(null);
     const headerRowRef = useRef<HTMLDivElement>(null);
@@ -132,10 +135,11 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
             ? specialDaysConfig.style.fontSize
             : dayStyle.fontSize);
 
-    const rawOuterW = Number(gridConfig.borderWidth !== undefined ? gridConfig.borderWidth : 1);
+    const scaleFactor = (pageWidth || 400) / 400;
+    const rawOuterW = Number(gridConfig.borderWidth !== undefined ? gridConfig.borderWidth : (1 * scaleFactor));
     const rawDividerW = gridConfig.dividerWidth !== undefined ? Number(gridConfig.dividerWidth) : rawOuterW;
-    const outerWidth = Math.max(0, rawOuterW <= 0 ? 0 : Math.round(rawOuterW * 100) / 100);
-    const dividerThickness = Math.max(0, rawDividerW <= 0 ? 0 : Math.round(rawDividerW * 100) / 100);
+    const outerWidth = Math.max(0, !Number.isFinite(rawOuterW) || rawOuterW <= 0 ? 0 : Math.round(rawOuterW * 100) / 100);
+    const dividerThickness = Math.max(0, !Number.isFinite(rawDividerW) || rawDividerW <= 0 ? 0 : Math.round(rawDividerW * 100) / 100);
     const borderStyleName = gridConfig.borderStyle || 'solid';
     const isSolidBorder = borderStyleName === 'solid';
 
@@ -222,6 +226,12 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
         : (effectiveStyle?.weekdayPadding !== undefined
             ? `${effectiveStyle.weekdayPadding}px`
             : (hasWeekAlign ? '2px 4px' : (isCustomWeekdayHeight ? '0px 2px' : '1px 2px')));
+
+    useEffect(() => {
+        if (titleStyle.fontFamily) ensureFontLoaded(titleStyle.fontFamily);
+        if (weekStyle.fontFamily) ensureFontLoaded(weekStyle.fontFamily);
+        if (dayStyle.fontFamily) ensureFontLoaded(dayStyle.fontFamily);
+    }, [titleStyle.fontFamily, weekStyle.fontFamily, dayStyle.fontFamily]);
 
     useLayoutEffect(() => {
         const box = gridBoxRef.current;
@@ -312,22 +322,24 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
     const calRightInset = hasOuterBorders && gridConfig.borders?.right ? outerWidth : 0;
 
     return (
-        <div className="flex flex-col w-full h-full min-h-0 overflow-hidden">
+        <div className="flex flex-col w-full h-full min-h-0 overflow-visible">
             <div
                 data-cal-part="title"
-                className="mb-1 pb-0.5 shrink-0 truncate"
+                className="mb-1 shrink-0"
                 style={{
                     fontSize: titleStyle.fontSize,
-                    fontFamily: titleStyle.fontFamily,
+                    fontFamily: getSafeFontFamily(titleStyle.fontFamily),
                     fontWeight: titleStyle.fontWeight,
+                    fontStyle: titleStyle.fontStyle || 'normal',
                     color: titleStyle.color,
                     textAlign: titleStyle.textAlign,
                     textTransform: cssTitleTransform as any,
                     letterSpacing: `${titleStyle.letterSpacing}px`,
-                    lineHeight: titleStyle.lineHeight || 1.2,
+                    lineHeight: titleStyle.lineHeight || 1.35,
+                    padding: '2px 2px 3px 2px',
                     whiteSpace: 'nowrap',
-                    overflow: titleStyle.textStrokeWidth ? 'visible' : 'hidden',
-                    textOverflow: 'ellipsis',
+                    overflow: 'visible',
+                    textOverflow: 'clip',
                     backgroundColor: titleStyle.backgroundColor,
                     ...getTextStrokeCss(titleStyle, titleStyle.color || '#000000'),
                 }}
@@ -724,7 +736,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
     );
 };
 
-export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayData, style, globalCalendarStyle, municipalHolidays, calendarIndex }) => {
+export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayData, style, globalCalendarStyle, municipalHolidays, calendarIndex, pageWidth }) => {
     const d = dayData;
 
     const getEffectiveStyle = () => {
@@ -798,6 +810,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                     style={style}
                     effectiveStyle={effectiveStyle}
                     municipalHolidays={municipalHolidays}
+                    pageWidth={pageWidth}
                 />
             </div>
         );
@@ -826,7 +839,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         return (
             <div className="w-full h-full" style={containerStyle}>
                 {months.map(m => (
-                    <div key={m} className="overflow-hidden min-h-0">
+                    <div key={m} className="overflow-visible min-h-0">
                         <SingleMonthCalendar
                             monthIndex={m}
                             year={targetYear}
@@ -835,6 +848,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                             style={style}
                             effectiveStyle={effectiveStyle}
                             municipalHolidays={municipalHolidays}
+                            pageWidth={pageWidth}
                         />
                     </div>
                 ))}
