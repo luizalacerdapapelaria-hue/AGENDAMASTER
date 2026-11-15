@@ -1,0 +1,597 @@
+import { DayData, Holiday } from '../../types';
+
+// --- BACKEND SIMULATION ---
+// Esta lógica deve residir no servidor em produção para proteção da propriedade intelectual.
+
+const getFixedHolidays = (year: number): Holiday[] => [
+  { date: `${year}-01-01`, name: 'Confraternização Universal', type: 'national' },
+  { date: `${year}-04-21`, name: 'Tiradentes', type: 'national' },
+  { date: `${year}-05-01`, name: 'Dia do Trabalho', type: 'national' },
+  { date: `${year}-09-07`, name: 'Independência do Brasil', type: 'national' },
+  { date: `${year}-10-12`, name: 'Nossa Senhora Aparecida', type: 'national' },
+  { date: `${year}-11-02`, name: 'Finados', type: 'national' },
+  { date: `${year}-11-15`, name: 'Proclamação da República', type: 'national' },
+  { date: `${year}-11-20`, name: 'Dia Nacional de Zumbi e da Consciência Negra', type: 'national' },
+  { date: `${year}-12-25`, name: 'Natal', type: 'national' },
+];
+
+const getMobileHolidays = (year: number): Holiday[] => {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+
+  const easterDate = new Date(year, month - 1, day);
+  const carnivalDate = new Date(easterDate); carnivalDate.setDate(easterDate.getDate() - 47);
+  const corpusDate = new Date(easterDate); corpusDate.setDate(easterDate.getDate() + 60);
+  const goodFridayDate = new Date(easterDate); goodFridayDate.setDate(easterDate.getDate() - 2);
+
+  const formatDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const dStr = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dStr}`;
+  };
+
+  return [
+    { date: formatDate(carnivalDate), name: 'Carnaval', type: 'optional' },
+    { date: formatDate(goodFridayDate), name: 'Paixão de Cristo', type: 'national' },
+    { date: formatDate(easterDate), name: 'Páscoa', type: 'religious' },
+    { date: formatDate(corpusDate), name: 'Corpus Christi', type: 'optional' },
+  ];
+};
+
+export type HolidayDateFormat = 'full_written' | 'full_with_weekday' | 'short_written' | 'numeric' | 'day_month_name';
+
+export interface FormattedHolidayItem {
+  date: string;
+  day: number;
+  month: number; // 0-11
+  year: number;
+  dayOfWeek: number; // 0-6
+  name: string;
+  type: string;
+}
+
+export const getYearHolidays = (
+  year: number,
+  options: {
+    includeOptional?: boolean;
+    includeEaster?: boolean;
+    municipalHolidays?: Holiday[];
+  } = {}
+): FormattedHolidayItem[] => {
+  const includeOptional = options.includeOptional !== false; // default true
+  const includeEaster = options.includeEaster !== false;     // default true
+  const rawHolidays: Holiday[] = [
+    ...getFixedHolidays(year),
+    ...getMobileHolidays(year).filter(h => {
+      if (h.name === 'Páscoa' && !includeEaster) return false;
+      if (h.type === 'optional' && !includeOptional) return false;
+      return true;
+    })
+  ];
+
+  if (options.municipalHolidays && options.municipalHolidays.length > 0) {
+    for (const mh of options.municipalHolidays) {
+      if (!mh.date || !mh.name) continue;
+      const parts = mh.date.trim().split('-');
+      if (parts.length === 3) {
+        const m = parts[1].padStart(2, '0');
+        const d = parts[2].padStart(2, '0');
+        rawHolidays.push({ ...mh, date: `${year}-${m}-${d}`, type: mh.type || 'municipal' });
+      } else {
+        rawHolidays.push(mh);
+      }
+    }
+  }
+
+  const itemsMap = new Map<string, FormattedHolidayItem>();
+
+  for (const h of rawHolidays) {
+    if (!h.date || !h.name) continue;
+    const parts = h.date.trim().split('-');
+    if (parts.length < 3) continue;
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dateObj = new Date(y, m, d, 12, 0, 0);
+
+    const key = `${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (!itemsMap.has(key)) {
+      itemsMap.set(key, {
+        date: h.date,
+        day: d,
+        month: m,
+        year: y,
+        dayOfWeek: dateObj.getDay(),
+        name: h.name,
+        type: h.type || 'national'
+      });
+    }
+  }
+
+  const list = Array.from(itemsMap.values());
+  list.sort((a, b) => {
+    if (a.month !== b.month) return a.month - b.month;
+    return a.day - b.day;
+  });
+
+  return list;
+};
+
+export const formatHolidayItemText = (
+  item: FormattedHolidayItem,
+  format: HolidayDateFormat = 'full_written',
+  padDay = true
+): string => {
+  const dayStr = padDay ? String(item.day).padStart(2, '0') : String(item.day);
+  const monthNameFull = getMonthName(item.month, 'full');
+  const monthNameShort = getMonthName(item.month, 'short');
+  const monthNumStr = String(item.month + 1).padStart(2, '0');
+  const dayOfWeekName = getDayName(item.dayOfWeek, 'full');
+
+  switch (format) {
+    case 'full_written':
+      // Ex: 01 de Janeiro - Confraternização Universal
+      return `${dayStr} de ${monthNameFull} - ${item.name}`;
+
+    case 'full_with_weekday':
+      // Ex: 01 de Janeiro (Quarta-feira) - Confraternização Universal
+      return `${dayStr} de ${monthNameFull} (${dayOfWeekName}) - ${item.name}`;
+
+    case 'short_written':
+      // Ex: 01 Jan - Confraternização Universal
+      return `${dayStr} ${monthNameShort} - ${item.name}`;
+
+    case 'day_month_name':
+      // Ex: 01/Jan - Confraternização Universal
+      return `${dayStr}/${monthNameShort} - ${item.name}`;
+
+    case 'numeric':
+    default:
+      // Ex: 01/01 - Confraternização Universal
+      return `${dayStr}/${monthNumStr} - ${item.name}`;
+  }
+};
+
+export const generateHolidayListFullText = (
+  year: number,
+  options: {
+    format?: HolidayDateFormat;
+    includeOptional?: boolean;
+    includeEaster?: boolean;
+    municipalHolidays?: Holiday[];
+    padDay?: boolean;
+  } = {}
+): string => {
+  const items = getYearHolidays(year, options);
+  const format = options.format || 'full_written';
+  const padDay = options.padDay !== false;
+
+  return items.map(item => formatHolidayItemText(item, format, padDay)).join('\n');
+};
+
+// Helper function exported for UI rendering
+// Moon Math Constants
+const knownNewMoon = new Date('2000-01-06').getTime();
+const cycle = 29.53058867;
+
+export const checkIsHoliday = (year: number, month: number, day: number, municipalHolidays: Holiday[] = []): string | undefined => {
+    const monthStr = String(month + 1).padStart(2, '0');
+    const dayStr = String(day).padStart(2, '0');
+    const dateStr = `${year}-${monthStr}-${dayStr}`;
+
+    if (municipalHolidays && municipalHolidays.length > 0) {
+        for (const mh of municipalHolidays) {
+            if (!mh.date || !mh.name) continue;
+            const parts = mh.date.trim().split('-');
+            if (parts.length === 3) {
+                const m = parts[1].padStart(2, '0');
+                const d = parts[2].padStart(2, '0');
+                if (m === monthStr && d === dayStr) {
+                    return mh.name;
+                }
+            } else if (mh.date === dateStr) {
+                return mh.name;
+            }
+        }
+    }
+
+    const holidays = [...getFixedHolidays(year), ...getMobileHolidays(year)];
+    return holidays.find(h => h.date === dateStr)?.name;
+};
+
+export const generateCalendarYear = (
+  year: number,
+  includeHolidays: boolean = true,
+  municipalHolidays: Holiday[] = [],
+  startMonth: number = 0,
+  durationMonths: number = 12
+): DayData[] => {
+  const days: DayData[] = [];
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + durationMonths, 0);
+  
+  const startYear = start.getFullYear();
+  const endYear = end.getFullYear();
+  let holidays: Holiday[] = [];
+  if (includeHolidays !== false) {
+    for (let y = startYear; y <= endYear; y++) {
+      holidays.push(...getFixedHolidays(y), ...getMobileHolidays(y));
+    }
+  }
+
+  if (municipalHolidays && municipalHolidays.length > 0) {
+    for (const mh of municipalHolidays) {
+      if (!mh.date || !mh.name) continue;
+      const parts = mh.date.trim().split('-');
+      if (parts.length === 3) {
+        const m = parts[1].padStart(2, '0');
+        const d = parts[2].padStart(2, '0');
+        for (let y = startYear; y <= endYear; y++) {
+          holidays.push({ ...mh, date: `${y}-${m}-${d}` });
+        }
+      } else {
+        holidays.push(mh);
+      }
+    }
+  }
+
+  const holidayMap = new Map<string, string>();
+  holidays.forEach(h => {
+    if (h.date && h.name) {
+      const parts = h.date.trim().split('-');
+      if (parts.length === 3) {
+        const iso = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        holidayMap.set(iso, h.name);
+      } else {
+        holidayMap.set(h.date, h.name);
+      }
+    }
+  });
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dYear = d.getFullYear();
+    const dMonth = String(d.getMonth() + 1).padStart(2, '0');
+    const dDay = String(d.getDate()).padStart(2, '0');
+    const isoDate = `${dYear}-${dMonth}-${dDay}`;
+    
+    // Moon Math
+    const current = d.getTime();
+    const diffDays = (current - knownNewMoon) / (1000 * 60 * 60 * 24);
+    const phasePos = ((diffDays % cycle) + cycle) % cycle / cycle;
+    let moonPhase = '';
+    // Continuous assignment to ensure it appears on all pages
+    if (phasePos < 0.06 || phasePos > 0.94) moonPhase = 'Nova';
+    else if (phasePos < 0.44) moonPhase = 'Crescente';
+    else if (phasePos < 0.56) moonPhase = 'Lua cheia';
+    else moonPhase = 'Minguante';
+
+    days.push({
+      date: new Date(d),
+      dayOfWeek: d.getDay(),
+      dayOfMonth: d.getDate(),
+      month: d.getMonth(),
+      year: d.getFullYear(),
+      holiday: holidayMap.get(isoDate),
+      moonPhase: moonPhase
+    });
+  }
+
+  return days;
+};
+
+export const generatePlannerDays = (
+  year: number,
+  includeHolidays: boolean,
+  municipalHolidays: Holiday[] = [],
+  startMonth: number = 0,
+  durationMonths: number = 12,
+  weeklyStartMode: 'full_week' | 'strict_first_day' = 'full_week',
+  startOfWeekDay: number = 1,
+  showPaddingDaysNumbers: boolean = true
+): DayData[] => {
+  const isStrictFirstDay = weeklyStartMode === 'strict_first_day';
+  const targetEndDay = (startOfWeekDay + 6) % 7;
+
+  // Pre-calculate holidays for all target years
+  const startYear = year + Math.floor(startMonth / 12);
+  const endYear = year + Math.floor((startMonth + durationMonths) / 12);
+  const holidays: Holiday[] = [];
+  if (includeHolidays !== false) {
+    for (let y = startYear - 1; y <= endYear + 1; y++) {
+      holidays.push(...getFixedHolidays(y), ...getMobileHolidays(y));
+    }
+  }
+
+  if (municipalHolidays && municipalHolidays.length > 0) {
+    for (const mh of municipalHolidays) {
+      if (!mh.date || !mh.name) continue;
+      const parts = mh.date.trim().split('-');
+      if (parts.length === 3) {
+        const m = parts[1].padStart(2, '0');
+        const d = parts[2].padStart(2, '0');
+        for (let y = startYear - 1; y <= endYear + 1; y++) {
+          holidays.push({ ...mh, date: `${y}-${m}-${d}` });
+        }
+      } else {
+        holidays.push(mh);
+      }
+    }
+  }
+
+  const holidayMap = new Map<string, string>();
+  holidays.forEach(h => {
+    if (h.date && h.name) {
+      const parts = h.date.trim().split('-');
+      if (parts.length === 3) {
+        const iso = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        holidayMap.set(iso, h.name);
+      } else {
+        holidayMap.set(h.date, h.name);
+      }
+    }
+  });
+
+  const getMoonPhaseForDate = (d: Date): string => {
+    const current = d.getTime();
+    const diffDays = (current - knownNewMoon) / (1000 * 60 * 60 * 24);
+    const phasePos = ((diffDays % cycle) + cycle) % cycle / cycle;
+    if (phasePos < 0.06 || phasePos > 0.94) return 'Nova';
+    if (phasePos < 0.44) return 'Crescente';
+    if (phasePos < 0.56) return 'Lua cheia';
+    return 'Minguante';
+  };
+
+  const days: DayData[] = [];
+
+  for (let m = startMonth; m < startMonth + durationMonths; m++) {
+    const currentYear = year + Math.floor(m / 12);
+    const monthIndex = ((m % 12) + 12) % 12;
+
+    const firstDate = new Date(currentYear, monthIndex, 1);
+    const lastDate = new Date(currentYear, monthIndex + 1, 0);
+    const daysInMonth = lastDate.getDate();
+
+    // 1. Padding at the beginning of the month's first week
+    const firstDayOfWeek = firstDate.getDay();
+    const startDiff = (firstDayOfWeek - startOfWeekDay + 7) % 7;
+
+    if (startDiff > 0) {
+      for (let i = startDiff; i > 0; i--) {
+        const padDate = new Date(firstDate);
+        padDate.setDate(padDate.getDate() - i);
+
+        // When strict_first_day: box is strictly empty with dayOfMonth = 0 (no prior month dates)
+        // When full_week: includes prior month dates if showPaddingDaysNumbers is true
+        const padDayNum = isStrictFirstDay ? 0 : (showPaddingDaysNumbers ? padDate.getDate() : 0);
+        const padHoliday = (isStrictFirstDay || !showPaddingDaysNumbers) ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
+        const padMoon = isStrictFirstDay ? undefined : getMoonPhaseForDate(padDate);
+
+        days.push({
+          date: new Date(padDate),
+          dayOfWeek: padDate.getDay(),
+          dayOfMonth: padDayNum,
+          month: monthIndex, // Keeps context bound to this month's first week
+          year: currentYear,
+          holiday: padHoliday,
+          moonPhase: padMoon,
+          isPaddingDay: true
+        });
+      }
+    }
+
+    // 2. Active days of this month
+    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+      const d = new Date(currentYear, monthIndex, dayNum);
+      const isoDate = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      const holidayName = checkIsHoliday(currentYear, monthIndex, dayNum, municipalHolidays) || holidayMap.get(isoDate);
+
+      days.push({
+        date: new Date(d),
+        dayOfWeek: d.getDay(),
+        dayOfMonth: dayNum,
+        month: monthIndex,
+        year: currentYear,
+        holiday: holidayName,
+        moonPhase: getMoonPhaseForDate(d),
+        isPaddingDay: false
+      });
+    }
+
+    // 3. Padding at the end of the month's final week
+    const lastDayOfWeek = lastDate.getDay();
+    const endDiff = (targetEndDay - lastDayOfWeek + 7) % 7;
+
+    if (endDiff > 0) {
+      for (let i = 1; i <= endDiff; i++) {
+        const padDate = new Date(lastDate);
+        padDate.setDate(padDate.getDate() + i);
+
+        const padDayNum = isStrictFirstDay ? 0 : (showPaddingDaysNumbers ? padDate.getDate() : 0);
+        const padHoliday = (isStrictFirstDay || !showPaddingDaysNumbers) ? undefined : (checkIsHoliday(padDate.getFullYear(), padDate.getMonth(), padDate.getDate(), municipalHolidays) || holidayMap.get(`${padDate.getFullYear()}-${String(padDate.getMonth() + 1).padStart(2, '0')}-${String(padDate.getDate()).padStart(2, '0')}`));
+        const padMoon = isStrictFirstDay ? undefined : getMoonPhaseForDate(padDate);
+
+        days.push({
+          date: new Date(padDate),
+          dayOfWeek: padDate.getDay(),
+          dayOfMonth: padDayNum,
+          month: monthIndex, // Keeps context bound to this month's final week
+          year: currentYear,
+          holiday: padHoliday,
+          moonPhase: padMoon,
+          isPaddingDay: true
+        });
+      }
+    }
+  }
+
+  return days;
+};
+
+export const generateGenericPages = (count: number): DayData[] => {
+    const pages: DayData[] = [];
+    for (let i = 0; i < count; i++) {
+        const seqDate = new Date(2025, 0, 1 + i);
+        pages.push({
+            date: seqDate,
+            dayOfWeek: (i % 7),
+            dayOfMonth: i + 1,
+            month: seqDate.getMonth(),
+            year: seqDate.getFullYear()
+        });
+    }
+    return pages;
+};
+
+export const generatePermanentAgendaDays = (
+    dayCount: number = 365,
+    splitIntoCycles: boolean = false,
+    daysPerCycle: number = 31
+): DayData[] => {
+    const pages: DayData[] = [];
+    if (splitIntoCycles) {
+        let seq = 0;
+        for (let cycleIdx = 0; cycleIdx < 12; cycleIdx++) {
+            for (let d = 0; d < daysPerCycle; d++) {
+                // Sequential date strictly for rotating daily quotes/verses across pages
+                const seqDate = new Date(2025, 0, 1 + seq);
+                pages.push({
+                    date: seqDate,
+                    dayOfWeek: seq % 7,
+                    dayOfMonth: 0,
+                    month: cycleIdx,
+                    year: 0,
+                    holiday: undefined,
+                    moonPhase: undefined
+                });
+                seq++;
+            }
+        }
+        return pages;
+    }
+
+    const total = Math.max(1, dayCount || 365);
+    for (let i = 0; i < total; i++) {
+        // Sequential date strictly for rotating daily quotes/verses across pages
+        const seqDate = new Date(2025, 0, 1 + i);
+        pages.push({
+            date: seqDate,
+            dayOfWeek: i % 7,
+            dayOfMonth: 0,
+            month: 0,
+            year: 0,
+            holiday: undefined,
+            moonPhase: undefined
+        });
+    }
+    return pages;
+};
+
+export const generateMonthGrid = (year: number, month: number, startOfWeekDay: number | boolean = 0): (number | null)[][] => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    
+    let startDayNumber = 0;
+    if (typeof startOfWeekDay === 'boolean') {
+        startDayNumber = startOfWeekDay ? 1 : 0;
+    } else {
+        startDayNumber = (typeof startOfWeekDay === 'number' && startOfWeekDay >= 0 && startOfWeekDay <= 6) ? startOfWeekDay : 0;
+    }
+
+    const jsDay = firstDay.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const startOffset = (jsDay - startDayNumber + 7) % 7;
+
+    const grid: (number | null)[][] = [];
+    let currentWeek: (number | null)[] = Array(7).fill(null);
+    let currentDay = 1;
+
+    for (let i = startOffset; i < 7; i++) currentWeek[i] = currentDay++;
+    grid.push(currentWeek);
+
+    while (currentDay <= daysInMonth) {
+        const week: (number | null)[] = Array(7).fill(null);
+        for (let i = 0; i < 7 && currentDay <= daysInMonth; i++) week[i] = currentDay++;
+        grid.push(week);
+    }
+    
+    return grid;
+};
+
+export const getMonthName = (i: number, format?: string) => {
+    const idx = ((i % 12) + 12) % 12;
+    const full = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const short = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const twoLetters = ['Ja', 'Fe', 'Ma', 'Ab', 'Ma', 'Ju', 'Ju', 'Ag', 'Se', 'Ou', 'No', 'De'];
+    const initial = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+
+    if (format === 'short' || format === '3_letters') return short[idx];
+    if (format === 'two_letters' || format === '2_letters') return twoLetters[idx];
+    if (format === 'initial' || format === '1_letter') return initial[idx];
+    return full[idx];
+};
+
+export const getDayName = (i: number, format?: string) => {
+    const idx = ((i % 7) + 7) % 7;
+    const full = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const noFeira = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const short = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const twoLetters = ['Do', 'Se', 'Te', 'Qu', 'Qi', 'Se', 'Sá'];
+    const initial = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+    const ordinalFull = ['Domingo', '2ª-feira', '3ª-feira', '4ª-feira', '5ª-feira', '6ª-feira', 'Sábado'];
+    const ordinalShort = ['Dom', '2ª', '3ª', '4ª', '5ª', '6ª', 'Sáb'];
+
+    if (format === 'no_feira' || format === 'without_feira' || format === 'medium' || format === 'short_name') return noFeira[idx];
+    if (format === 'short' || format === '3_letters') return short[idx];
+    if (format === 'two_letters' || format === '2_letters') return twoLetters[idx];
+    if (format === 'initial' || format === '1_letter') return initial[idx];
+    if (format === 'ordinal_full') return ordinalFull[idx];
+    if (format === 'ordinal_short') return ordinalShort[idx];
+    return full[idx];
+};
+
+export const isProjectYearRestricted = (
+    projectType: string | undefined,
+    year: number,
+    startMonth: number = 0,
+    durationMonths: number = 12,
+    userPlan: string = '',
+    isPermanent: boolean = false
+): boolean => {
+    if (isPermanent || projectType === 'notebook' || projectType === 'devotional') return false;
+
+    const planLower = (userPlan || '').toLowerCase();
+    const is2028Unlocked = planLower.includes('2028') || planLower.includes('renovad') || planLower.includes('master');
+
+    if (is2028Unlocked) return false;
+
+    if (year < 2026 || year > 2028) return true;
+    if (year === 2028) return true;
+
+    let monthsIn2028OrBeyond = 0;
+    for (let i = 0; i < durationMonths; i++) {
+        const yearOffset = Math.floor((startMonth + i) / 12);
+        const mYear = year + yearOffset;
+        if (mYear >= 2028) {
+            monthsIn2028OrBeyond++;
+        }
+    }
+
+    if (monthsIn2028OrBeyond > 1) {
+        return true;
+    }
+
+    return false;
+};

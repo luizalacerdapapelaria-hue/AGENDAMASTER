@@ -13,7 +13,7 @@ function generateLatestYaml() {
   let exeFile = files.find(f => f.toLowerCase().endsWith('.exe') && !f.toLowerCase().includes('elevate') && !f.toLowerCase().includes('uninstall'));
 
   const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
-  const version = pkg.version || '2.0.3';
+  const version = pkg.version || '2.0.5';
   const exeName = exeFile || `Agenda.Master.Setup.${version}.exe`;
   const exePath = path.join(distDesktop, exeName);
 

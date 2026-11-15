@@ -305,7 +305,11 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
         }
     }
 
-    const outerSnapOffset = Math.ceil(outerWidth);
+    const hasOuterBorders = outerWidth > 0;
+    const calTopInset = hasOuterBorders && gridConfig.borders?.top ? outerWidth : 0;
+    const calBottomInset = hasOuterBorders && gridConfig.borders?.bottom ? outerWidth : 0;
+    const calLeftInset = hasOuterBorders && gridConfig.borders?.left ? outerWidth : 0;
+    const calRightInset = hasOuterBorders && gridConfig.borders?.right ? outerWidth : 0;
 
     return (
         <div className="flex flex-col w-full h-full min-h-0 overflow-hidden">
@@ -333,7 +337,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
 
             <div
                 ref={gridBoxRef}
-                className={`flex flex-col w-full relative ${isCustomDayRowHeight ? 'shrink-0' : 'flex-1 min-h-0'}`}
+                className={`flex flex-col w-full relative overflow-hidden ${isCustomDayRowHeight ? 'shrink-0' : 'flex-1 min-h-0'}`}
             >
                 {/* Weekday Header Row */}
                 <div
@@ -651,9 +655,12 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                     })}
                 </div>
 
-                {/* Unified Pixel-Locked Grid Border Overlay — prevents subpixel cell-width variation in PDF */}
+                {/* Unified Pixel-Locked Grid Border Overlay — prevents subpixel variation & protruding edges in PDF */}
                 {(hasMeasuredWidth || hasMeasuredHeight) && (
-                    <div className="absolute inset-0 pointer-events-none z-20">
+                    <div
+                        className="absolute top-0 left-0 right-0 pointer-events-none z-20 overflow-hidden"
+                        style={{ height: totalRenderHeightPx > 0 ? `${totalRenderHeightPx}px` : '100%' }}
+                    >
                         {outerWidth > 0 && (
                             <>
                                 {gridConfig.borders?.top && (
@@ -667,24 +674,24 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                                 {gridConfig.borders?.bottom && totalRenderHeightPx > 0 && (
                                     <div
                                         style={isSolidBorder
-                                            ? { position: 'absolute', top: `${Math.max(0, totalRenderHeightPx - outerSnapOffset)}px`, left: 0, right: 0, height: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', top: `${Math.max(0, totalRenderHeightPx - outerSnapOffset)}px`, left: 0, right: 0, height: 0, borderTop: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
+                                            ? { position: 'absolute', bottom: 0, left: 0, right: 0, height: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
+                                            : { position: 'absolute', bottom: 0, left: 0, right: 0, height: 0, borderBottom: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
                                         }
                                     />
                                 )}
                                 {gridConfig.borders?.left && (
                                     <div
                                         style={isSolidBorder
-                                            ? { position: 'absolute', top: 0, bottom: 0, left: 0, width: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', top: 0, bottom: 0, left: 0, width: 0, borderLeft: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
+                                            ? { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, left: 0, width: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
+                                            : { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, left: 0, width: 0, borderLeft: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
                                         }
                                     />
                                 )}
                                 {gridConfig.borders?.right && measuredGrid.width > 0 && (
                                     <div
                                         style={isSolidBorder
-                                            ? { position: 'absolute', top: 0, bottom: 0, left: `${Math.max(0, measuredGrid.width - outerSnapOffset)}px`, width: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', top: 0, bottom: 0, left: `${Math.max(0, measuredGrid.width - outerSnapOffset)}px`, width: 0, borderLeft: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
+                                            ? { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, right: 0, width: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
+                                            : { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, right: 0, width: 0, borderRight: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
                                         }
                                     />
                                 )}
@@ -695,8 +702,8 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                             <div
                                 key={`cal-h-${idx}`}
                                 style={isSolidBorder
-                                    ? { position: 'absolute', top: `${y}px`, left: 0, right: 0, height: `${dividerThickness}px`, backgroundColor: gridConfig.borderColor }
-                                    : { position: 'absolute', top: `${y}px`, left: 0, right: 0, height: 0, borderTop: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}` }
+                                    ? { position: 'absolute', top: `${y}px`, left: `${calLeftInset}px`, right: `${calRightInset}px`, height: `${dividerThickness}px`, backgroundColor: gridConfig.borderColor }
+                                    : { position: 'absolute', top: `${y}px`, left: `${calLeftInset}px`, right: `${calRightInset}px`, height: 0, borderTop: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}` }
                                 }
                             />
                         ))}
@@ -705,8 +712,8 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                             <div
                                 key={`cal-v-${idx}`}
                                 style={isSolidBorder
-                                    ? { position: 'absolute', left: `${x}px`, top: 0, bottom: 0, width: `${dividerThickness}px`, backgroundColor: gridConfig.borderColor }
-                                    : { position: 'absolute', left: `${x}px`, top: 0, bottom: 0, width: 0, borderLeft: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}` }
+                                    ? { position: 'absolute', left: `${x}px`, top: `${calTopInset}px`, bottom: `${calBottomInset}px`, width: `${dividerThickness}px`, backgroundColor: gridConfig.borderColor }
+                                    : { position: 'absolute', left: `${x}px`, top: `${calTopInset}px`, bottom: `${calBottomInset}px`, width: 0, borderLeft: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}` }
                                 }
                             />
                         ))}

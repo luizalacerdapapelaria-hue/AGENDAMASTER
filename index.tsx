@@ -90,7 +90,7 @@ if (typeof window !== 'undefined') {
   } catch (_) {}
 
   // Atualização silenciosa de versão: limpa somente caches antigos de arquivos, mantendo a aluna logada!
-  const CURRENT_SYSTEM_VERSION = 'agendamaster-v2.0.3';
+  const CURRENT_SYSTEM_VERSION = 'agendamaster-v2.0.5';
   const lastSavedVersion = localStorage.getItem('agendamaster_system_version');
 
   if (lastSavedVersion !== CURRENT_SYSTEM_VERSION) {
@@ -220,7 +220,7 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   } else {
     window.addEventListener('load', () => {
       navigator.serviceWorker
-        .register('/sw.js?v=2.0.3', { updateViaCache: 'none' })
+        .register('/sw.js?v=2.0.5', { updateViaCache: 'none' })
         .then((reg) => {
           reg.update().catch(() => {});
           document.addEventListener('visibilitychange', () => {

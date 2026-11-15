@@ -1,0 +1,5 @@
+{
+  "version": "2.0.5",
+  "releaseDate": "2026-11-14",
+  "notes": "Precisão milimétrica nas bordas de tabelas e calendários sem arestas no PDF e correção definitiva das linhas avulsas."
+}

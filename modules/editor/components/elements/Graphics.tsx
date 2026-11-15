@@ -80,7 +80,8 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
         const markerSize = style.habitMarkerSize || 16;
         const markerStroke = style.habitMarkerStroke || 1.5;
         const spacing = style.habitSpacing || 4;
-        const lineWidth = style.habitLineWidth || 1;
+        const rawHabitLineW = style.habitLineWidth !== undefined ? Number(style.habitLineWidth) : 1;
+        const lineWidth = Number.isFinite(rawHabitLineW) && rawHabitLineW >= 0 ? rawHabitLineW : 1;
         const color = style.habitColor || style.color || '#d1d5db';
         const fillColor = style.habitFillColor || style.backgroundColor || 'transparent';
         const showLabel = style.habitShowLabel !== false;

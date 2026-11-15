@@ -1,6 +1,6 @@
 // Service Worker leve (Network-Only) — mantém compatibilidade de instalação PWA
 // sem armazenar HTML/JS antigos em cache, evitando que alunas precisem limpar cache manualmente.
-const SW_VERSION = 'agendamaster-sw-v2.0.4-network-only';
+const SW_VERSION = 'agendamaster-sw-v2.0.5-network-only';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

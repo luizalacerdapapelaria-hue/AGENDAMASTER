@@ -1,5 +1,5 @@
 {
-  "version": "2.0.4",
-  "releaseDate": "2026-11-08",
-  "notes": "Remoção da linha pontilhada no PDF de 2 DPP e botão de cancelar conversão de PDF em andamento."
+  "version": "2.0.5",
+  "releaseDate": "2026-11-14",
+  "notes": "Precisão milimétrica nas bordas de tabelas e calendários sem arestas no PDF e correção definitiva das linhas avulsas."
 }

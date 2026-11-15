@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <script>
+      (function () {
+        try {
+          // 1. Limpa silenciosamente caches antigos de arquivos estáticos sem tocar nos projetos ou login válido
+          if ('caches' in window) {
+            caches.keys().then(function (names) {
+              for (var i = 0; i < names.length; i++) {
+                caches.delete(names[i]);
+              }
+            }).catch(function () {});
+          }
+
+          // 2. Remove automaticamente tokens corrompidos ou irrecuperáveis antes da aplicação iniciar
+          try {
+            var nowSec = Math.floor(Date.now() / 1000);
+            var toDelete = [];
+            for (var j = 0; j < window.localStorage.length; j++) {
+              var k = window.localStorage.key(j);
+              if (k && k.indexOf('sb-') === 0 && k.indexOf('-auth-token') !== -1) {
+                var raw = window.localStorage.getItem(k);
+                if (!raw) {
+                  toDelete.push(k);
+                } else {
+                  try {
+                    var parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object' || (!parsed.refresh_token && parsed.expires_at && parsed.expires_at < nowSec)) {
+                      toDelete.push(k);
+                    }
+                  } catch (_parseErr) {
+                    toDelete.push(k);
+                  }
+                }
+              }
+            }
+            for (var d = 0; d < toDelete.length; d++) {
+              window.localStorage.removeItem(toDelete[d]);
+              window.localStorage.removeItem('agendamaster_verified_profile');
+            }
+          } catch (_lsErr) {}
+
+          // 3. Auto-recuperação imediata caso um pacote JS/CSS antigo tenha sido substituído num novo deploy
+          window.addEventListener('error', function (ev) {
+            // Em Electron ou no protocolo file:, não há cache mismatch de deploy - nunca recarregar!
+            if (window.location.protocol === 'file:' || (navigator.userAgent && navigator.userAgent.toLowerCase().indexOf('electron') !== -1)) {
+              return;
+            }
+            var target = ev && ev.target;
+            if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+              var src = target.src || target.href || '';
+              // Ignorar workers, pdfjs, cmaps, fontes e blobs locais para não reiniciar a aplicação
+              if (src.indexOf('pdf') !== -1 || src.indexOf('blob:') === 0 || src.indexOf('worker') !== -1 || src.indexOf('cmap') !== -1 || src.indexOf('font') !== -1) {
+                return;
+              }
+              if (src.indexOf(window.location.origin) === 0 || src.indexOf('/assets/') !== -1) {
+                try {
+                  var lastTs = parseInt(window.sessionStorage.getItem('agendamaster_asset_heal_ts') || '0', 10);
+                  if (Date.now() - lastTs < 20000) return;
+                  window.sessionStorage.setItem('agendamaster_asset_heal_ts', String(Date.now()));
+                } catch (_ssErr) {}
+
+                var reloadFresh = function () {
+                  var u = new URL(window.location.href);
+                  u.searchParams.set('_r', Date.now().toString(36));
+                  window.location.replace(u.toString());
+                };
+
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(function (regs) {
+                    return Promise.all(regs.map(function (r) { return r.unregister(); }));
+                  }).finally(reloadFresh);
+                } else {
+                  reloadFresh();
+                }
+              }
+            }
+          }, true);
+        } catch (_e) {}
+      })();
+    </script>
+    <title>AgendaMaster</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#b84a56" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AgendaMaster" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              indigo: {
+                50: '#fff5f5',
+                100: '#fdeeed',
+                200: '#f5ded9',
+                300: '#eedad5',
+                400: '#d98b95',
+                500: '#c45663',
+                600: '#b84a56',
+                700: '#9f3d4a',
+                800: '#85313d',
+                900: '#6e2731',
+                950: '#43141b',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <!-- Expanded font selection for customization & stationery aesthetics -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600;700&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400;1,600&family=Quicksand:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Merriweather:wght@300;400;700&family=Dancing+Script:wght@400;700&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;700&family=Roboto:wght@300;400;700&family=Open+Sans:wght@300;400;700&family=Oswald:wght@400;700&family=Raleway:wght@300;400;700&family=Pacifico&family=Caveat:wght@400;700&family=Lobster&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background-color: #faf6f4;
+        color: #1e293b;
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+      }
+      html {
+        height: -webkit-fill-available;
+      }
+      #root {
+        height: 100%;
+      }
+      /* Custom scrollbar for preview area */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #faf6f4;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #eedad5;
+        border-radius: 6px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #d98b95;
+      }
+      
+      /* Mobile specific utility to hide scrollbars but keep functionality */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+
+      /* Safe area helpers */
+      .pb-safe {
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .pt-safe {
+        padding-top: env(safe-area-inset-top);
+      }
+      .px-safe {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+
+      @media print {
+        @page {
+          margin: 0;
+        }
+        .no-print {
+          display: none !important;
+        }
+        .print-only {
+          display: block !important;
+        }
+        body {
+          background-color: white;
+        }
+        .print-break-page {
+            page-break-after: always;
+            break-after: page;
+        }
+        /* Ensure background colors print */
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+      }
+    </style>
+    <link rel="stylesheet" href="/index.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

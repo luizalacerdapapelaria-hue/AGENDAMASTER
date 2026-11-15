@@ -1,0 +1,1052 @@
+
+import { jsPDF } from "jspdf";
+import { AgendaConfig, DayData, LayoutElement, Holiday } from "../types";
+import { getMonthName, getDayName, checkIsHoliday } from "../core/backend/calendar";
+import { getVerseForDay } from "../core/constants/verses";
+import { getQuoteForDay } from "../core/constants/quotes";
+import { ImageManager } from "../modules/editor/utils/imageManager";
+import { getWeekendTransitionElements } from "../core/logic/weekendTransition";
+
+const hexToRgb = (hex: string): { r: number, g: number, b: number } | null => {
+  if (!hex || hex === 'transparent') return null;
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null;
+};
+
+const getFont = (fontName: string | undefined, weight: string | number | undefined) => {
+    let style = 'normal';
+    if (weight === 'bold' || (typeof weight === 'number' && weight > 600)) style = 'bold';
+    if (fontName?.includes('Playfair') || fontName?.includes('Merriweather')) return { font: 'times', style };
+    if (fontName?.includes('Courier') || fontName?.includes('Mono')) return { font: 'courier', style };
+    return { font: 'helvetica', style };
+};
+
+const drawPdfTextWithOptionalStroke = (
+    doc: jsPDF,
+    textOrLines: string | string[],
+    x: number,
+    y: number,
+    options: Record<string, any>,
+    strokeStyle?: { textStrokeWidth?: number; textStrokeColor?: string; textFillTransparent?: boolean; textStrokeJoin?: 'miter' | 'round' }
+) => {
+    const strokeW = Number(strokeStyle?.textStrokeWidth || 0);
+    if (Number.isFinite(strokeW) && strokeW > 0) {
+        const sRgb = hexToRgb(strokeStyle?.textStrokeColor || '#000000') || { r: 0, g: 0, b: 0 };
+        const isRound = strokeStyle?.textStrokeJoin === 'round';
+        doc.setDrawColor(sRgb.r, sRgb.g, sRgb.b);
+        doc.setLineWidth(Math.max(0.05, strokeW * 0.264583));
+        doc.setLineJoin(isRound ? 'round' : 'miter');
+        doc.setLineCap(isRound ? 'round' : 'butt');
+        const renderingMode = strokeStyle?.textFillTransparent ? 'stroke' : 'fillThenStroke';
+        doc.text(textOrLines as any, x, y, { ...options, renderingMode });
+        doc.setLineJoin('miter');
+        doc.setLineCap('butt');
+    } else {
+        doc.text(textOrLines as any, x, y, { ...options, renderingMode: 'fill' });
+    }
+};
+
+const getShiftedDayData = (baseDay: DayData, offset: number, municipalHolidays: Holiday[] = []): DayData => {
+    if (!offset || offset === 0 || !baseDay) return baseDay;
+    if (!baseDay.date) {
+        return {
+            ...baseDay,
+            dayOfMonth: baseDay.dayOfMonth ? baseDay.dayOfMonth + offset : offset
+        };
+    }
+    const targetDate = new Date(baseDay.date);
+    targetDate.setDate(targetDate.getDate() + offset);
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth();
+    const day = targetDate.getDate();
+    const holidayName = checkIsHoliday(year, month, day, municipalHolidays);
+
+    return {
+        ...baseDay,
+        dayOfMonth: day,
+        month: month,
+        year: year,
+        dayOfWeek: targetDate.getDay(),
+        date: targetDate,
+        holiday: holidayName
+    };
+};
+
+const renderElementToPDF = (
+    doc: jsPDF, 
+    el: LayoutElement, 
+    day: DayData | null, 
+    quote: string | undefined, 
+    verse: string | undefined, 
+    safeAreaW: number, 
+    safeAreaH: number, 
+    offsetX: number, 
+    offsetY: number, 
+    week?: DayData[],
+    municipalHolidays?: Holiday[]
+) => {
+    const { x, y, w, h, style } = el;
+    const absX = (x / 100) * safeAreaW + offsetX;
+    const absY = (y / 100) * safeAreaH + offsetY;
+    const absW = (w / 100) * safeAreaW;
+    const absH = (h / 100) * safeAreaH;
+
+    const rgb = hexToRgb(style.color || '#000000') || { r: 0, g: 0, b: 0 };
+    
+    // Gradient Handling: Fallback to the first color for PDF stability
+    let bgRgb = style.backgroundColor ? hexToRgb(style.backgroundColor) : null;
+    if (el.type === 'box' && style.backgroundType === 'gradient' && style.gradientColors && style.gradientColors[0]) {
+        bgRgb = hexToRgb(style.gradientColors[0]);
+    }
+
+    const fontConfig = getFont(style.fontFamily, style.fontWeight);
+    doc.setTextColor(rgb.r, rgb.g, rgb.b);
+    doc.setFont(fontConfig.font, fontConfig.style);
+    doc.setFontSize(style.fontSize || 12); 
+
+    const rawDayIdx = el.style?.dayIndex ?? (el.type === 'planner_day_box' ? el.style?.plannerDayBox?.dayIndex : 0);
+    const dayIdx = typeof rawDayIdx === 'number' ? rawDayIdx : 0;
+    const targetDay = (week && week.length > 0)
+        ? (week.find(d => d.dayOfWeek === dayIdx) || week[dayIdx])
+        : ((day && dayIdx > 0) ? getShiftedDayData(day, dayIdx, municipalHolidays || []) : day);
+
+    let text = '';
+    const variant = style.variant || (el.type === 'date_placeholder' ? 'day_number' : el.type);
+
+    if (el.type === 'text') text = el.content || 'Texto';
+    if ((el.type === 'day_number' || variant === 'day_number') && targetDay) {
+        if (targetDay.isPaddingDay && (!targetDay.dayOfMonth || targetDay.dayOfMonth === 0)) {
+            text = '';
+        } else if (targetDay.dayOfMonth > 0) {
+            text = style.showLeadingZero ? targetDay.dayOfMonth.toString().padStart(2, '0') : targetDay.dayOfMonth.toString();
+        } else {
+            text = '';
+        }
+    }
+    if ((el.type === 'day_name' || variant === 'day_name') && targetDay) text = getDayName(targetDay.dayOfWeek, style.nameFormat);
+    if ((el.type === 'month_name' || variant === 'month_name') && targetDay) text = getMonthName(targetDay.month, style.nameFormat);
+    if ((el.type === 'month_number' || variant === 'month_number') && targetDay) text = (targetDay.month + 1).toString().padStart(2, '0');
+    if ((el.type === 'year' || variant === 'year') && targetDay) text = (targetDay.year + (style.yearOffset || 0)).toString();
+    if (el.type === 'quote') {
+        if (el.style?.quoteDisplayMode === 'fixed' && el.style?.quoteFixedText) {
+            text = el.style.quoteFixedText;
+        } else if (el.content && el.style?.quoteDisplayMode === 'fixed') {
+            text = el.content;
+        } else {
+            text = quote || '';
+        }
+    }
+    if (el.type === 'verse') text = verse || '';
+    if (el.type === 'holiday' && targetDay) {
+        if (targetDay.isPaddingDay && (!targetDay.dayOfMonth || targetDay.dayOfMonth === 0)) {
+            text = '';
+        } else {
+            text = targetDay.holiday || '';
+        }
+    }
+    if (el.type === 'holiday_list') text = el.content || '';
+
+    // --- RENDER LOGIC ---
+
+    // Box/Circle Special Rendering (Shadows & Fills)
+    if (el.type === 'box' || el.type === 'circle') {
+        
+        // 1. Draw Shadow (Simulated)
+        if (style.boxShadow && style.boxShadow !== 'none') {
+            const shadowOffset = style.boxShadow === 'sm' ? 0.5 : style.boxShadow === 'md' ? 1.0 : 2.0; // mm
+            const shadowColor = { r: 200, g: 200, b: 200 };
+            doc.setFillColor(shadowColor.r, shadowColor.g, shadowColor.b);
+            
+            // Draw shadow rect/circle offset
+            if (el.type === 'circle') {
+                const r = Math.min(absW, absH) / 2;
+                doc.circle(absX + absW/2 + shadowOffset, absY + absH/2 + shadowOffset, r, 'F');
+            } else {
+                if (style.borderRadius && style.borderRadius > 0) {
+                    const r = style.borderRadius * 0.264583; // px to mm approx
+                    doc.roundedRect(absX + shadowOffset, absY + shadowOffset, absW, absH, r, r, 'F');
+                } else {
+                    doc.rect(absX + shadowOffset, absY + shadowOffset, absW, absH, 'F');
+                }
+            }
+        }
+
+        // 2. Draw Background Fill
+        let paintOp = '';
+        if (bgRgb) {
+            doc.setFillColor(bgRgb.r, bgRgb.g, bgRgb.b);
+            paintOp += 'F';
+        }
+
+        // 3. Draw Borders
+        if (style.borderWidth && style.borderWidth > 0) {
+            const borderColor = style.borderColor ? hexToRgb(style.borderColor) : rgb;
+            if (borderColor) doc.setDrawColor(borderColor.r, borderColor.g, borderColor.b);
+            doc.setLineWidth(style.borderWidth * 0.2); // Scale px to mm roughly
+            
+            if (style.borderStyle === 'dashed') (doc as any).setLineDash([3, 3], 0);
+            else if (style.borderStyle === 'dotted') (doc as any).setLineDash([1, 1], 0);
+            else (doc as any).setLineDash([], 0);
+            
+            paintOp += 'D';
+        }
+
+        if (paintOp) {
+            if (el.type === 'circle') {
+                const r = Math.min(absW, absH) / 2;
+                doc.circle(absX + absW/2, absY + absH/2, r, paintOp);
+            } else {
+                if (style.borderRadius && style.borderRadius > 0) {
+                    const r = style.borderRadius * 0.264583; 
+                    doc.roundedRect(absX, absY, absW, absH, r, r, paintOp);
+                } else {
+                    doc.rect(absX, absY, absW, absH, paintOp);
+                }
+            }
+            // Reset dash
+            (doc as any).setLineDash([], 0);
+        }
+    }
+
+    // Permanent Day Header (S T Q Q S S D)
+    else if (el.type === 'permanent_day_header') {
+        const pVariant = style.variant || 'circles_outline';
+        const isFilled = pVariant.includes('filled');
+        const isSquare = pVariant.includes('square');
+        const isMinimal = pVariant.includes('minimal');
+        const isTextBelow = pVariant.includes('text_below');
+        const shapeScale = style.shapeScale || 1;
+        const pColorHex = style.color || '#f472b6';
+        const pRgb = hexToRgb(pColorHex) || { r: 244, g: 114, b: 182 };
+        const pBorderRgb = hexToRgb(style.borderColor || pColorHex) || pRgb;
+        const pFontSize = style.fontSize || 9;
+        const pFont = getFont(style.fontFamily, 'bold');
+
+        const dayIndices = [1, 2, 3, 4, 5, 6, 0];
+        const nameFormat = style.nameFormat || 'initial';
+        const dayLabels = dayIndices.map(dIdx => getDayName(dIdx, nameFormat));
+        const slotW = absW / 7;
+
+        dayLabels.forEach((lbl, idx) => {
+            const centerX = absX + slotW * idx + slotW / 2;
+            const maxDiam = Math.min(slotW * 0.78, isTextBelow ? absH * 0.65 : absH * 0.85) * shapeScale;
+            const radius = Math.max(1.2, maxDiam / 2);
+            const shapeCenterY = isTextBelow ? absY + radius + 0.5 : absY + absH / 2;
+
+            if (!isMinimal) {
+                doc.setDrawColor(pBorderRgb.r, pBorderRgb.g, pBorderRgb.b);
+                doc.setLineWidth(Math.max(0.1, (style.borderWidth ?? 1) * 0.2));
+                if (isFilled) {
+                    doc.setFillColor(pRgb.r, pRgb.g, pRgb.b);
+                }
+                const paintMode = isFilled ? 'FD' : 'S';
+                if (isSquare) {
+                    doc.roundedRect(centerX - radius, shapeCenterY - radius, radius * 2, radius * 2, 0.8, 0.8, paintMode);
+                } else {
+                    doc.circle(centerX, shapeCenterY, radius, paintMode);
+                }
+            }
+
+            doc.setFont(pFont.font, pFont.style);
+            doc.setFontSize(pFontSize);
+            if (!isTextBelow) {
+                if (isFilled && !isMinimal) {
+                    doc.setTextColor(255, 255, 255);
+                } else {
+                    doc.setTextColor(pRgb.r, pRgb.g, pRgb.b);
+                }
+                drawPdfTextWithOptionalStroke(
+                    doc,
+                    lbl,
+                    centerX,
+                    shapeCenterY + (pFontSize * 0.352 * 0.34),
+                    { align: 'center' },
+                    style
+                );
+            } else {
+                doc.setTextColor(pRgb.r, pRgb.g, pRgb.b);
+                drawPdfTextWithOptionalStroke(
+                    doc,
+                    lbl,
+                    centerX,
+                    shapeCenterY + radius + (pFontSize * 0.352 * 0.85),
+                    { align: 'center' },
+                    style
+                );
+            }
+        });
+    }
+
+    // Other element line drawing (lines, etc)
+    else if ((style.borderWidth && style.borderWidth > 0) || el.type === 'lines') {
+        const borderColor = (style.borderColor ? hexToRgb(style.borderColor) : null) || rgb;
+        doc.setDrawColor(borderColor.r, borderColor.g, borderColor.b);
+        doc.setLineWidth(style.borderWidth ? style.borderWidth * 0.2 : 0.1);
+
+        if (el.type === 'lines') {
+            const lineSpacingMm = style.lineSpacing ? (style.lineSpacing / 3.78) : 6;
+            const numLines = Math.floor(absH / lineSpacingMm);
+            for(let i=1; i<=numLines; i++) {
+                const ly = absY + (i * lineSpacingMm);
+                doc.line(absX, ly, absX + absW, ly);
+                if (style.showTimes) {
+                    doc.setFontSize(8);
+                    const hour = (style.startHour || 7) + (i - 1);
+                    doc.text(`${hour}:00`, absX - 2, ly - 1, { align: 'right' });
+                }
+            }
+        }
+    }
+
+    // Text Rendering
+    if (text) {
+        const fontSize = style.fontSize || 12;
+        let ty = absY;
+        if (style.verticalAlign === 'middle') {
+             ty = absY + (absH / 2) - (fontSize * 0.352 / 2); 
+        } else if (style.verticalAlign === 'bottom') {
+             ty = absY + absH - (fontSize * 0.352);
+        }
+
+        if (style.textTransform === 'uppercase') text = text.toUpperCase();
+        if (style.textTransform === 'lowercase') text = text.toLowerCase();
+
+        // Specific rendering for holiday_list or text with multiple columns
+        if ((el.type === 'holiday_list' || el.type === 'text') && style.columnCount && style.columnCount > 1) {
+            const cols = style.columnCount;
+            const colGap = typeof style.columnGap === 'number' ? Math.max(2, style.columnGap * 0.264583) : 5; // mm
+            const colWidth = (absW - ((cols - 1) * colGap)) / cols;
+            const rawLines = text.split('\n');
+            const linesPerCol = Math.ceil(rawLines.length / cols);
+
+            for(let c = 0; c < cols; c++) {
+                const chunk = rawLines.slice(c * linesPerCol, (c + 1) * linesPerCol);
+                if (chunk.length > 0) {
+                    const colText = chunk.join('\n');
+                    const colX = absX + (c * (colWidth + colGap));
+                    
+                    let align: 'left' | 'center' | 'right' = 'left';
+                    let tx = colX;
+                    if (style.textAlign === 'center') { tx = colX + (colWidth / 2); align = 'center'; }
+                    else if (style.textAlign === 'right') { tx = colX + colWidth; align = 'right'; }
+
+                    const splitText = doc.splitTextToSize(colText, colWidth);
+                    drawPdfTextWithOptionalStroke(doc, splitText, tx, ty, { align, baseline: 'top' }, style);
+                }
+            }
+        } 
+        else if (el.type === 'text' || el.type === 'quote' || el.type === 'holiday_list' || el.type === 'verse' || el.type === 'holiday') {
+            // Standard Single Column Text
+            let tx = absX;
+            let align: 'left' | 'center' | 'right' = 'left';
+            if (style.textAlign === 'center') { tx = absX + (absW / 2); align = 'center'; } 
+            else if (style.textAlign === 'right') { tx = absX + absW; align = 'right'; }
+
+            const splitText = doc.splitTextToSize(text, absW);
+            drawPdfTextWithOptionalStroke(doc, splitText, tx, ty, { align, baseline: 'top' }, style);
+        } else {
+            // Short labels (day numbers, etc)
+            let tx = absX;
+            let align: 'left' | 'center' | 'right' = 'left';
+            if (style.textAlign === 'center') { tx = absX + (absW / 2); align = 'center'; } 
+            else if (style.textAlign === 'right') { tx = absX + absW; align = 'right'; }
+            
+            drawPdfTextWithOptionalStroke(doc, text, tx, ty + (fontSize * 0.352), { align }, style);
+        }
+    }
+
+    // Special: Image
+    if (el.type === 'image' && style.imageUrl) {
+        try {
+            const imgX = style.flipX ? absX + absW : absX;
+            const imgY = style.flipY ? absY + absH : absY;
+            const imgW = style.flipX ? -absW : absW;
+            const imgH = style.flipY ? -absH : absH;
+
+            let resolvedUrl = style.imageUrl;
+            if (style.imageUrl.startsWith('image-id:')) {
+                const id = style.imageUrl.substring('image-id:'.length);
+                resolvedUrl = ImageManager.getCachedBase64(id) || '';
+            }
+
+            if (resolvedUrl) {
+                doc.addImage(
+                    resolvedUrl,
+                    'JPEG',
+                    imgX,
+                    imgY,
+                    imgW,
+                    imgH
+                );
+            }
+        } catch (e) {
+            console.error("Error adding image to PDF:", e);
+        }
+    }
+
+    // Special: Full Calendar
+    if (el.type === 'full_calendar' && day) {
+        const cols = style.monthsPerRow || 3;
+        const cellW = absW / cols;
+        const cellH = absH / Math.ceil(12/cols);
+        
+        for(let m=0; m<12; m++) {
+            const c = m % cols;
+            const r = Math.floor(m / cols);
+            const mx = absX + (c * cellW);
+            const my = absY + (r * cellH);
+            
+            doc.setFontSize(8);
+            doc.setFont(fontConfig.font, 'bold');
+            
+            const showYear = el.style.fullCalendar?.showYearInTitle ?? true;
+            const targetYear = day.year + (style.yearOffset || 0);
+            const titleText = showYear ? `${getMonthName(m)} ${targetYear}` : getMonthName(m);
+            
+            doc.text(titleText, mx + cellW/2, my + 4, { align: 'center' });
+            
+            doc.setDrawColor(200, 200, 200);
+            doc.rect(mx + 2, my + 6, cellW - 4, cellH - 8);
+        }
+    }
+    
+    // Special: Table
+    if (el.type === 'table') {
+        const rows = style.table?.rows || 10;
+        const cols = style.table?.cols || 2;
+        const hasHeader = style.table?.headerRow;
+        const zebraRows = style.table?.zebraRows;
+        const zebraColorHex = style.table?.zebraColor || '#f9fafb';
+        const userRowHeight = style.table?.rowHeight;
+        const rowHeights = style.table?.rowHeights || Array(rows).fill(100 / rows);
+        const colWs = style.table?.columnWidths || Array(cols).fill(100 / cols);
+        const cellContent = style.table?.cellContent || {};
+        
+        const globalTextStyle = {
+            fontFamily: style.table?.textStyle?.fontFamily || style.fontFamily || 'Inter',
+            fontSize: style.table?.textStyle?.fontSize || style.fontSize || 10,
+            fontWeight: style.table?.textStyle?.fontWeight || style.fontWeight || 'normal',
+            fontStyle: style.table?.textStyle?.fontStyle || style.fontStyle || 'normal',
+            color: style.table?.textStyle?.color || style.color || '#666666',
+            textAlign: style.table?.textStyle?.textAlign || style.textAlign || 'left',
+            verticalAlign: style.table?.textStyle?.verticalAlign || style.verticalAlign || 'top',
+            textTransform: style.table?.textStyle?.textTransform || style.textTransform || 'none',
+            backgroundColor: style.table?.textStyle?.backgroundColor || style.backgroundColor || 'transparent',
+            textWrap: style.table?.textStyle?.textWrap || 'wrap',
+            cellPadding: style.table?.textStyle?.cellPadding !== undefined ? style.table?.textStyle?.cellPadding : 4,
+            textStrokeWidth: style.table?.textStyle?.textStrokeWidth !== undefined ? style.table.textStyle.textStrokeWidth : (style.textStrokeWidth || 0),
+            textStrokeColor: style.table?.textStyle?.textStrokeColor || style.textStrokeColor || '#000000',
+            textFillTransparent: style.table?.textStyle?.textFillTransparent !== undefined ? style.table.textStyle.textFillTransparent : Boolean(style.textFillTransparent),
+            textStrokeJoin: style.table?.textStyle?.textStrokeJoin || style.textStrokeJoin || 'miter',
+        };
+
+        const rowStyles = style.table?.rowStyles || {};
+        const colStyles = style.table?.colStyles || {};
+        const cellStyles = style.table?.cellStyles || {};
+
+        const borderColorHex = style.table?.borderColor || '#e5e7eb';
+        const borderRgb = hexToRgb(borderColorHex) || { r: 229, g: 231, b: 235 };
+        const borderWidthPx = style.table?.borderWidth !== undefined ? style.table.borderWidth : 1;
+        const outerBorderWidthPx = style.table?.outerBorderWidth !== undefined ? style.table.outerBorderWidth : borderWidthPx;
+        const insideBorderWidthPx = style.table?.insideBorderWidth !== undefined ? style.table.insideBorderWidth : borderWidthPx;
+        const outerLineWidthMm = Math.max(0.05, outerBorderWidthPx * 0.2);
+        const insideLineWidthMm = Math.max(0.05, insideBorderWidthPx * 0.2);
+        const borderStyle = style.table?.borderStyle || 'solid';
+        const borders = style.table?.borders || {
+            top: true, bottom: true, left: true, right: true, insideHorizontal: true, insideVertical: true, headerSeparator: true
+        };
+
+        // First Pass: Draw Cell Backgrounds & Render Content
+        let curY = absY;
+        for (let r = 0; r < rows; r++) {
+            const rowH = userRowHeight ? (userRowHeight * 0.264583) : ((rowHeights[r] / 100) * absH);
+            let curX = absX;
+            for (let c = 0; c < cols; c++) {
+                const cellW = (colWs[c] / 100) * absW;
+                const cellKey = `${r}-${c}`;
+                const cellKeyAlt = `${r}_${c}`;
+                let textVal = cellContent[cellKey] ?? cellContent[cellKeyAlt] ?? '';
+                const isHeaderCell = hasHeader && r === 0;
+
+                const cellCustomStyle = cellStyles[cellKey] || cellStyles[cellKeyAlt] || {};
+                const tStyle = { ...globalTextStyle, ...(rowStyles[r] || {}), ...(colStyles[c] || {}), ...cellCustomStyle };
+                
+                // Determine Background Color
+                let cellBgHex = tStyle.backgroundColor;
+                if (!cellBgHex || cellBgHex === 'transparent') {
+                    if (isHeaderCell) {
+                        cellBgHex = '#f3f4f6';
+                    } else if (zebraRows) {
+                        const dataRowIdx = hasHeader ? r - 1 : r;
+                        if (dataRowIdx % 2 === 1) cellBgHex = zebraColorHex;
+                    }
+                }
+
+                const cellBgRgb = cellBgHex ? hexToRgb(cellBgHex) : null;
+                if (cellBgRgb) {
+                    doc.setFillColor(cellBgRgb.r, cellBgRgb.g, cellBgRgb.b);
+                    doc.rect(curX, curY, cellW, rowH, 'F');
+                }
+
+                // Render Cell Text
+                if (textVal) {
+                    if (tStyle.textTransform === 'uppercase') textVal = textVal.toUpperCase();
+                    else if (tStyle.textTransform === 'lowercase') textVal = textVal.toLowerCase();
+                    else if (tStyle.textTransform === 'capitalize') {
+                        textVal = textVal.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+                    } else if (tStyle.textTransform === 'sentence') {
+                        textVal = textVal.charAt(0).toUpperCase() + textVal.slice(1).toLowerCase();
+                    }
+
+                    const rawFontSize = tStyle.fontSize || 10;
+                    const rawLineHeight = tStyle.lineHeight || 1.2;
+                    const rawPadPx = typeof tStyle.cellPadding === 'number' ? tStyle.cellPadding : 4;
+                    const rawPadMm = rawPadPx * 0.264583;
+                    const neededRowMm = (rawFontSize * 0.352 * rawLineHeight) + (rawPadMm * 2);
+                    const isCompactRow = rowH < neededRowMm + 0.5;
+
+                    const maxFontPt = Math.max(4.5, ((rowH - 0.3) / 0.352) * 0.82);
+                    const cellFontSize = isCompactRow ? Math.min(rawFontSize, maxFontPt) : rawFontSize;
+                    const effectiveLineHeight = isCompactRow ? (rowH < rawFontSize * 0.352 * 1.25 ? 1.0 : Math.min(rawLineHeight, 1.1)) : rawLineHeight;
+                    const lineHeightMm = (cellFontSize * 0.352) * effectiveLineHeight;
+
+                    const availVertMm = Math.max(0, rowH - lineHeightMm - 0.2);
+                    const cellPaddingVertMm = isCompactRow ? Math.min(rawPadMm, availVertMm / 2) : rawPadMm;
+                    const cellPaddingHorizMm = (isCompactRow && rowH < 4) ? Math.min(rawPadMm, 0.6) : rawPadMm;
+                    const availW = Math.max(1, cellW - (cellPaddingHorizMm * 2));
+                    
+                    const cellFont = getFont(tStyle.fontFamily, tStyle.fontWeight);
+                    const fontStyleStr = tStyle.fontStyle === 'italic' ? (cellFont.style === 'bold' ? 'bolditalic' : 'italic') : cellFont.style;
+                    doc.setFont(cellFont.font, fontStyleStr);
+                    doc.setFontSize(cellFontSize);
+                    
+                    const textRgb = hexToRgb(tStyle.color || '#000000') || { r: 0, g: 0, b: 0 };
+                    doc.setTextColor(textRgb.r, textRgb.g, textRgb.b);
+
+                    const textWrap = tStyle.textWrap || 'wrap';
+                    const isSingleLineCompact = isCompactRow && rowH < lineHeightMm * 1.9 && !textVal.includes('\n');
+                    let lines: string[] = [];
+
+                    if (textWrap === 'nowrap' || textWrap === 'clip' || isSingleLineCompact) {
+                        const firstLine = textVal.split('\n')[0] || '';
+                        lines = [firstLine];
+                    } else if (textWrap === 'ellipsis') {
+                        const firstLine = textVal.split('\n')[0] || '';
+                        let testLine = firstLine;
+                        while (testLine.length > 0 && doc.getTextWidth(testLine + '...') > availW) {
+                            testLine = testLine.slice(0, -1);
+                        }
+                        lines = [testLine.length < firstLine.length ? (testLine + '...') : firstLine];
+                    } else {
+                        // Word wrap mode
+                        lines = doc.splitTextToSize(textVal, availW);
+                    }
+
+                    const totalTextH = lines.length * lineHeightMm;
+                    const effectiveVa = (isCompactRow && (!tStyle.verticalAlign || tStyle.verticalAlign === 'top')) ? 'middle' : tStyle.verticalAlign;
+                    
+                    let textY = curY + cellPaddingVertMm + (cellFontSize * 0.352 * 0.8);
+                    if (effectiveVa === 'middle' || (effectiveVa as any) === 'center') {
+                        textY = curY + (rowH / 2) - (totalTextH / 2) + (cellFontSize * 0.352 * 0.78);
+                    } else if (effectiveVa === 'bottom') {
+                        textY = curY + rowH - cellPaddingVertMm - totalTextH + (cellFontSize * 0.352 * 0.8);
+                    }
+
+                    let textAlign: 'left' | 'center' | 'right' = 'left';
+                    let textX = curX + cellPaddingHorizMm;
+                    if (tStyle.textAlign === 'center') {
+                        textAlign = 'center';
+                        textX = curX + (cellW / 2);
+                    } else if (tStyle.textAlign === 'right') {
+                        textAlign = 'right';
+                        textX = curX + cellW - cellPaddingHorizMm;
+                    }
+
+                    lines.forEach((line: string, lIdx: number) => {
+                        const lineY = textY + (lIdx * lineHeightMm);
+                        if (lineY <= curY + rowH + 1) {
+                            drawPdfTextWithOptionalStroke(doc, line, textX, lineY, { align: textAlign }, tStyle);
+                        }
+                    });
+                }
+
+                curX += cellW;
+            }
+            curY += rowH;
+        }
+
+        // Second Pass: Draw Table Grid Borders
+        if (outerBorderWidthPx > 0 || insideBorderWidthPx > 0) {
+            doc.setDrawColor(borderRgb.r, borderRgb.g, borderRgb.b);
+            if (borderStyle === 'dashed') (doc as any).setLineDash([2, 2], 0);
+            else if (borderStyle === 'dotted') (doc as any).setLineDash([0.8, 0.8], 0);
+            else (doc as any).setLineDash([], 0);
+
+            // Outer Borders
+            if (outerBorderWidthPx > 0) {
+                doc.setLineWidth(outerLineWidthMm);
+                if (borders.top) doc.line(absX, absY, absX + absW, absY);
+                if (borders.bottom) doc.line(absX, absY + absH, absX + absW, absY + absH);
+                if (borders.left) doc.line(absX, absY, absX, absY + absH);
+                if (borders.right) doc.line(absX + absW, absY, absX + absW, absY + absH);
+            }
+
+            // Internal Vertical Lines
+            if (insideBorderWidthPx > 0) {
+                doc.setLineWidth(insideLineWidthMm);
+                if (borders.insideVertical) {
+                    let colX = absX;
+                    for (let c = 0; c < cols - 1; c++) {
+                        colX += (colWs[c] / 100) * absW;
+                        doc.line(colX, absY, colX, absY + absH);
+                    }
+                }
+
+                // Internal Horizontal Lines
+                if (borders.insideHorizontal) {
+                    let rowY = absY;
+                    for (let r = 0; r < rows - 1; r++) {
+                        const rowH = userRowHeight ? (userRowHeight * 0.264583) : ((rowHeights[r] / 100) * absH);
+                        rowY += rowH;
+                        const isHeaderSep = hasHeader && r === 0;
+                        if (!isHeaderSep || borders.headerSeparator) {
+                            doc.line(absX, rowY, absX + absW, rowY);
+                        }
+                    }
+                }
+            }
+
+            (doc as any).setLineDash([], 0);
+        }
+    }
+};
+
+export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays: DayData[], quotes: string[], onProgress: (progress: number) => void) => {
+    // Ensure all referenced images are loaded before generating PDF
+    await ImageManager.preloadConfigImages(config);
+    
+    const format = config.pageSize.toLowerCase();
+    const orientation = config.orientation === 'portrait' ? 'p' : 'l';
+    const doc = new jsPDF({ orientation, unit: "mm", format, compress: true });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    const getSafeGeometry = (pageNum: number) => {
+        const isEven = pageNum % 2 === 0;
+        let marginLeft, marginRight;
+        if (config.mirrorEvenPages && isEven) { marginLeft = config.margins.outside; marginRight = config.margins.inside; } 
+        else { marginLeft = config.margins.inside; marginRight = config.margins.outside; }
+        const marginTop = config.margins.top;
+        const marginBottom = config.margins.bottom;
+        return { marginLeft, marginTop, safeW: pageW - marginLeft - marginRight, safeH: pageH - marginTop - marginBottom };
+    };
+
+    const getElementsForPage = (elements: LayoutElement[], pageNum: number, isDaily: boolean = false): LayoutElement[] => {
+        const isEven = pageNum % 2 === 0;
+        if (isEven && config.customVerso && config.elementsVerso && config.elementsVerso.length > 0) {
+            return config.elementsVerso;
+        }
+        if (config.mirrorEvenPages && isEven) {
+            if (config.mirrorContentOnVerso === false) return elements;
+            return elements.map(el => {
+                const newX = 100 - el.x - el.w;
+                let newTextAlign = el.style.textAlign;
+                const isCalendarType = el.type === 'mini_calendar' || el.type === 'full_calendar';
+                if (!isCalendarType) {
+                    if (newTextAlign === 'left') newTextAlign = 'right'; else if (newTextAlign === 'right') newTextAlign = 'left';
+                }
+                
+                let newFlipX = el.style.flipX;
+                if (el.style.autoMirrorImage && (el.type === 'image' || el.type === 'icon')) {
+                    newFlipX = !newFlipX;
+                }
+
+                return { ...el, x: newX, style: { ...el.style, textAlign: newTextAlign, flipX: newFlipX } };
+            });
+        }
+        return elements;
+    };
+
+    const getDayOfYear = (date: Date) => {
+        const start = new Date(date.getFullYear(), 0, 0);
+        const diff = date.getTime() - start.getTime();
+        const oneDay = 1000 * 60 * 60 * 24;
+        return Math.floor(diff / oneDay);
+    };
+
+    const isNotebook = config.projectType === 'notebook' || config.layoutType === 'notebook' || config.projectType === 'devotional';
+    let effectiveQuotesList = config.quoteCustomList && config.quoteCustomList.length > 0 ? config.quoteCustomList : quotes;
+    if ((!effectiveQuotesList || effectiveQuotesList.length === 0) && typeof window !== 'undefined') {
+        try {
+            const saved = window.localStorage.getItem('agendamaster_custom_quotes');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    effectiveQuotesList = parsed;
+                }
+            }
+        } catch (_) {}
+    }
+
+    const getDayQuote = (targetDay: DayData, pageNum: number) => {
+        const quoteIdx = isNotebook
+            ? (pageNum - 1)
+            : (targetDay.date ? getDayOfYear(new Date(targetDay.date)) : (pageNum - 1));
+        return getQuoteForDay(
+            quoteIdx,
+            targetDay.month,
+            config.quoteCategory || 'all',
+            effectiveQuotesList
+        );
+    };
+
+    let globalPageCount = 0;
+    const addNextPage = () => {
+        if (globalPageCount > 0) {
+            doc.addPage(format, orientation);
+        }
+        globalPageCount++;
+    };
+
+    const isSinglePageType = config.layoutType === '1_per_page' || config.layoutType === 'notebook' || config.projectType === 'notebook' || config.projectType === 'devotional';
+    const allConfigElements = [...config.elements, ...(config.elementsVerso || [])];
+    const maxDayIdx = Math.max(0, ...allConfigElements.map(el => {
+        const raw = el.style?.dayIndex ?? (el.type === 'planner_day_box' ? el.style?.plannerDayBox?.dayIndex : 0);
+        return typeof raw === 'number' ? raw : 0;
+    }));
+    const daysPerPage = (isSinglePageType && maxDayIdx > 0) ? maxDayIdx + 1 : 1;
+    const singlePagesCount = Math.ceil(generatedDays.length / daysPerPage);
+
+    const isWeeklyTwoPage = config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal';
+    const weeklyWeeksCount = Math.ceil(generatedDays.length / 7);
+    const weeklyPagesCount = (isWeeklyTwoPage && config.customVerso && config.versoAdvancesSequence === false) ? weeklyWeeksCount * 4 : weeklyWeeksCount * 2;
+    const isSharedWeekend = config.layoutType === '1_per_page_weekend_shared';
+    const sharedWeekendPagesCount = Math.ceil(generatedDays.length * (6 / 7));
+    const totalPages = config.introPages.length + (
+        isSinglePageType 
+            ? (config.customVerso && config.versoAdvancesSequence === false ? singlePagesCount * 2 : singlePagesCount) 
+            : isWeeklyTwoPage 
+                ? weeklyPagesCount 
+                : isSharedWeekend 
+                    ? (config.customVerso && config.versoAdvancesSequence === false ? sharedWeekendPagesCount * 2 : sharedWeekendPagesCount)
+                    : config.layoutType === '2_per_page' 
+                        ? Math.ceil(generatedDays.length / 2) 
+                        : Math.ceil(generatedDays.length)
+    );
+
+    for (const page of config.introPages) {
+        addNextPage();
+        const geo = getSafeGeometry(globalPageCount);
+        const elements = getElementsForPage(page.elements, globalPageCount);
+        elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+        onProgress(Math.round((globalPageCount / totalPages) * 100));
+        await new Promise(r => setTimeout(r, 0)); 
+    }
+
+    if (isSinglePageType) {
+        if (config.customVerso && config.versoAdvancesSequence === false) {
+            for (let i = 0; i < generatedDays.length; i += daysPerPage) {
+                const batch = generatedDays.slice(i, i + daysPerPage);
+                const day = batch[0];
+                if (!day) break;
+
+                // Frente Page (Odd)
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let elements = getElementsForPage(config.elements, globalPageCount, true);
+                let verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
+                let quote = getDayQuote(day, globalPageCount);
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
+
+                // Verso Page (Even) with same date
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                elements = getElementsForPage(config.elements, globalPageCount, true);
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
+
+                if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
+            }
+        } else {
+            for (let i = 0; i < generatedDays.length; i += daysPerPage) {
+                const batch = generatedDays.slice(i, i + daysPerPage);
+                const day = batch[0];
+                if (!day) break;
+
+                addNextPage();
+                const geo = getSafeGeometry(globalPageCount);
+                const elements = getElementsForPage(config.elements, globalPageCount, true);
+                const verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
+                const quote = getDayQuote(day, globalPageCount);
+                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
+                if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
+            }
+        }
+    } 
+    else if (config.layoutType === '2_per_page') {
+        for (let i = 0; i < generatedDays.length; i += 2) {
+            addNextPage();
+            const geo = getSafeGeometry(globalPageCount);
+            const day1 = generatedDays[i];
+            const day2 = generatedDays[i+1];
+            const topSource = (config.elementsTop && config.elementsTop.length > 0) ? config.elementsTop : config.elements;
+            const bottomSource = (config.elementsBottom && config.elementsBottom.length > 0) ? config.elementsBottom : config.elements;
+            const elementsTop = getElementsForPage(topSource, globalPageCount);
+            const elementsBottom = getElementsForPage(bottomSource, globalPageCount);
+            
+            const verse1 = getVerseForDay(getDayOfYear(new Date(day1.date)));
+            const quote1 = getDayQuote(day1, globalPageCount);
+            elementsTop.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day1, quote1, verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+            
+            if (day2) { 
+                const verse2 = getVerseForDay(getDayOfYear(new Date(day2.date)));
+                const quote2 = getDayQuote(day2, globalPageCount);
+                const bottomAlreadyOffset = elementsBottom.every(e => e.y >= 48);
+                elementsBottom.forEach(el => {
+                    const halfH_El = bottomAlreadyOffset ? el : { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
+                    renderElementToPDF(doc, halfH_El, day2, quote2, verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                }); 
+            }
+            if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
+        }
+    }
+    else if (config.layoutType === '1_per_page_weekend_shared') {
+        let i = 0;
+        while (i < generatedDays.length) {
+            const day = generatedDays[i];
+            const isSaturday = day.dayOfWeek === 6;
+            const isSundayAlone = day.dayOfWeek === 0;
+
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Frente Page
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let verse = getVerseForDay(getDayOfYear(new Date(day.date)));
+                let quote = getDayQuote(day, globalPageCount);
+
+                if (isSaturday) {
+                    const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+                    const elementsSat = getElementsForPage(satSource, globalPageCount);
+                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    const nextDay = generatedDays[i+1];
+                    const hasMonthlyBreak = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDay && nextDay.month !== day.month);
+                    
+                    if (nextDay && !hasMonthlyBreak) { 
+                        const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                        const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                        const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
+                        const nextQuote = getDayQuote(nextDay, globalPageCount);
+                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                    } else {
+                        // Sábado isolado no fim do mês: renderiza o espaço de transição personalizado na metade inferior
+                        const transElements = getWeekendTransitionElements(config, 'Anotações do Fim de Semana');
+                        const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                        elementsTrans.forEach(el => {
+                            const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
+                            renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                        });
+                    }
+                } else if (isSundayAlone) {
+                    // Domingo isolado no início do mês: renderiza espaço de transição no topo e Domingo na base
+                    const transElements = getWeekendTransitionElements(config, 'Metas da Semana');
+                    const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                    elementsTrans.forEach(el => {
+                        const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 };
+                        renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                    });
+
+                    const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                    const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                } else {
+                    const elements = getElementsForPage(config.elements, globalPageCount);
+                    elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                }
+
+                // Verso Page (same sequence)
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                const versoSource = (config.elementsVerso && config.elementsVerso.length > 0) ? config.elementsVerso : config.elements;
+                const elementsVerso = getElementsForPage(versoSource, globalPageCount);
+                elementsVerso.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+
+                const nextDayFrente = generatedDays[i+1];
+                const hasMonthlyBreakFrente = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDayFrente && nextDayFrente.month !== day.month);
+                i += isSaturday ? ((nextDayFrente && !hasMonthlyBreakFrente) ? 2 : 1) : 1;
+            } else {
+                addNextPage();
+                const geo = getSafeGeometry(globalPageCount);
+                const verse = getVerseForDay(getDayOfYear(new Date(day.date)));
+                const quote = getDayQuote(day, globalPageCount);
+                
+                if (isSaturday) {
+                    const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
+                    const elementsSat = getElementsForPage(satSource, globalPageCount);
+                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    const nextDay = generatedDays[i+1];
+                    const hasMonthlyBreak = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDay && nextDay.month !== day.month);
+                    
+                    if (nextDay && !hasMonthlyBreak) { 
+                        const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                        const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                        const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
+                        const nextQuote = getDayQuote(nextDay, globalPageCount);
+                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                        i += 2;
+                    } else {
+                        // Sábado isolado no fim do mês: renderiza o espaço de transição personalizado na metade inferior
+                        const transElements = getWeekendTransitionElements(config, 'Anotações do Fim de Semana');
+                        const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                        elementsTrans.forEach(el => {
+                            const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
+                            renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                        });
+                        i += 1;
+                    }
+                } else if (isSundayAlone) {
+                    // Domingo isolado no início do mês: renderiza espaço de transição no topo e Domingo na base
+                    const transElements = getWeekendTransitionElements(config, 'Metas da Semana');
+                    const elementsTrans = getElementsForPage(transElements, globalPageCount);
+                    elementsTrans.forEach(el => {
+                        const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 };
+                        renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                    });
+
+                    const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
+                    const elementsSun = getElementsForPage(sunSource, globalPageCount);
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    i += 1;
+                } else {
+                    const elements = getElementsForPage(config.elements, globalPageCount);
+                    elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                    i += 1;
+                }
+            }
+            if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
+        }
+    }
+    else if (config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal') {
+        const weeks: DayData[][] = [];
+        let currentWeek: DayData[] = [];
+        generatedDays.forEach((day, index) => {
+            currentWeek.push(day);
+            if (day.dayOfWeek === 0 || index === generatedDays.length - 1) {
+                weeks.push(currentWeek);
+                currentWeek = [];
+            }
+        });
+
+        for (const week of weeks) {
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Frente Page (Odd) for current week
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let elements = getElementsForPage(config.elements, globalPageCount, true);
+                elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Verso Page (Even) for SAME week
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                elements = getElementsForPage(config.elements, globalPageCount, true);
+                elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+            } else {
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let elements = getElementsForPage(config.elements, globalPageCount, true);
+                elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+            }
+            if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
+        }
+    }
+    else if (config.layoutType === 'weekly_vertical' || config.layoutType === 'weekly_horizontal') {
+        const targetEndDay = ((config.startOfWeekDay ?? 1) + 6) % 7;
+        const weeks: DayData[][] = [];
+        let currentWeek: DayData[] = [];
+        generatedDays.forEach((day, index) => {
+            currentWeek.push(day);
+            if (day.dayOfWeek === targetEndDay || index === generatedDays.length - 1) {
+                weeks.push(currentWeek);
+                currentWeek = [];
+            }
+        });
+
+        let spreadIndex = 0;
+        let lastMonth = -1;
+
+        for (const week of weeks) {
+            const firstValidDay = week.find(d => !d.isPaddingDay && d.dayOfMonth > 0) || week.find(d => !d.isPaddingDay) || week.find(d => d.dayOfMonth > 0) || week[0];
+            const currentMonth = firstValidDay ? firstValidDay.month : 0;
+            if (currentMonth !== lastMonth) {
+                lastMonth = currentMonth;
+                spreadIndex = 0;
+            }
+
+            if (config.customVerso && config.versoAdvancesSequence === false) {
+                // Spread Frente para esta semana
+                if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    addNextPage();
+                }
+
+                // Left Page (Even / Par) - Frente
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let elementsL = config.elementsWeeklyLeft || config.elements;
+                elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Right Page (Odd / Ímpar) - Frente
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                let elementsR = config.elementsWeeklyRight || config.elements;
+                elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Spread Verso com mesma semana (as próximas páginas par e ímpar!)
+                if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    addNextPage();
+                }
+
+                // Left Page (Even / Par) - Verso
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                let elementsVL = config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements;
+                elementsVL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Right Page (Odd / Ímpar) - Verso
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                let elementsVR = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
+                elementsVR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+            } else {
+                // Alterna entre layout Frente (spread par) e layout Verso (spread ímpar - as próximas páginas par e ímpar!)
+                const isVersoSpread = config.customVerso && (spreadIndex % 2 === 1);
+
+                if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
+                    // Ensure Left page is on EVEN page
+                    addNextPage();
+                }
+
+                // Left Page (Even / Par)
+                addNextPage();
+                let geo = getSafeGeometry(globalPageCount);
+                let elementsL = isVersoSpread
+                    ? (config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements)
+                    : (config.elementsWeeklyLeft || config.elements);
+                elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                // Right Page (Odd / Ímpar)
+                addNextPage();
+                geo = getSafeGeometry(globalPageCount);
+                let elementsR = isVersoSpread
+                    ? (config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements)
+                    : (config.elementsWeeklyRight || config.elements);
+                elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+
+                spreadIndex++;
+            }
+
+            if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
+        }
+    }
+
+    onProgress(100);
+    doc.save(config.isPermanent ? 'Agenda_Permanente.pdf' : `Agenda_${config.year}.pdf`);
+};

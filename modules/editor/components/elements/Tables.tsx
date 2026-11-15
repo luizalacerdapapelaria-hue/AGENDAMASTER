@@ -244,13 +244,14 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const headerBgColor = (style.table as any)?.headerBackgroundColor || '#f3f4f6';
     const headerTxtColor = (style.table as any)?.headerTextColor;
     const borderColor = style.table?.borderColor || '#e5e7eb';
-    const rawBorderWidth = Number(style.table?.borderWidth !== undefined ? style.table.borderWidth : (style.borderWidth !== undefined ? style.borderWidth : 1)) || 1;
+    const fallbackBorderW = style.table?.borderWidth !== undefined ? Number(style.table.borderWidth) : (style.borderWidth !== undefined ? Number(style.borderWidth) : 1);
+    const rawBorderWidth = Number.isFinite(fallbackBorderW) ? fallbackBorderW : 1;
     const rawOuterWidth = style.table?.outerBorderWidth !== undefined ? Number(style.table.outerBorderWidth) : rawBorderWidth;
     const rawInsideWidth = style.table?.insideBorderWidth !== undefined ? Number(style.table.insideBorderWidth) : rawBorderWidth;
 
     // Preserves exact user decimal strokes (e.g. 1.4px, 0.75px, 1.5px) without forced integer truncation
-    const outerBorderWidth = Math.max(0, rawOuterWidth <= 0 ? 0 : Math.round(rawOuterWidth * 100) / 100);
-    const insideBorderWidth = Math.max(0, rawInsideWidth <= 0 ? 0 : Math.round(rawInsideWidth * 100) / 100);
+    const outerBorderWidth = Math.max(0, !Number.isFinite(rawOuterWidth) || rawOuterWidth <= 0 ? 0 : Math.round(rawOuterWidth * 100) / 100);
+    const insideBorderWidth = Math.max(0, !Number.isFinite(rawInsideWidth) || rawInsideWidth <= 0 ? 0 : Math.round(rawInsideWidth * 100) / 100);
     const borderStyle = style.table?.borderStyle || 'solid';
     const borderRadius = style.table?.borderRadius || 0;
     const useContainerBorder = borderRadius > 0 || borderStyle !== 'solid';
@@ -344,7 +345,11 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     }
 
     const isSolidBorder = borderStyle === 'solid';
-    const outerSnapOffset = Math.ceil(outerBorderWidth);
+    const hasOverlayOuter = !useContainerBorder && outerBorderWidth > 0;
+    const topInset = hasOverlayOuter && borders.top ? outerBorderWidth : 0;
+    const bottomInset = hasOverlayOuter && borders.bottom ? outerBorderWidth : 0;
+    const leftInset = hasOverlayOuter && borders.left ? outerBorderWidth : 0;
+    const rightInset = hasOverlayOuter && borders.right ? outerBorderWidth : 0;
 
     return (
         <div 
@@ -474,21 +479,21 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                 );
             })}
 
-            {/* Unified Pixel-Locked Borders Overlay — guarantees identical thickness across header & data rows */}
-            <div className="absolute inset-0 pointer-events-none z-20">
-                {!useContainerBorder && outerBorderWidth > 0 && (
+            {/* Unified Pixel-Locked Borders Overlay — guarantees identical thickness and flush corners without protruding edges */}
+            <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
+                {hasOverlayOuter && (
                     <>
                         {borders.top && (
                             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
                         )}
                         {borders.bottom && (
-                            <div style={{ position: 'absolute', top: `${Math.max(0, Math.round(effectiveTableHeightPx) - outerSnapOffset)}px`, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
                         )}
                         {borders.left && (
-                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                            <div style={{ position: 'absolute', top: `${topInset}px`, bottom: `${bottomInset}px`, left: 0, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
                         )}
                         {borders.right && (
-                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${Math.max(0, Math.round(effectiveTableWidthPx) - outerSnapOffset)}px`, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
+                            <div style={{ position: 'absolute', top: `${topInset}px`, bottom: `${bottomInset}px`, right: 0, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
                         )}
                     </>
                 )}
@@ -499,15 +504,15 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                         style={isSolidBorder ? {
                             position: 'absolute',
                             top: `${d.y}px`,
-                            left: 0,
-                            right: 0,
+                            left: `${leftInset}px`,
+                            right: `${rightInset}px`,
                             height: `${insideBorderWidth}px`,
                             backgroundColor: borderColor,
                         } : {
                             position: 'absolute',
                             top: `${d.y}px`,
-                            left: 0,
-                            right: 0,
+                            left: `${leftInset}px`,
+                            right: `${rightInset}px`,
                             height: 0,
                             borderTop: `${insideBorderWidth}px ${borderStyle} ${borderColor}`,
                         }}
@@ -520,15 +525,15 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                         style={isSolidBorder ? {
                             position: 'absolute',
                             left: `${d.x}px`,
-                            top: 0,
-                            bottom: 0,
+                            top: `${topInset}px`,
+                            bottom: `${bottomInset}px`,
                             width: `${insideBorderWidth}px`,
                             backgroundColor: borderColor,
                         } : {
                             position: 'absolute',
                             left: `${d.x}px`,
-                            top: 0,
-                            bottom: 0,
+                            top: `${topInset}px`,
+                            bottom: `${bottomInset}px`,
                             width: 0,
                             borderLeft: `${insideBorderWidth}px ${borderStyle} ${borderColor}`,
                         }}
