@@ -6,6 +6,7 @@ import { getVerseForDay } from "../core/constants/verses";
 import { getQuoteForDay } from "../core/constants/quotes";
 import { ImageManager } from "../modules/editor/utils/imageManager";
 import { getWeekendTransitionElements } from "../core/logic/weekendTransition";
+import { unitToMm } from "../core/logic/strokeScale";
 
 const hexToRgb = (hex: string): { r: number, g: number, b: number } | null => {
   if (!hex || hex === 'transparent') return null;
@@ -27,14 +28,16 @@ const drawPdfTextWithOptionalStroke = (
     x: number,
     y: number,
     options: Record<string, any>,
-    strokeStyle?: { textStrokeWidth?: number; textStrokeColor?: string; textFillTransparent?: boolean; textStrokeJoin?: 'miter' | 'round' }
+    strokeStyle?: { textStrokeWidth?: number; textStrokeColor?: string; textFillTransparent?: boolean; textStrokeJoin?: 'miter' | 'round' },
+    pageWidthMm?: number
 ) => {
     const strokeW = Number(strokeStyle?.textStrokeWidth || 0);
     if (Number.isFinite(strokeW) && strokeW > 0) {
         const sRgb = hexToRgb(strokeStyle?.textStrokeColor || '#000000') || { r: 0, g: 0, b: 0 };
         const isRound = strokeStyle?.textStrokeJoin === 'round';
         doc.setDrawColor(sRgb.r, sRgb.g, sRgb.b);
-        doc.setLineWidth(Math.max(0.05, strokeW * 0.264583));
+        const lineWMm = pageWidthMm ? unitToMm(strokeW, pageWidthMm) : (strokeW * 0.264583);
+        doc.setLineWidth(Math.max(0.02, lineWMm));
         doc.setLineJoin(isRound ? 'round' : 'miter');
         doc.setLineCap(isRound ? 'round' : 'butt');
         const renderingMode = strokeStyle?.textFillTransparent ? 'stroke' : 'fillThenStroke';
@@ -83,8 +86,11 @@ const renderElementToPDF = (
     offsetX: number, 
     offsetY: number, 
     week?: DayData[],
-    municipalHolidays?: Holiday[]
+    municipalHolidays?: Holiday[],
+    pageWidthMm?: number
 ) => {
+    const effPageW = pageWidthMm || safeAreaW;
+    const pxToMm = (val: number) => unitToMm(val, effPageW);
     const { x, y, w, h, style } = el;
     const absX = (x / 100) * safeAreaW + offsetX;
     const absY = (y / 100) * safeAreaH + offsetY;
@@ -163,7 +169,7 @@ const renderElementToPDF = (
                 doc.circle(absX + absW/2 + shadowOffset, absY + absH/2 + shadowOffset, r, 'F');
             } else {
                 if (style.borderRadius && style.borderRadius > 0) {
-                    const r = style.borderRadius * 0.264583; // px to mm approx
+                    const r = pxToMm(style.borderRadius);
                     doc.roundedRect(absX + shadowOffset, absY + shadowOffset, absW, absH, r, r, 'F');
                 } else {
                     doc.rect(absX + shadowOffset, absY + shadowOffset, absW, absH, 'F');
@@ -182,7 +188,7 @@ const renderElementToPDF = (
         if (style.borderWidth && style.borderWidth > 0) {
             const borderColor = style.borderColor ? hexToRgb(style.borderColor) : rgb;
             if (borderColor) doc.setDrawColor(borderColor.r, borderColor.g, borderColor.b);
-            doc.setLineWidth(style.borderWidth * 0.2); // Scale px to mm roughly
+            doc.setLineWidth(Math.max(0.02, pxToMm(style.borderWidth)));
             
             if (style.borderStyle === 'dashed') (doc as any).setLineDash([3, 3], 0);
             else if (style.borderStyle === 'dotted') (doc as any).setLineDash([1, 1], 0);
@@ -197,7 +203,7 @@ const renderElementToPDF = (
                 doc.circle(absX + absW/2, absY + absH/2, r, paintOp);
             } else {
                 if (style.borderRadius && style.borderRadius > 0) {
-                    const r = style.borderRadius * 0.264583; 
+                    const r = pxToMm(style.borderRadius); 
                     doc.roundedRect(absX, absY, absW, absH, r, r, paintOp);
                 } else {
                     doc.rect(absX, absY, absW, absH, paintOp);
@@ -234,16 +240,21 @@ const renderElementToPDF = (
             const shapeCenterY = isTextBelow ? absY + radius + 0.5 : absY + absH / 2;
 
             if (!isMinimal) {
-                doc.setDrawColor(pBorderRgb.r, pBorderRgb.g, pBorderRgb.b);
-                doc.setLineWidth(Math.max(0.1, (style.borderWidth ?? 1) * 0.2));
+                const pBorderW = style.borderWidth !== undefined ? Number(style.borderWidth) : 1;
+                if (pBorderW > 0) {
+                    doc.setDrawColor(pBorderRgb.r, pBorderRgb.g, pBorderRgb.b);
+                    doc.setLineWidth(Math.max(0.02, pxToMm(pBorderW)));
+                }
                 if (isFilled) {
                     doc.setFillColor(pRgb.r, pRgb.g, pRgb.b);
                 }
-                const paintMode = isFilled ? 'FD' : 'S';
-                if (isSquare) {
-                    doc.roundedRect(centerX - radius, shapeCenterY - radius, radius * 2, radius * 2, 0.8, 0.8, paintMode);
-                } else {
-                    doc.circle(centerX, shapeCenterY, radius, paintMode);
+                const paintMode = isFilled ? (pBorderW > 0 ? 'FD' : 'F') : (pBorderW > 0 ? 'S' : '');
+                if (paintMode) {
+                    if (isSquare) {
+                        doc.roundedRect(centerX - radius, shapeCenterY - radius, radius * 2, radius * 2, 0.8, 0.8, paintMode);
+                    } else {
+                        doc.circle(centerX, shapeCenterY, radius, paintMode);
+                    }
                 }
             }
 
@@ -261,7 +272,8 @@ const renderElementToPDF = (
                     centerX,
                     shapeCenterY + (pFontSize * 0.352 * 0.34),
                     { align: 'center' },
-                    style
+                    style,
+                    effPageW
                 );
             } else {
                 doc.setTextColor(pRgb.r, pRgb.g, pRgb.b);
@@ -271,7 +283,8 @@ const renderElementToPDF = (
                     centerX,
                     shapeCenterY + radius + (pFontSize * 0.352 * 0.85),
                     { align: 'center' },
-                    style
+                    style,
+                    effPageW
                 );
             }
         });
@@ -279,20 +292,23 @@ const renderElementToPDF = (
 
     // Other element line drawing (lines, etc)
     else if ((style.borderWidth && style.borderWidth > 0) || el.type === 'lines') {
-        const borderColor = (style.borderColor ? hexToRgb(style.borderColor) : null) || rgb;
-        doc.setDrawColor(borderColor.r, borderColor.g, borderColor.b);
-        doc.setLineWidth(style.borderWidth ? style.borderWidth * 0.2 : 0.1);
+        const lineBorderW = style.borderWidth !== undefined ? Number(style.borderWidth) : 1;
+        if (lineBorderW > 0) {
+            const borderColor = (style.borderColor ? hexToRgb(style.borderColor) : null) || rgb;
+            doc.setDrawColor(borderColor.r, borderColor.g, borderColor.b);
+            doc.setLineWidth(Math.max(0.02, pxToMm(lineBorderW)));
 
-        if (el.type === 'lines') {
-            const lineSpacingMm = style.lineSpacing ? (style.lineSpacing / 3.78) : 6;
-            const numLines = Math.floor(absH / lineSpacingMm);
-            for(let i=1; i<=numLines; i++) {
-                const ly = absY + (i * lineSpacingMm);
-                doc.line(absX, ly, absX + absW, ly);
-                if (style.showTimes) {
-                    doc.setFontSize(8);
-                    const hour = (style.startHour || 7) + (i - 1);
-                    doc.text(`${hour}:00`, absX - 2, ly - 1, { align: 'right' });
+            if (el.type === 'lines') {
+                const lineSpacingMm = style.lineSpacing ? pxToMm(style.lineSpacing) : 6;
+                const numLines = Math.floor(absH / lineSpacingMm);
+                for(let i=1; i<=numLines; i++) {
+                    const ly = absY + (i * lineSpacingMm);
+                    doc.line(absX, ly, absX + absW, ly);
+                    if (style.showTimes) {
+                        doc.setFontSize(8);
+                        const hour = (style.startHour || 7) + (i - 1);
+                        doc.text(`${hour}:00`, absX - 2, ly - 1, { align: 'right' });
+                    }
                 }
             }
         }
@@ -449,8 +465,8 @@ const renderElementToPDF = (
         const borderWidthPx = style.table?.borderWidth !== undefined ? style.table.borderWidth : 1;
         const outerBorderWidthPx = style.table?.outerBorderWidth !== undefined ? style.table.outerBorderWidth : borderWidthPx;
         const insideBorderWidthPx = style.table?.insideBorderWidth !== undefined ? style.table.insideBorderWidth : borderWidthPx;
-        const outerLineWidthMm = Math.max(0.05, outerBorderWidthPx * 0.2);
-        const insideLineWidthMm = Math.max(0.05, insideBorderWidthPx * 0.2);
+        const outerLineWidthMm = outerBorderWidthPx > 0 ? Math.max(0.02, pxToMm(outerBorderWidthPx)) : 0;
+        const insideLineWidthMm = insideBorderWidthPx > 0 ? Math.max(0.02, pxToMm(insideBorderWidthPx)) : 0;
         const borderStyle = style.table?.borderStyle || 'solid';
         const borders = style.table?.borders || {
             top: true, bottom: true, left: true, right: true, insideHorizontal: true, insideVertical: true, headerSeparator: true
@@ -459,7 +475,7 @@ const renderElementToPDF = (
         // First Pass: Draw Cell Backgrounds & Render Content
         let curY = absY;
         for (let r = 0; r < rows; r++) {
-            const rowH = userRowHeight ? (userRowHeight * 0.264583) : ((rowHeights[r] / 100) * absH);
+            const rowH = userRowHeight ? pxToMm(userRowHeight) : ((rowHeights[r] / 100) * absH);
             let curX = absX;
             for (let c = 0; c < cols; c++) {
                 const cellW = (colWs[c] / 100) * absW;
@@ -606,7 +622,7 @@ const renderElementToPDF = (
                 if (borders.insideHorizontal) {
                     let rowY = absY;
                     for (let r = 0; r < rows - 1; r++) {
-                        const rowH = userRowHeight ? (userRowHeight * 0.264583) : ((rowHeights[r] / 100) * absH);
+                        const rowH = userRowHeight ? pxToMm(userRowHeight) : ((rowHeights[r] / 100) * absH);
                         rowY += rowH;
                         const isHeaderSep = hasHeader && r === 0;
                         if (!isHeaderSep || borders.headerSeparator) {
@@ -643,7 +659,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
 
     const getElementsForPage = (elements: LayoutElement[], pageNum: number, isDaily: boolean = false): LayoutElement[] => {
         const isEven = pageNum % 2 === 0;
-        if (isEven && config.customVerso && config.elementsVerso && config.elementsVerso.length > 0) {
+        if (isDaily && isEven && config.customVerso && config.elementsVerso !== undefined) {
             return config.elementsVerso;
         }
         if (config.mirrorEvenPages && isEven) {
@@ -734,11 +750,24 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                         : Math.ceil(generatedDays.length)
     );
 
+    const renderEl = (
+        el: LayoutElement,
+        day: DayData | null,
+        quote: string | undefined,
+        verse: string | undefined,
+        safeW: number,
+        safeH: number,
+        mLeft: number,
+        mTop: number,
+        week?: DayData[],
+        holidays?: Holiday[]
+    ) => renderElementToPDF(doc, el, day, quote, verse, safeW, safeH, mLeft, mTop, week, holidays, pageW);
+
     for (const page of config.introPages) {
         addNextPage();
         const geo = getSafeGeometry(globalPageCount);
         const elements = getElementsForPage(page.elements, globalPageCount);
-        elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+        elements.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
         onProgress(Math.round((globalPageCount / totalPages) * 100));
         await new Promise(r => setTimeout(r, 0)); 
     }
@@ -756,13 +785,15 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 let elements = getElementsForPage(config.elements, globalPageCount, true);
                 let verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
                 let quote = getDayQuote(day, globalPageCount);
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
+                elements.forEach(el => renderEl(el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
 
                 // Verso Page (Even) with same date
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
-                elements = getElementsForPage(config.elements, globalPageCount, true);
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
+                elements = config.elementsVerso !== undefined
+                    ? config.elementsVerso
+                    : getElementsForPage(config.elements, globalPageCount, false);
+                elements.forEach(el => renderEl(el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
 
                 if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
             }
@@ -777,7 +808,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 const elements = getElementsForPage(config.elements, globalPageCount, true);
                 const verse = day.date ? getVerseForDay(getDayOfYear(new Date(day.date))) : undefined;
                 const quote = getDayQuote(day, globalPageCount);
-                elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
+                elements.forEach(el => renderEl(el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, batch, config.municipalHolidays));
                 if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
             }
         }
@@ -795,7 +826,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
             
             const verse1 = getVerseForDay(getDayOfYear(new Date(day1.date)));
             const quote1 = getDayQuote(day1, globalPageCount);
-            elementsTop.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day1, quote1, verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+            elementsTop.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderEl(halfH_El, day1, quote1, verse1, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
             
             if (day2) { 
                 const verse2 = getVerseForDay(getDayOfYear(new Date(day2.date)));
@@ -803,7 +834,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 const bottomAlreadyOffset = elementsBottom.every(e => e.y >= 48);
                 elementsBottom.forEach(el => {
                     const halfH_El = bottomAlreadyOffset ? el : { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
-                    renderElementToPDF(doc, halfH_El, day2, quote2, verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                    renderEl(halfH_El, day2, quote2, verse2, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
                 }); 
             }
             if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
@@ -826,7 +857,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 if (isSaturday) {
                     const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
                     const elementsSat = getElementsForPage(satSource, globalPageCount);
-                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderEl(halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
                     const nextDay = generatedDays[i+1];
                     const hasMonthlyBreak = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDay && nextDay.month !== day.month);
                     
@@ -835,14 +866,14 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                         const elementsSun = getElementsForPage(sunSource, globalPageCount);
                         const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
                         const nextQuote = getDayQuote(nextDay, globalPageCount);
-                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderEl(halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
                     } else {
                         // Sábado isolado no fim do mês: renderiza o espaço de transição personalizado na metade inferior
                         const transElements = getWeekendTransitionElements(config, 'Anotações do Fim de Semana');
                         const elementsTrans = getElementsForPage(transElements, globalPageCount);
                         elementsTrans.forEach(el => {
                             const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
-                            renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                            renderEl(halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
                         });
                     }
                 } else if (isSundayAlone) {
@@ -851,23 +882,24 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                     const elementsTrans = getElementsForPage(transElements, globalPageCount);
                     elementsTrans.forEach(el => {
                         const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 };
-                        renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                        renderEl(halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
                     });
 
                     const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
                     const elementsSun = getElementsForPage(sunSource, globalPageCount);
-                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderEl(halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
                 } else {
                     const elements = getElementsForPage(config.elements, globalPageCount);
-                    elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                    elements.forEach(el => renderEl(el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
                 }
 
                 // Verso Page (same sequence)
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
-                const versoSource = (config.elementsVerso && config.elementsVerso.length > 0) ? config.elementsVerso : config.elements;
-                const elementsVerso = getElementsForPage(versoSource, globalPageCount);
-                elementsVerso.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                const elementsVerso = config.elementsVerso !== undefined
+                    ? config.elementsVerso
+                    : getElementsForPage(config.elements, globalPageCount, false);
+                elementsVerso.forEach(el => renderEl(el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
 
                 const nextDayFrente = generatedDays[i+1];
                 const hasMonthlyBreakFrente = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDayFrente && nextDayFrente.month !== day.month);
@@ -881,7 +913,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 if (isSaturday) {
                     const satSource = (config.elementsSaturday && config.elementsSaturday.length > 0) ? config.elementsSaturday : config.elements;
                     const elementsSat = getElementsForPage(satSource, globalPageCount);
-                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    elementsSat.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 }; renderEl(halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
                     const nextDay = generatedDays[i+1];
                     const hasMonthlyBreak = Boolean((config.includeMonthlyDividers || (config.monthlyIntroPages && config.monthlyIntroPages.length > 0) || config.splitWeekendAcrossMonths !== false) && nextDay && nextDay.month !== day.month);
                     
@@ -890,7 +922,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                         const elementsSun = getElementsForPage(sunSource, globalPageCount);
                         const nextVerse = getVerseForDay(getDayOfYear(new Date(nextDay.date)));
                         const nextQuote = getDayQuote(nextDay, globalPageCount);
-                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
+                        elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderEl(halfH_El, nextDay, nextQuote, nextVerse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); }); 
                         i += 2;
                     } else {
                         // Sábado isolado no fim do mês: renderiza o espaço de transição personalizado na metade inferior
@@ -898,7 +930,7 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                         const elementsTrans = getElementsForPage(transElements, globalPageCount);
                         elementsTrans.forEach(el => {
                             const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 };
-                            renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                            renderEl(halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
                         });
                         i += 1;
                     }
@@ -908,16 +940,16 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                     const elementsTrans = getElementsForPage(transElements, globalPageCount);
                     elementsTrans.forEach(el => {
                         const halfH_El = { ...el, h: el.h / 2, y: el.y / 2 };
-                        renderElementToPDF(doc, halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
+                        renderEl(halfH_El, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop);
                     });
 
                     const sunSource = (config.elementsSunday && config.elementsSunday.length > 0) ? config.elementsSunday : config.elements;
                     const elementsSun = getElementsForPage(sunSource, globalPageCount);
-                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderElementToPDF(doc, halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
+                    elementsSun.forEach(el => { const halfH_El = { ...el, h: el.h / 2, y: (el.y / 2) + 50 }; renderEl(halfH_El, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop); });
                     i += 1;
                 } else {
-                    const elements = getElementsForPage(config.elements, globalPageCount);
-                    elements.forEach(el => renderElementToPDF(doc, el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
+                    const elements = getElementsForPage(config.elements, globalPageCount, true);
+                    elements.forEach(el => renderEl(el, day, quote, verse, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop));
                     i += 1;
                 }
             }
@@ -941,18 +973,20 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 addNextPage();
                 let geo = getSafeGeometry(globalPageCount);
                 let elements = getElementsForPage(config.elements, globalPageCount, true);
-                elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                elements.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
                 // Verso Page (Even) for SAME week
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
-                elements = getElementsForPage(config.elements, globalPageCount, true);
-                elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                elements = config.elementsVerso !== undefined
+                    ? config.elementsVerso
+                    : getElementsForPage(config.elements, globalPageCount, false);
+                elements.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
             } else {
                 addNextPage();
                 let geo = getSafeGeometry(globalPageCount);
                 let elements = getElementsForPage(config.elements, globalPageCount, true);
-                elements.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                elements.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
             }
             if (globalPageCount % 10 === 0) { onProgress(Math.round((globalPageCount / totalPages) * 100)); await new Promise(r => setTimeout(r, 0)); }
         }
@@ -990,13 +1024,13 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 addNextPage();
                 let geo = getSafeGeometry(globalPageCount);
                 let elementsL = config.elementsWeeklyLeft || config.elements;
-                elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                elementsL.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
                 // Right Page (Odd / Ímpar) - Frente
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
                 let elementsR = config.elementsWeeklyRight || config.elements;
-                elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                elementsR.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
                 // Spread Verso com mesma semana (as próximas páginas par e ímpar!)
                 if (globalPageCount % 2 === 0 && !config.disableSequenceSkip) {
@@ -1006,14 +1040,14 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 // Left Page (Even / Par) - Verso
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
-                let elementsVL = config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements;
-                elementsVL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                let elementsVL = config.elementsWeeklyVersoLeft ?? config.elementsWeeklyLeft ?? config.elements;
+                elementsVL.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
                 // Right Page (Odd / Ímpar) - Verso
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
-                let elementsVR = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
-                elementsVR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                let elementsVR = config.elementsWeeklyVersoRight ?? config.elementsWeeklyRight ?? config.elements;
+                elementsVR.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
             } else {
                 // Alterna entre layout Frente (spread par) e layout Verso (spread ímpar - as próximas páginas par e ímpar!)
@@ -1028,17 +1062,17 @@ export const generateAndDownloadPDF = async (config: AgendaConfig, generatedDays
                 addNextPage();
                 let geo = getSafeGeometry(globalPageCount);
                 let elementsL = isVersoSpread
-                    ? (config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements)
-                    : (config.elementsWeeklyLeft || config.elements);
-                elementsL.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                    ? (config.elementsWeeklyVersoLeft ?? config.elementsWeeklyLeft ?? config.elements)
+                    : (config.elementsWeeklyLeft ?? config.elements);
+                elementsL.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
                 // Right Page (Odd / Ímpar)
                 addNextPage();
                 geo = getSafeGeometry(globalPageCount);
                 let elementsR = isVersoSpread
-                    ? (config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements)
-                    : (config.elementsWeeklyRight || config.elements);
-                elementsR.forEach(el => renderElementToPDF(doc, el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
+                    ? (config.elementsWeeklyVersoRight ?? config.elementsWeeklyRight ?? config.elements)
+                    : (config.elementsWeeklyRight ?? config.elements);
+                elementsR.forEach(el => renderEl(el, null, undefined, undefined, geo.safeW, geo.safeH, geo.marginLeft, geo.marginTop, week));
 
                 spreadIndex++;
             }

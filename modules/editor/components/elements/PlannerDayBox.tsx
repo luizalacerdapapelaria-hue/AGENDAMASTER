@@ -1,9 +1,11 @@
 
-import React from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Moon, Circle } from 'lucide-react';
 import { LayoutElement, DayData } from '../../../../types';
-import { getMonthName, getDayName } from '../../../../core/backend/calendar';
+import { getDayName } from '../../../../core/backend/calendar';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { ensureFontLoaded, getSafeFontFamily } from '../../../../core/logic/fontDetector';
+import { getDashArray } from '../../../../core/logic/strokeScale';
 
 interface PlannerDayBoxProps {
     element: LayoutElement;
@@ -14,8 +16,46 @@ interface PlannerDayBoxProps {
 }
 
 export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, isEditor, pageWidth, pageHeight }) => {
-    const scaleFactor = pageWidth / 400;
+    const scaleFactor = (pageWidth || 400) / 400;
     const { plannerDayBox } = element.style;
+    const boxRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const [boxSize, setBoxSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+    const [contentSize, setContentSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+    useLayoutEffect(() => {
+        const b = boxRef.current;
+        const c = contentRef.current;
+        if (!b && !c) return;
+        const measure = () => {
+            if (b) {
+                const w = b.clientWidth;
+                const h = b.clientHeight;
+                if (w > 0 && h > 0) {
+                    setBoxSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+                }
+            }
+            if (c) {
+                const w = c.clientWidth;
+                const h = c.clientHeight;
+                if (w > 0 && h > 0) {
+                    setContentSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+                }
+            }
+        };
+        measure();
+        const obs = new ResizeObserver(measure);
+        if (b) obs.observe(b);
+        if (c) obs.observe(c);
+        return () => obs.disconnect();
+    }, [element.w, element.h, pageWidth, pageHeight, plannerDayBox?.showHeader, plannerDayBox?.headerHeight]);
+
+    useEffect(() => {
+        if (plannerDayBox?.fontFamily) ensureFontLoaded(plannerDayBox.fontFamily);
+        if (plannerDayBox?.headerFontFamily) ensureFontLoaded(plannerDayBox.headerFontFamily);
+        if (plannerDayBox?.holidayFontFamily) ensureFontLoaded(plannerDayBox.holidayFontFamily);
+    }, [plannerDayBox?.fontFamily, plannerDayBox?.headerFontFamily, plannerDayBox?.holidayFontFamily]);
+
     if (!plannerDayBox) return null;
 
     const renderMoonIcon = (phase: string, color: string) => {
@@ -38,8 +78,6 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
 
     const { 
         contentStyle, 
-        lineSpacing = 20, 
-        gridSpacing = 20, 
         showHeader = true,
         showDayNumber = true, 
         showDayName = true,
@@ -49,14 +87,23 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
         headerTextColor = '#374151',
         showHeaderBorder = true,
         headerBorderColor = '#e5e7eb',
-        headerBorderWidth = 1,
         headerBorderStyle = 'solid',
         strokeColor = '#e5e7eb',
-        strokeWidth = 0.5,
         strokeStyle = 'solid'
     } = plannerDayBox;
 
-    const dashArray = strokeStyle === 'dashed' ? '2,2' : (strokeStyle === 'dotted' ? '0.5,1.5' : 'none');
+    const lineSpacing = plannerDayBox.lineSpacing !== undefined ? Number(plannerDayBox.lineSpacing) : (20 * scaleFactor);
+    const gridSpacing = plannerDayBox.gridSpacing !== undefined ? Number(plannerDayBox.gridSpacing) : (20 * scaleFactor);
+    const outerBorderWidth = element.style.borderWidth !== undefined ? Math.max(0, Number(element.style.borderWidth)) : (1 * scaleFactor);
+    const outerBorderColor = element.style.borderColor || '#e5e7eb';
+    const outerBorderStyle = element.style.borderStyle || 'solid';
+    const outerBorderRadius = element.style.borderRadius || 0;
+    const headerBorderWidth = plannerDayBox.headerBorderWidth !== undefined ? Math.max(0, Number(plannerDayBox.headerBorderWidth)) : (1 * scaleFactor);
+    const strokeWidth = plannerDayBox.strokeWidth !== undefined ? Math.max(0, Number(plannerDayBox.strokeWidth)) : (0.5 * scaleFactor);
+
+    const dashArray = getDashArray(strokeStyle, strokeWidth, scaleFactor);
+    const outerDashArray = getDashArray(outerBorderStyle, outerBorderWidth, scaleFactor);
+    const headerDashArray = getDashArray(headerBorderStyle, headerBorderWidth, scaleFactor);
 
     const nameFormat = (plannerDayBox as any).nameFormat || element.style.nameFormat || 'full';
     let dayName = getDayName(d.dayOfWeek, nameFormat);
@@ -64,71 +111,93 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
     if (dayNameCase === 'uppercase') dayName = dayName.toUpperCase();
     if (dayNameCase === 'lowercase') dayName = dayName.toLowerCase();
 
+    const fallbackBoxW = Math.max(1, pageWidth * (element.w / 100));
+    const fallbackBoxH = Math.max(1, pageHeight * (element.h / 100));
+    const measuredBoxW = boxSize.w > 0 ? boxSize.w : fallbackBoxW;
+    const measuredBoxH = boxSize.h > 0 ? boxSize.h : fallbackBoxH;
+    const estHeaderH = showHeader ? (headerHeight / 100) * measuredBoxH : 0;
+    const contentW = contentSize.w > 0 ? contentSize.w : Math.max(1, measuredBoxW - outerBorderWidth * 2);
+    const contentH = contentSize.h > 0 ? contentSize.h : Math.max(1, measuredBoxH - estHeaderH - outerBorderWidth * 2);
+
     const renderBackground = () => {
-        // Subtract border width (1px on each side = 2px total)
-        const boxWidth = Math.max(1, (pageWidth * (element.w / 100)) - 2);
-        const boxHeight = Math.max(1, (pageHeight * (element.h / 100)) - 2);
-        const headerH = showHeader ? (headerHeight / 100) * boxHeight : 0;
-        const contentHeight = Math.max(1, boxHeight - headerH);
-
-        // Note: The SVG is rendered inside a flex-1 div, so y=0 is already at the bottom of the header.
-        // We don't need to add startY to our coordinates.
-
         if (contentStyle === 'lines') {
             const lines = [];
-            const spacing = Math.max(5, (lineSpacing / 100) * 100); // Guard against too small spacing
-            const rows = Math.max(1, Math.round(contentHeight / spacing));
-            const actualSpacing = contentHeight / rows;
+            const spacing = Math.max(4 * scaleFactor, lineSpacing);
+            const rows = Math.max(1, Math.round(contentH / spacing));
+            const actualSpacing = contentH / rows;
 
             for (let i = 0; i <= rows; i++) {
                 const y = i * actualSpacing;
-                lines.push(<line key={i} x1="0" y1={y} x2="100%" y2={y} stroke={plannerDayBox.hideLines ? 'transparent' : strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
+                lines.push(
+                    <line
+                        key={i}
+                        x1={0}
+                        y1={y}
+                        x2={contentW}
+                        y2={y}
+                        stroke={plannerDayBox.hideLines || strokeWidth <= 0 ? 'transparent' : strokeColor}
+                        strokeWidth={strokeWidth}
+                        strokeDasharray={dashArray}
+                    />
+                );
             }
-            return <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{lines}</svg>;
+            return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${contentW} ${contentH}`}>
+                    {lines}
+                </svg>
+            );
         }
 
         if (contentStyle === 'dots') {
             const dots = [];
-            const spacing = Math.max(5, (gridSpacing / 100) * 100);
-            const cols = Math.max(1, Math.round(boxWidth / spacing));
-            const rows = Math.max(1, Math.round(contentHeight / spacing));
+            const spacing = Math.max(4 * scaleFactor, gridSpacing);
+            const cols = Math.max(1, Math.round(contentW / spacing));
+            const rows = Math.max(1, Math.round(contentH / spacing));
             
-            const actualSpacingX = boxWidth / cols;
-            const actualSpacingY = contentHeight / rows;
+            const actualSpacingX = contentW / cols;
+            const actualSpacingY = contentH / rows;
+            const dotRadius = strokeWidth <= 0 ? 0 : Math.max(0.15 * scaleFactor, strokeWidth / 2);
 
-            // Increased radius for visibility, especially on high-dpi screens or pixel-based viewBox
-            const dotRadius = Math.max(0.6, strokeWidth);
-
-            for (let ix = 0; ix <= cols; ix++) {
-                for (let iy = 0; iy <= rows; iy++) {
-                    const x = ix * actualSpacingX;
-                    const y = iy * actualSpacingY;
-                    dots.push(<circle key={`${ix}-${iy}`} cx={x} cy={y} r={dotRadius} fill={strokeColor} />);
+            if (dotRadius > 0) {
+                for (let ix = 0; ix <= cols; ix++) {
+                    for (let iy = 0; iy <= rows; iy++) {
+                        const x = ix * actualSpacingX;
+                        const y = iy * actualSpacingY;
+                        dots.push(<circle key={`${ix}-${iy}`} cx={x} cy={y} r={dotRadius} fill={strokeColor} />);
+                    }
                 }
             }
-            return <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{dots}</svg>;
+            return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${contentW} ${contentH}`}>
+                    {dots}
+                </svg>
+            );
         }
 
         if (contentStyle === 'grid') {
             const lines = [];
-            const spacing = Math.max(5, (gridSpacing / 100) * 100);
-            const cols = Math.max(1, Math.round(boxWidth / spacing));
-            const rows = Math.max(1, Math.round(contentHeight / spacing));
+            const spacing = Math.max(4 * scaleFactor, gridSpacing);
+            const cols = Math.max(1, Math.round(contentW / spacing));
+            const rows = Math.max(1, Math.round(contentH / spacing));
             
-            const actualSpacingX = boxWidth / cols;
-            const actualSpacingY = contentHeight / rows;
+            const actualSpacingX = contentW / cols;
+            const actualSpacingY = contentH / rows;
 
-            // Vertical lines
-            for (let i = 0; i <= cols; i++) {
-                const x = i * actualSpacingX;
-                lines.push(<line key={`v-${i}`} x1={x} y1="0" x2={x} y2="100%" stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
+            if (strokeWidth > 0) {
+                for (let i = 0; i <= cols; i++) {
+                    const x = i * actualSpacingX;
+                    lines.push(<line key={`v-${i}`} x1={x} y1={0} x2={x} y2={contentH} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
+                }
+                for (let i = 0; i <= rows; i++) {
+                    const y = i * actualSpacingY;
+                    lines.push(<line key={`h-${i}`} x1={0} y1={y} x2={contentW} y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
+                }
             }
-            // Horizontal lines
-            for (let i = 0; i <= rows; i++) {
-                const y = i * actualSpacingY;
-                lines.push(<line key={`h-${i}`} x1="0" y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={dashArray} />);
-            }
-            return <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${boxWidth} ${contentHeight}`} preserveAspectRatio="none">{lines}</svg>;
+            return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${contentW} ${contentH}`}>
+                    {lines}
+                </svg>
+            );
         }
 
         if (contentStyle === 'timetable') {
@@ -151,22 +220,22 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
             }
 
             const heightPercent = plannerDayBox.timetableHeightPercent !== undefined ? plannerDayBox.timetableHeightPercent : 100;
-            const delimitedHeight = Math.max(10, (contentHeight * heightPercent) / 100);
+            const delimitedHeight = Math.max(10 * scaleFactor, (contentH * heightPercent) / 100);
 
             const isDistribute = plannerDayBox.timetableFit === 'distribute';
-            let rowSpacing = Math.max(8, (lineSpacing || 20) * scaleFactor);
+            let rowSpacing = Math.max(8 * scaleFactor, lineSpacing);
             let lineCount = timesList.length;
 
             if (isDistribute && timesList.length > 0) {
                 rowSpacing = delimitedHeight / timesList.length;
             } else {
-                const maxFitting = Math.floor((delimitedHeight + 1) / rowSpacing);
+                const maxFitting = Math.floor((delimitedHeight + 0.5) / rowSpacing);
                 lineCount = Math.min(timesList.length, Math.max(1, maxFitting));
             }
 
             const fontSz = plannerDayBox.fontSize !== undefined 
                 ? plannerDayBox.fontSize * scaleFactor 
-                : Math.max(4, 8 * scaleFactor);
+                : Math.max(4 * scaleFactor, 8 * scaleFactor);
 
             return (
                 <div 
@@ -182,12 +251,12 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             <span 
                                 className="shrink-0 pl-1 pr-1.5 select-none font-mono" 
                                 style={{ 
-                                    fontFamily: plannerDayBox.fontFamily || 'monospace',
+                                    fontFamily: plannerDayBox.fontFamily ? getSafeFontFamily(plannerDayBox.fontFamily) : 'monospace',
                                     fontSize: `${fontSz}px`,
                                     fontWeight: plannerDayBox.fontWeight || 'normal',
                                     color: plannerDayBox.color || '#6b7280',
                                     lineHeight: 1,
-                                    marginBottom: '2px',
+                                    marginBottom: `${2 * scaleFactor}px`,
                                     visibility: timesList[i] ? 'visible' : 'hidden',
                                     ...getTextStrokeCss(
                                         {
@@ -203,14 +272,19 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             >
                                 {timesList[i] || '\u00A0'}
                             </span>
-                            <div 
-                                className="flex-1 h-0 border-b" 
-                                style={{ 
-                                    borderBottomWidth: plannerDayBox.hideLines ? '0px' : `${strokeWidth}px`, 
-                                    borderBottomStyle: strokeStyle === 'dashed' ? 'dashed' : (strokeStyle === 'dotted' ? 'dotted' : 'solid'), 
-                                    borderBottomColor: strokeColor 
-                                }} 
-                            />
+                            {!plannerDayBox.hideLines && strokeWidth > 0 && (
+                                <svg className="flex-1 overflow-visible" style={{ height: Math.max(1, strokeWidth) }}>
+                                    <line
+                                        x1="0"
+                                        y1="50%"
+                                        x2="100%"
+                                        y2="50%"
+                                        stroke={strokeColor}
+                                        strokeWidth={strokeWidth}
+                                        strokeDasharray={dashArray}
+                                    />
+                                </svg>
+                            )}
                         </div>
                     ))}
                 </div>
@@ -220,25 +294,27 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
         return null;
     };
 
+    const isOuterDouble = outerBorderStyle === 'double' && outerBorderWidth > 0;
+
     return (
         <div 
-            className="w-full h-full flex flex-col overflow-visible" 
+            ref={boxRef}
+            className="w-full h-full flex flex-col relative overflow-hidden" 
             style={{ 
-                borderRadius: element.style.borderRadius,
+                borderRadius: outerBorderRadius > 0 ? `${outerBorderRadius}px` : undefined,
                 backgroundColor: element.style.backgroundColor || 'white',
-                borderWidth: element.style.borderWidth ?? 1,
-                borderColor: element.style.borderColor || '#e5e7eb',
-                borderStyle: element.style.borderStyle || 'solid'
+                padding: outerBorderWidth > 0 ? `${outerBorderWidth}px` : undefined,
+                boxSizing: 'border-box',
             }}
         >
             {/* Header */}
             {showHeader && (
                 <div 
-                    className="flex items-center px-2 gap-2 shrink-0" 
+                    className="flex items-center px-2 gap-2 shrink-0 relative" 
                     style={{ 
                         height: `${headerHeight}%`, 
                         backgroundColor: headerBackgroundColor,
-                        borderBottom: showHeaderBorder ? `${headerBorderWidth}px ${headerBorderStyle} ${headerBorderColor}` : 'none'
+                        paddingBottom: (showHeaderBorder && headerBorderWidth > 0) ? `${headerBorderWidth}px` : undefined
                     }}
                 >
                     {showDayNumber && (d.dayOfMonth > 0 || (isEditor && !d.isPaddingDay)) && (
@@ -248,7 +324,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                                 color: headerTextColor,
                                 opacity: d.isPaddingDay ? 0.45 : 1,
                                 fontSize: `${Math.max(6, 18 * scaleFactor)}px`,
-                                fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
+                                fontFamily: (plannerDayBox.headerFontFamily || plannerDayBox.fontFamily) ? getSafeFontFamily(plannerDayBox.headerFontFamily || plannerDayBox.fontFamily) : 'inherit',
                                 ...getTextStrokeCss(
                                     {
                                         textStrokeWidth: plannerDayBox.headerTextStrokeWidth ?? element.style.textStrokeWidth,
@@ -271,7 +347,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                                 color: headerTextColor,
                                 opacity: d.isPaddingDay ? 0.45 : 0.7,
                                 fontSize: `${Math.max(5, 10 * scaleFactor)}px`,
-                                fontFamily: plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
+                                fontFamily: (plannerDayBox.headerFontFamily || plannerDayBox.fontFamily) ? getSafeFontFamily(plannerDayBox.headerFontFamily || plannerDayBox.fontFamily) : 'inherit',
                                 ...getTextStrokeCss(
                                     {
                                         textStrokeWidth: plannerDayBox.headerTextStrokeWidth ?? element.style.textStrokeWidth,
@@ -293,7 +369,7 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             style={{ 
                                 fontSize: plannerDayBox.holidayFontSize ? `${plannerDayBox.holidayFontSize * scaleFactor}px` : `${Math.max(4, 8 * scaleFactor)}px`,
                                 color: plannerDayBox.holidayColor || '#ef4444',
-                                fontFamily: plannerDayBox.holidayFontFamily || plannerDayBox.headerFontFamily || plannerDayBox.fontFamily || 'inherit',
+                                fontFamily: (plannerDayBox.holidayFontFamily || plannerDayBox.headerFontFamily || plannerDayBox.fontFamily) ? getSafeFontFamily(plannerDayBox.holidayFontFamily || plannerDayBox.headerFontFamily || plannerDayBox.fontFamily) : 'inherit',
                                 ...getTextStrokeCss(
                                     {
                                         textStrokeWidth: plannerDayBox.holidayTextStrokeWidth,
@@ -318,13 +394,80 @@ export const PlannerDayBox: React.FC<PlannerDayBoxProps> = ({ element, dayData, 
                             <span className="opacity-60 truncate" style={{ color: headerTextColor, fontSize: `${Math.max(4, 8 * scaleFactor)}px` }}>{d.moonPhase}</span>
                         </div>
                     )}
+
+                    {showHeaderBorder && headerBorderWidth > 0 && (
+                        <svg
+                            className="absolute bottom-0 left-0 w-full pointer-events-none overflow-visible"
+                            style={{ height: Math.max(1, headerBorderWidth) }}
+                        >
+                            <line
+                                x1="0"
+                                y1="50%"
+                                x2="100%"
+                                y2="50%"
+                                stroke={headerBorderColor}
+                                strokeWidth={headerBorderWidth}
+                                strokeDasharray={headerDashArray}
+                            />
+                        </svg>
+                    )}
                 </div>
             )}
 
             {/* Content Area */}
-            <div className="flex-1 relative">
+            <div ref={contentRef} className="flex-1 relative min-h-0">
                 {renderBackground()}
             </div>
+
+            {/* Outer Vector Box Border Overlay */}
+            {outerBorderWidth > 0 && measuredBoxW > 0 && measuredBoxH > 0 && (
+                <svg
+                    width={measuredBoxW}
+                    height={measuredBoxH}
+                    viewBox={`0 0 ${measuredBoxW} ${measuredBoxH}`}
+                    className="absolute inset-0 w-full h-full pointer-events-none z-20"
+                >
+                    {isOuterDouble ? (
+                        <>
+                            <rect
+                                x={outerBorderWidth / 6}
+                                y={outerBorderWidth / 6}
+                                width={Math.max(0, measuredBoxW - outerBorderWidth / 3)}
+                                height={Math.max(0, measuredBoxH - outerBorderWidth / 3)}
+                                rx={Math.max(0, outerBorderRadius)}
+                                ry={Math.max(0, outerBorderRadius)}
+                                fill="none"
+                                stroke={outerBorderColor}
+                                strokeWidth={outerBorderWidth / 3}
+                            />
+                            <rect
+                                x={(5 * outerBorderWidth) / 6}
+                                y={(5 * outerBorderWidth) / 6}
+                                width={Math.max(0, measuredBoxW - (5 * outerBorderWidth) / 3)}
+                                height={Math.max(0, measuredBoxH - (5 * outerBorderWidth) / 3)}
+                                rx={Math.max(0, outerBorderRadius - (2 * outerBorderWidth) / 3)}
+                                ry={Math.max(0, outerBorderRadius - (2 * outerBorderWidth) / 3)}
+                                fill="none"
+                                stroke={outerBorderColor}
+                                strokeWidth={outerBorderWidth / 3}
+                            />
+                        </>
+                    ) : (
+                        <rect
+                            x={outerBorderWidth / 2}
+                            y={outerBorderWidth / 2}
+                            width={Math.max(0, measuredBoxW - outerBorderWidth)}
+                            height={Math.max(0, measuredBoxH - outerBorderWidth)}
+                            rx={Math.max(0, outerBorderRadius - outerBorderWidth / 2)}
+                            ry={Math.max(0, outerBorderRadius - outerBorderWidth / 2)}
+                            fill="none"
+                            stroke={outerBorderColor}
+                            strokeWidth={outerBorderWidth}
+                            strokeDasharray={outerDashArray}
+                        />
+                    )}
+                </svg>
+            )}
         </div>
     );
 };

@@ -570,15 +570,16 @@ export const isProjectYearRestricted = (
     userPlan: string = '',
     isPermanent: boolean = false
 ): boolean => {
-    if (isPermanent || projectType === 'notebook' || projectType === 'devotional') return false;
+    if (isPermanent || projectType === 'notebook' || projectType === 'devotional' || projectType === 'cover') return false;
 
     const planLower = (userPlan || '').toLowerCase();
     const is2028Unlocked = planLower.includes('2028') || planLower.includes('renovad') || planLower.includes('master');
 
     if (is2028Unlocked) return false;
 
-    if (year < 2026 || year > 2028) return true;
-    if (year === 2028) return true;
+    // Preserva projetos salvos de anos anteriores (ex: 2023, 2024, 2025, 2026, 2027) sem sobrescrever ou bloquear
+    if (year > 2028 || year === 2028) return true;
+    if (year < 2000) return true;
 
     let monthsIn2028OrBeyond = 0;
     for (let i = 0; i < durationMonths; i++) {

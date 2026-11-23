@@ -2,8 +2,9 @@ import { LayoutElement, ElementType } from '../../types';
 
 export const AVAILABLE_FONTS = [
   'Inter', 'Arial', 'Helvetica', 'Times New Roman', 'Courier New', 
-  'Georgia', 'Verdana', 'Playfair Display', 'Merriweather', 'Dancing Script', 'Lato',
-  'Montserrat', 'Roboto', 'Open Sans', 'Oswald', 'Raleway', 'Pacifico', 'Caveat', 'Lobster', 'Comfortaa', 'Bebas Neue'
+  'Georgia', 'Verdana', 'Playfair Display', 'Merriweather', 'Dancing Script', 'Great Vibes', 'Cinzel', 'Lato',
+  'Montserrat', 'Roboto', 'Open Sans', 'Oswald', 'Raleway', 'Pacifico', 'Caveat', 'Lobster', 'Comfortaa', 'Bebas Neue',
+  'Nunito', 'Quicksand', 'Poppins', 'Fira Code'
 ];
 
 export const SYSTEM_FONTS = [

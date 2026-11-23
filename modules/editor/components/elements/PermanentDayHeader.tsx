@@ -1,15 +1,87 @@
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BaseElementProps } from './types';
 import { getDayName } from '../../../../core/backend/calendar';
 import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 
+const DayBadgeOutlineSvg: React.FC<{
+    isSquare: boolean;
+    isFilled: boolean;
+    isMinimal: boolean;
+    borderWidth: number;
+    borderColor: string;
+    fillColor: string;
+    cornerRadius: number;
+}> = ({ isSquare, isFilled, isMinimal, borderWidth, borderColor, fillColor, cornerRadius }) => {
+    const ref = useRef<SVGSVGElement>(null);
+    const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+    useLayoutEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const measure = () => {
+            const w = el.clientWidth;
+            const h = el.clientHeight;
+            if (w > 0 && h > 0) {
+                setSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+            }
+        };
+        measure();
+        const obs = new ResizeObserver(measure);
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, []);
+
+    if (isMinimal && !isFilled) return null;
+    const sw = isMinimal ? 0 : Math.max(0, borderWidth);
+    const half = sw / 2;
+    const w = size.w;
+    const h = size.h;
+
+    if (w <= 0 || h <= 0) {
+        return <svg ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" />;
+    }
+
+    if (isSquare) {
+        const rx = Math.min(cornerRadius, Math.max(0, Math.min(w, h) / 2 - half));
+        return (
+            <svg ref={ref} className="absolute inset-0 w-full h-full pointer-events-none">
+                <rect
+                    x={half}
+                    y={half}
+                    width={Math.max(0, w - sw)}
+                    height={Math.max(0, h - sw)}
+                    rx={rx}
+                    ry={rx}
+                    fill={isFilled ? fillColor : 'none'}
+                    stroke={sw > 0 ? borderColor : 'none'}
+                    strokeWidth={sw}
+                />
+            </svg>
+        );
+    }
+
+    const r = Math.max(0.5, Math.min(w, h) / 2 - half);
+    return (
+        <svg ref={ref} className="absolute inset-0 w-full h-full pointer-events-none">
+            <circle
+                cx={w / 2}
+                cy={h / 2}
+                r={r}
+                fill={isFilled ? fillColor : 'none'}
+                stroke={sw > 0 ? borderColor : 'none'}
+                strokeWidth={sw}
+            />
+        </svg>
+    );
+};
+
 export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style, pageHeight, pageWidth }) => {
+    const scaleFactor = (pageWidth || 400) / 400;
     const variant = style.variant || 'circles_outline';
     const color = style.color || '#f472b6'; 
-    const bgColor = style.backgroundColor || '#fdf2f8';
-    const fontSize = style.fontSize || 10;
+    const fontSize = style.fontSize || (10 * scaleFactor);
     const fontFamily = getSafeFontFamily(style.fontFamily);
 
     useEffect(() => {
@@ -37,6 +109,8 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
         const isMinimal = variant.includes('minimal');
         const isTextBelow = variant.includes('text_below');
         const shapeScale = style.shapeScale || 1; // 0.5 to 1.5
+        const borderWidth = style.borderWidth !== undefined ? Math.max(0, Number(style.borderWidth)) : (1 * scaleFactor);
+        const borderColor = style.borderColor || color;
 
         const dayWrapperStyle: React.CSSProperties = {
             display: 'flex',
@@ -48,14 +122,12 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
         };
 
         const dayCircleStyle: React.CSSProperties = {
+            position: 'relative',
             width: `${100 * shapeScale}%`,
             height: 'auto',
             maxHeight: isTextBelow ? `${70 * shapeScale}%` : `${100 * shapeScale}%`,
             aspectRatio: '1/1',
             flexShrink: 0,
-            borderRadius: isSquare ? '4px' : isMinimal ? '0' : '50%',
-            border: isMinimal ? 'none' : `${style.borderWidth ?? 1}px solid ${style.borderColor || color}`,
-            backgroundColor: isFilled ? color : 'transparent',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -81,7 +153,7 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
             color: color,
             fontWeight: '600',
             fontFamily: fontFamily,
-            marginTop: '2px',
+            marginTop: `${2 * scaleFactor}px`,
             ...belowLetterStroke,
         };
 
@@ -90,7 +162,20 @@ export const PermanentDayHeader: React.FC<BaseElementProps> = ({ element, style,
                 {days.map((day, i) => (
                     <div key={i} style={dayWrapperStyle}>
                         <div style={dayCircleStyle}>
-                            {!isTextBelow && <span style={circleLetterStroke}>{day}</span>}
+                            <DayBadgeOutlineSvg
+                                isSquare={isSquare}
+                                isFilled={isFilled}
+                                isMinimal={isMinimal}
+                                borderWidth={borderWidth}
+                                borderColor={borderColor}
+                                fillColor={color}
+                                cornerRadius={4 * scaleFactor}
+                            />
+                            {!isTextBelow && (
+                                <span style={{ ...circleLetterStroke, position: 'relative', zIndex: 1 }}>
+                                    {day}
+                                </span>
+                            )}
                         </div>
                         {isTextBelow && <span style={textStyle}>{day}</span>}
                     </div>

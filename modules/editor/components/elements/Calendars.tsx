@@ -5,6 +5,67 @@ import { getMonthName, getDayName, generateMonthGrid, checkIsHoliday } from '../
 import { TextStyleConfig, Holiday, DayData, LayoutElement } from '../../../../types';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
 import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
+import { getDashArray } from '../../../../core/logic/strokeScale';
+
+const CalendarWrapperBorderSvg: React.FC<{
+    containerRef: React.RefObject<HTMLDivElement | null>;
+    borderWidth: number;
+    borderColor: string;
+    borderStyle: string;
+    borderRadius: number;
+    scaleFactor: number;
+}> = ({ containerRef, borderWidth, borderColor, borderStyle, borderRadius, scaleFactor }) => {
+    const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+    useLayoutEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const measure = () => {
+            const w = el.clientWidth;
+            const h = el.clientHeight;
+            if (w > 0 && h > 0) {
+                setBox(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+            }
+        };
+        measure();
+        const obs = new ResizeObserver(measure);
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [containerRef, borderWidth, borderRadius]);
+
+    if (borderWidth <= 0 || box.w <= 0 || box.h <= 0) return null;
+
+    const sw = borderWidth;
+    const half = sw / 2;
+    const w = Math.max(0.5, box.w - sw);
+    const h = Math.max(0.5, box.h - sw);
+    const rx = Math.max(0, Math.min(borderRadius, w / 2, h / 2));
+    const dashArray = getDashArray(borderStyle, sw, scaleFactor);
+
+    return (
+        <svg
+            width={box.w}
+            height={box.h}
+            viewBox={`0 0 ${box.w} ${box.h}`}
+            className="absolute inset-0 pointer-events-none z-30 overflow-visible"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <rect
+                x={half}
+                y={half}
+                width={w}
+                height={h}
+                rx={rx}
+                ry={rx}
+                fill="none"
+                stroke={borderColor}
+                strokeWidth={sw}
+                strokeDasharray={dashArray}
+                strokeLinecap={borderStyle === 'dotted' ? 'round' : 'butt'}
+            />
+        </svg>
+    );
+};
 
 const applyTextTransform = (text: string, transform?: string) => {
     if (!text) return text;
@@ -110,7 +171,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
     } as TextStyleConfig;
 
     const gridConfig = {
-        borderColor: '#ddd', borderWidth: 1, dividerWidth: undefined as number | undefined, borderStyle: 'solid',
+        borderColor: '#ddd', borderWidth: undefined as number | undefined, dividerWidth: undefined as number | undefined, borderStyle: 'solid',
         cellBackgroundColor: 'transparent', headerBackgroundColor: 'transparent',
         borders: { top: false, bottom: false, left: false, right: false, insideHorizontal: false, insideVertical: false, headerSeparator: false },
         ...effectiveStyle?.grid
@@ -141,7 +202,6 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
     const outerWidth = Math.max(0, !Number.isFinite(rawOuterW) || rawOuterW <= 0 ? 0 : Math.round(rawOuterW * 100) / 100);
     const dividerThickness = Math.max(0, !Number.isFinite(rawDividerW) || rawDividerW <= 0 ? 0 : Math.round(rawDividerW * 100) / 100);
     const borderStyleName = gridConfig.borderStyle || 'solid';
-    const isSolidBorder = borderStyleName === 'solid';
 
     // Filter cols of each week
     const filteredWeeks = grid.map(week => {
@@ -375,7 +435,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                                     justifyContent: weekAlign,
                                     padding: weekCellPadding,
                                     fontSize: weekStyle.fontSize,
-                                    fontFamily: weekStyle.fontFamily,
+                                    fontFamily: getSafeFontFamily(weekStyle.fontFamily),
                                     fontWeight: weekStyle.fontWeight,
                                     fontStyle: weekStyle.fontStyle || 'normal',
                                     lineHeight: weekStyle.lineHeight || 1.2,
@@ -491,7 +551,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                                                                 paddingRight: satPadRight,
                                                                 boxSizing: 'border-box',
                                                                 fontSize: satActiveStyle.fontSize,
-                                                                fontFamily: satActiveStyle.fontFamily,
+                                                                fontFamily: getSafeFontFamily(satActiveStyle.fontFamily),
                                                                 fontWeight: isCurrentSat ? 'bold' : satActiveStyle.fontWeight,
                                                                 color: isCurrentSat ? currentDayHighlightTextColor : satActiveStyle.color,
                                                                 letterSpacing: `${satActiveStyle.letterSpacing}px`,
@@ -523,15 +583,43 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                                                 {/* Divider Line */}
                                                 {(satNum || sunNum) && dividerThickness > 0 && (
                                                     <div
-                                                        style={isSolidBorder
-                                                            ? (isVertical
-                                                                ? { width: `${dividerThickness}px`, height: '100%', backgroundColor: gridConfig.borderColor, flexShrink: 0 }
-                                                                : { height: `${dividerThickness}px`, width: '100%', backgroundColor: gridConfig.borderColor, flexShrink: 0 })
-                                                            : (isVertical
-                                                                ? { borderLeft: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}`, width: 0, height: '100%', flexShrink: 0 }
-                                                                : { borderTop: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}`, height: 0, width: '100%', flexShrink: 0 })
+                                                        className="shrink-0 relative overflow-visible"
+                                                        style={isVertical
+                                                            ? { width: `${dividerThickness}px`, height: '100%' }
+                                                            : { height: `${dividerThickness}px`, width: '100%' }
                                                         }
-                                                    />
+                                                    >
+                                                        <svg
+                                                            width="100%"
+                                                            height="100%"
+                                                            className="block overflow-visible"
+                                                            xmlns="http://www.w3.org/2000/svg"
+                                                        >
+                                                            {isVertical ? (
+                                                                <line
+                                                                    x1={dividerThickness / 2}
+                                                                    y1="0"
+                                                                    x2={dividerThickness / 2}
+                                                                    y2="100%"
+                                                                    stroke={gridConfig.borderColor}
+                                                                    strokeWidth={dividerThickness}
+                                                                    strokeDasharray={getDashArray(borderStyleName, dividerThickness, scaleFactor)}
+                                                                    strokeLinecap={borderStyleName === 'dotted' ? 'round' : 'butt'}
+                                                                />
+                                                            ) : (
+                                                                <line
+                                                                    x1="0"
+                                                                    y1={dividerThickness / 2}
+                                                                    x2="100%"
+                                                                    y2={dividerThickness / 2}
+                                                                    stroke={gridConfig.borderColor}
+                                                                    strokeWidth={dividerThickness}
+                                                                    strokeDasharray={getDashArray(borderStyleName, dividerThickness, scaleFactor)}
+                                                                    strokeLinecap={borderStyleName === 'dotted' ? 'round' : 'butt'}
+                                                                />
+                                                            )}
+                                                        </svg>
+                                                    </div>
                                                 )}
 
                                                 {/* Sunday Half */}
@@ -554,7 +642,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                                                                 paddingRight: sunPadRight,
                                                                 boxSizing: 'border-box',
                                                                 fontSize: sunActiveStyle.fontSize,
-                                                                fontFamily: sunActiveStyle.fontFamily,
+                                                                fontFamily: getSafeFontFamily(sunActiveStyle.fontFamily),
                                                                 fontWeight: isCurrentSun ? 'bold' : sunActiveStyle.fontWeight,
                                                                 color: isCurrentSun ? currentDayHighlightTextColor : sunActiveStyle.color,
                                                                 letterSpacing: `${sunActiveStyle.letterSpacing}px`,
@@ -634,7 +722,7 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                                                 boxSizing: 'border-box',
                                                 overflow: 'hidden',
                                                 fontSize: activeStyle.fontSize,
-                                                fontFamily: activeStyle.fontFamily,
+                                                fontFamily: getSafeFontFamily(activeStyle.fontFamily),
                                                 fontWeight: isCurrentDayPage ? 'bold' : activeStyle.fontWeight,
                                                 color: isCurrentDayPage ? currentDayHighlightTextColor : activeStyle.color,
                                                 letterSpacing: `${activeStyle.letterSpacing}px`,
@@ -667,77 +755,119 @@ const SingleMonthCalendar: React.FC<SingleMonthProps> = ({
                     })}
                 </div>
 
-                {/* Unified Pixel-Locked Grid Border Overlay — prevents subpixel variation & protruding edges in PDF */}
-                {(hasMeasuredWidth || hasMeasuredHeight) && (
-                    <div
-                        className="absolute top-0 left-0 right-0 pointer-events-none z-20 overflow-hidden"
-                        style={{ height: totalRenderHeightPx > 0 ? `${totalRenderHeightPx}px` : '100%' }}
-                    >
-                        {outerWidth > 0 && (
-                            <>
-                                {gridConfig.borders?.top && (
-                                    <div
-                                        style={isSolidBorder
-                                            ? { position: 'absolute', top: 0, left: 0, right: 0, height: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', top: 0, left: 0, right: 0, height: 0, borderTop: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
-                                        }
-                                    />
-                                )}
-                                {gridConfig.borders?.bottom && totalRenderHeightPx > 0 && (
-                                    <div
-                                        style={isSolidBorder
-                                            ? { position: 'absolute', bottom: 0, left: 0, right: 0, height: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', bottom: 0, left: 0, right: 0, height: 0, borderBottom: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
-                                        }
-                                    />
-                                )}
-                                {gridConfig.borders?.left && (
-                                    <div
-                                        style={isSolidBorder
-                                            ? { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, left: 0, width: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, left: 0, width: 0, borderLeft: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
-                                        }
-                                    />
-                                )}
-                                {gridConfig.borders?.right && measuredGrid.width > 0 && (
-                                    <div
-                                        style={isSolidBorder
-                                            ? { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, right: 0, width: `${outerWidth}px`, backgroundColor: gridConfig.borderColor }
-                                            : { position: 'absolute', top: `${calTopInset}px`, bottom: `${calBottomInset}px`, right: 0, width: 0, borderRight: `${outerWidth}px ${borderStyleName} ${gridConfig.borderColor}` }
-                                        }
-                                    />
-                                )}
-                            </>
-                        )}
+                {/* Unified Vector SVG Grid Border Overlay — exact thickness & zero Chromium CSS border snapping */}
+                {(hasMeasuredWidth || hasMeasuredHeight) && measuredGrid.width > 0 && (outerWidth > 0 || dividerThickness > 0) && (() => {
+                    const svgH = totalRenderHeightPx > 0 ? totalRenderHeightPx : measuredGrid.height;
+                    if (svgH <= 0) return null;
+                    const outerDash = getDashArray(borderStyleName, outerWidth, scaleFactor);
+                    const dividerDash = getDashArray(borderStyleName, dividerThickness, scaleFactor);
+                    const lineCap = borderStyleName === 'dotted' ? 'round' : 'butt';
 
-                        {horizontalDividersY.map((y, idx) => (
-                            <div
-                                key={`cal-h-${idx}`}
-                                style={isSolidBorder
-                                    ? { position: 'absolute', top: `${y}px`, left: `${calLeftInset}px`, right: `${calRightInset}px`, height: `${dividerThickness}px`, backgroundColor: gridConfig.borderColor }
-                                    : { position: 'absolute', top: `${y}px`, left: `${calLeftInset}px`, right: `${calRightInset}px`, height: 0, borderTop: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}` }
-                                }
-                            />
-                        ))}
+                    return (
+                        <svg
+                            width={measuredGrid.width}
+                            height={svgH}
+                            viewBox={`0 0 ${measuredGrid.width} ${svgH}`}
+                            className="absolute top-0 left-0 pointer-events-none z-20 overflow-visible"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            {outerWidth > 0 && (
+                                <>
+                                    {gridConfig.borders?.top && (
+                                        <line
+                                            x1={0}
+                                            y1={outerWidth / 2}
+                                            x2={measuredGrid.width}
+                                            y2={outerWidth / 2}
+                                            stroke={gridConfig.borderColor}
+                                            strokeWidth={outerWidth}
+                                            strokeDasharray={outerDash}
+                                            strokeLinecap={lineCap}
+                                        />
+                                    )}
+                                    {gridConfig.borders?.bottom && (
+                                        <line
+                                            x1={0}
+                                            y1={svgH - outerWidth / 2}
+                                            x2={measuredGrid.width}
+                                            y2={svgH - outerWidth / 2}
+                                            stroke={gridConfig.borderColor}
+                                            strokeWidth={outerWidth}
+                                            strokeDasharray={outerDash}
+                                            strokeLinecap={lineCap}
+                                        />
+                                    )}
+                                    {gridConfig.borders?.left && (
+                                        <line
+                                            x1={outerWidth / 2}
+                                            y1={calTopInset}
+                                            x2={outerWidth / 2}
+                                            y2={svgH - calBottomInset}
+                                            stroke={gridConfig.borderColor}
+                                            strokeWidth={outerWidth}
+                                            strokeDasharray={outerDash}
+                                            strokeLinecap={lineCap}
+                                        />
+                                    )}
+                                    {gridConfig.borders?.right && (
+                                        <line
+                                            x1={measuredGrid.width - outerWidth / 2}
+                                            y1={calTopInset}
+                                            x2={measuredGrid.width - outerWidth / 2}
+                                            y2={svgH - calBottomInset}
+                                            stroke={gridConfig.borderColor}
+                                            strokeWidth={outerWidth}
+                                            strokeDasharray={outerDash}
+                                            strokeLinecap={lineCap}
+                                        />
+                                    )}
+                                </>
+                            )}
 
-                        {verticalDividersX.map((x, idx) => (
-                            <div
-                                key={`cal-v-${idx}`}
-                                style={isSolidBorder
-                                    ? { position: 'absolute', left: `${x}px`, top: `${calTopInset}px`, bottom: `${calBottomInset}px`, width: `${dividerThickness}px`, backgroundColor: gridConfig.borderColor }
-                                    : { position: 'absolute', left: `${x}px`, top: `${calTopInset}px`, bottom: `${calBottomInset}px`, width: 0, borderLeft: `${dividerThickness}px ${borderStyleName} ${gridConfig.borderColor}` }
-                                }
-                            />
-                        ))}
-                    </div>
-                )}
+                            {dividerThickness > 0 && horizontalDividersY.map((y, idx) => (
+                                <line
+                                    key={`cal-h-${idx}`}
+                                    x1={calLeftInset}
+                                    y1={y}
+                                    x2={measuredGrid.width - calRightInset}
+                                    y2={y}
+                                    stroke={gridConfig.borderColor}
+                                    strokeWidth={dividerThickness}
+                                    strokeDasharray={dividerDash}
+                                    strokeLinecap={lineCap}
+                                />
+                            ))}
+
+                            {dividerThickness > 0 && verticalDividersX.map((x, idx) => (
+                                <line
+                                    key={`cal-v-${idx}`}
+                                    x1={x}
+                                    y1={calTopInset}
+                                    x2={x}
+                                    y2={svgH - calBottomInset}
+                                    stroke={gridConfig.borderColor}
+                                    strokeWidth={dividerThickness}
+                                    strokeDasharray={dividerDash}
+                                    strokeLinecap={lineCap}
+                                />
+                            ))}
+                        </svg>
+                    );
+                })()}
             </div>
         </div>
     );
 };
 
 export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayData, style, globalCalendarStyle, municipalHolidays, calendarIndex, pageWidth }) => {
+    const miniWrapperRef = useRef<HTMLDivElement>(null);
+    const fullWrapperRef = useRef<HTMLDivElement>(null);
     const d = dayData;
+    const scaleFactor = (pageWidth || 400) / 400;
+    const wrapperBorderWidth = style.borderWidth !== undefined ? Math.max(0, Number(style.borderWidth)) : 0;
+    const wrapperBorderColor = style.borderColor || '#000';
+    const wrapperBorderStyle = style.borderStyle || 'solid';
+    const wrapperBorderRadius = style.borderRadius ? Number(style.borderRadius) : 0;
 
     const getEffectiveStyle = () => {
         if (element.type === 'mini_calendar' && style.useGlobalStyle && globalCalendarStyle) {
@@ -793,15 +923,14 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
 
         const containerStyle: React.CSSProperties = {
             backgroundColor: style.backgroundColor || 'transparent',
-            border: style.borderWidth ? `${style.borderWidth}px ${style.borderStyle || 'solid'} ${style.borderColor || '#000'}` : 'none',
-            borderRadius: style.borderRadius ? `${style.borderRadius}px` : '0',
-            padding: style.padding ? `${style.padding}px` : '4px',
+            borderRadius: wrapperBorderRadius ? `${wrapperBorderRadius}px` : '0',
+            padding: style.padding ? `${style.padding}px` : `${4 * scaleFactor}px`,
             boxShadow: style.boxShadow || 'none',
             opacity: style.opacity !== undefined ? style.opacity : 1,
         };
 
         return (
-            <div className="w-full h-full flex flex-col" style={containerStyle}>
+            <div ref={miniWrapperRef} className="w-full h-full flex flex-col relative" style={containerStyle}>
                 <SingleMonthCalendar
                     monthIndex={targetMonth}
                     year={targetYear}
@@ -812,6 +941,14 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                     municipalHolidays={municipalHolidays}
                     pageWidth={pageWidth}
                 />
+                <CalendarWrapperBorderSvg
+                    containerRef={miniWrapperRef}
+                    borderWidth={wrapperBorderWidth}
+                    borderColor={wrapperBorderColor}
+                    borderStyle={wrapperBorderStyle}
+                    borderRadius={wrapperBorderRadius}
+                    scaleFactor={scaleFactor}
+                />
             </div>
         );
     }
@@ -820,7 +957,7 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
         const months = Array.from({ length: 12 }, (_, i) => i);
         const cols = style.monthsPerRow || 3;
         const rows = Math.ceil(12 / cols);
-        const gap = style.gap !== undefined ? style.gap : 10;
+        const gap = style.gap !== undefined ? style.gap : (10 * scaleFactor);
         const targetYear = d.year + (style.yearOffset || 0);
 
         const containerStyle: React.CSSProperties = {
@@ -829,15 +966,14 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
             gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
             gap: `${gap}px`,
             backgroundColor: style.backgroundColor || 'transparent',
-            padding: style.padding ? `${style.padding}px` : '4px',
-            border: style.borderWidth ? `${style.borderWidth}px ${style.borderStyle || 'solid'} ${style.borderColor || '#000'}` : 'none',
-            borderRadius: style.borderRadius ? `${style.borderRadius}px` : '0',
+            padding: style.padding ? `${style.padding}px` : `${4 * scaleFactor}px`,
+            borderRadius: wrapperBorderRadius ? `${wrapperBorderRadius}px` : '0',
             boxShadow: style.boxShadow || 'none',
             opacity: style.opacity !== undefined ? style.opacity : 1,
         };
 
         return (
-            <div className="w-full h-full" style={containerStyle}>
+            <div ref={fullWrapperRef} className="w-full h-full relative" style={containerStyle}>
                 {months.map(m => (
                     <div key={m} className="overflow-visible min-h-0">
                         <SingleMonthCalendar
@@ -852,6 +988,14 @@ export const CalendarElement: React.FC<CalendarElementProps> = ({ element, dayDa
                         />
                     </div>
                 ))}
+                <CalendarWrapperBorderSvg
+                    containerRef={fullWrapperRef}
+                    borderWidth={wrapperBorderWidth}
+                    borderColor={wrapperBorderColor}
+                    borderStyle={wrapperBorderStyle}
+                    borderRadius={wrapperBorderRadius}
+                    scaleFactor={scaleFactor}
+                />
             </div>
         );
     }

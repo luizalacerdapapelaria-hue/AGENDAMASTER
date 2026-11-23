@@ -1,4 +1,10 @@
 import { AgendaConfig, CustomTemplateItem } from '../../types';
+import {
+  CURRENT_PROJECT_SCHEMA_VERSION,
+  migrateCustomTemplatesArray,
+  migrateProjectConfig,
+  unwrapRawProjectData,
+} from './projectMigration';
 
 let lastExportObjectUrl: string | null = null;
 
@@ -55,8 +61,13 @@ export const exportProject = (config: AgendaConfig) => {
     lastExportObjectUrl = null;
   }
 
+  const exportPayload: AgendaConfig = {
+    ...config,
+    schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
+  };
+
   const parts: BlobPart[] = [];
-  appendJsonToParts(config, parts, 0);
+  appendJsonToParts(exportPayload, parts, 0);
 
   const blob = new Blob(parts, { type: 'application/json;charset=utf-8' });
   if (blob.size <= 2) {
@@ -96,113 +107,19 @@ export const exportProject = (config: AgendaConfig) => {
 };
 
 /**
- * Normaliza e repara campos obrigatórios de um AgendaConfig importado,
- * garantindo compatibilidade com Capas, Planners Semanais, Cadernos e versões anteriores.
+ * Normaliza e repara campos de um AgendaConfig importado (inclusive versões antigas),
+ * preservando configurações originais e garantindo compatibilidade com Capas, Planners Semanais e Cadernos.
  */
 export const normalizeImportedProjectConfig = (raw: any): AgendaConfig => {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('Formato de arquivo inválido.');
-  }
-
-  const hasRecognizableProjectField = Boolean(
-    raw.year ||
-    raw.elements ||
-    raw.elementsWeeklyLeft ||
-    raw.elementsWeeklyRight ||
-    raw.introPages ||
-    raw.cover ||
-    raw.projectType ||
-    raw.layoutType ||
-    raw.pageSize
-  );
-
-  if (!hasRecognizableProjectField) {
-    throw new Error('Este arquivo JSON não parece ser um projeto do Agenda Master.');
-  }
-
-  const normalized: AgendaConfig = {
-    ...raw,
-    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : 'Projeto Importado',
-    year: Number(raw.year) || new Date().getFullYear() + 1,
-    isPermanent: Boolean(raw.isPermanent),
-    layoutType: raw.layoutType || '1_per_page',
-    pageSize: raw.pageSize || 'A5',
-    orientation: raw.orientation || 'portrait',
-    includeHolidays: raw.isPermanent ? false : (raw.includeHolidays ?? true),
-    includeMoonPhases: raw.includeMoonPhases ?? false,
-    includeQuotes: raw.includeQuotes ?? false,
-    includeVerses: raw.includeVerses ?? true,
-    mirrorEvenPages: raw.mirrorEvenPages ?? true,
-    margins:
-      raw.margins && typeof raw.margins === 'object'
-        ? {
-            top: Number(raw.margins.top) || 0,
-            bottom: Number(raw.margins.bottom) || 0,
-            inside: Number(raw.margins.inside) || 0,
-            outside: Number(raw.margins.outside) || 0,
-          }
-        : { top: 15, bottom: 15, inside: 20, outside: 10 },
-    elements: Array.isArray(raw.elements) ? raw.elements : [],
-    introPages: Array.isArray(raw.introPages) ? raw.introPages : [],
-    monthlyIntroPages: Array.isArray(raw.monthlyIntroPages) ? raw.monthlyIntroPages : [],
-  };
-
-  return normalized;
+  return migrateProjectConfig(raw);
 };
 
 export type ImportedJsonPayload =
   | { kind: 'project'; config: AgendaConfig }
   | { kind: 'templates'; templates: CustomTemplateItem[] };
 
-const cloneElementsWithIds = (arr?: any[]) =>
-  Array.isArray(arr)
-    ? arr.map((el: any) => ({
-        ...el,
-        id: el?.id || Math.random().toString(36).substring(2, 11),
-      }))
-    : undefined;
-
 export const normalizeCustomTemplatesArray = (items: any[]): CustomTemplateItem[] => {
-  const valid: CustomTemplateItem[] = [];
-
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    const hasElements =
-      Array.isArray(item.elements) ||
-      Array.isArray(item.elementsWeeklyLeft) ||
-      Array.isArray(item.elementsWeeklyRight);
-
-    if (!item.name && !hasElements) continue;
-
-    const isMiolo =
-      item.templateType === 'miolo' ||
-      (item.id && String(item.id).startsWith('miolo-')) ||
-      Array.isArray(item.elementsWeeklyLeft) ||
-      Array.isArray(item.elementsWeeklyRight) ||
-      Boolean(item.layoutType);
-
-    valid.push({
-      id:
-        typeof item.id === 'string' && item.id.trim()
-          ? item.id
-          : (isMiolo ? 'miolo-' : 'custom-') + Math.random().toString(36).substring(2, 11),
-      name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : 'Modelo Importado',
-      templateType: item.templateType || (isMiolo ? 'miolo' : 'page'),
-      layoutType: item.layoutType,
-      projectType: item.projectType,
-      isPermanent: Boolean(item.isPermanent),
-      elements: cloneElementsWithIds(item.elements) || [],
-      elementsVerso: cloneElementsWithIds(item.elementsVerso),
-      elementsWeeklyLeft: cloneElementsWithIds(item.elementsWeeklyLeft),
-      elementsWeeklyRight: cloneElementsWithIds(item.elementsWeeklyRight),
-      elementsWeeklyVersoLeft: cloneElementsWithIds(item.elementsWeeklyVersoLeft),
-      elementsWeeklyVersoRight: cloneElementsWithIds(item.elementsWeeklyVersoRight),
-      background: item.background,
-      createdAt: item.createdAt || new Date().toISOString(),
-    });
-  }
-
-  return valid;
+  return migrateCustomTemplatesArray(items);
 };
 
 const readAndParseJsonFile = async (file: File): Promise<any> => {
@@ -260,27 +177,29 @@ export const importProjectOrTemplates = async (file: File): Promise<ImportedJson
     throw new Error('Nenhum modelo ou projeto válido foi encontrado dentro deste arquivo .json.');
   }
 
+  const unwrapped = unwrapRawProjectData(parsed);
+
   // Caso seja um único modelo exportado isoladamente (sem campos de projeto completo)
   const isSingleStandaloneTemplate =
-    parsed &&
-    typeof parsed === 'object' &&
-    !parsed.year &&
-    !parsed.margins &&
-    !parsed.introPages &&
-    !parsed.cover &&
-    (parsed.templateType === 'miolo' ||
-      parsed.templateType === 'page' ||
-      String(parsed.id || '').startsWith('miolo-') ||
-      String(parsed.id || '').startsWith('custom-'));
+    unwrapped &&
+    typeof unwrapped === 'object' &&
+    unwrapped.year === undefined &&
+    !unwrapped.margins &&
+    !unwrapped.introPages &&
+    !unwrapped.cover &&
+    (unwrapped.templateType === 'miolo' ||
+      unwrapped.templateType === 'page' ||
+      String(unwrapped.id || '').startsWith('miolo-') ||
+      String(unwrapped.id || '').startsWith('custom-'));
 
   if (isSingleStandaloneTemplate) {
-    const templates = normalizeCustomTemplatesArray([parsed]);
+    const templates = normalizeCustomTemplatesArray([unwrapped]);
     if (templates.length > 0) {
       return { kind: 'templates', templates };
     }
   }
 
-  return { kind: 'project', config: normalizeImportedProjectConfig(parsed) };
+  return { kind: 'project', config: normalizeImportedProjectConfig(unwrapped) };
 };
 
 /**

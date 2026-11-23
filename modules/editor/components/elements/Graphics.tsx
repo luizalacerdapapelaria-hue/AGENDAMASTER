@@ -1,10 +1,18 @@
 
-import React from 'react';
+import React, { useEffect, useId } from 'react';
 import { Moon, Circle } from 'lucide-react';
 import { BaseElementProps } from './types';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { ensureFontLoaded, getSafeFontFamily } from '../../../../core/logic/fontDetector';
+import { getDashArray } from '../../../../core/logic/strokeScale';
 
 export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, style, isEditor, pageHeight, pageWidth, week }) => {
+    const patternId = useId();
+    useEffect(() => {
+        if (style?.fontFamily) {
+            ensureFontLoaded(style.fontFamily);
+        }
+    }, [style?.fontFamily]);
     
     const renderMoonIcon = (phase: string, color: string) => {
         const p = phase.toLowerCase();
@@ -62,7 +70,7 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
                         className="whitespace-nowrap truncate"
                         style={{
                             fontSize: style.fontSize,
-                            fontFamily: style.fontFamily,
+                            fontFamily: getSafeFontFamily(style.fontFamily),
                             color: style.color,
                             ...getTextStrokeCss(style, style.color || '#000000'),
                         }}
@@ -105,37 +113,118 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
         const markerMarginRight = Math.max(4, Math.round(8 * scaleFactor));
 
         const renderMarker = () => {
+            const halfS = markerStroke / 2;
+            const boxSize = Math.max(0.5, markerSize - markerStroke);
+            const hasFill = fillColor && fillColor !== 'transparent';
+
             if (markerType === 'dot') {
+                const r = Math.max(0.5, (markerSize / 2) - halfS);
                 return (
-                    <svg viewBox="0 0 24 24" style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }} className="shrink-0 overflow-visible">
-                        <circle cx="12" cy="12" r="10" stroke={color} strokeWidth={markerStroke} fill={fillColor} vectorEffect="non-scaling-stroke" />
+                    <svg
+                        width={markerSize}
+                        height={markerSize}
+                        viewBox={`0 0 ${markerSize} ${markerSize}`}
+                        style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }}
+                        className="shrink-0 overflow-visible block"
+                    >
+                        {hasFill && <circle cx={markerSize / 2} cy={markerSize / 2} r={r} fill={fillColor} />}
+                        {markerStroke > 0 && (
+                            <circle
+                                cx={markerSize / 2}
+                                cy={markerSize / 2}
+                                r={r}
+                                fill="none"
+                                stroke={color}
+                                strokeWidth={markerStroke}
+                            />
+                        )}
                     </svg>
                 );
             }
             if (markerType === 'check') {
+                const k = markerSize / 24;
+                const rx = Math.max(1, 4 * k);
+                const checkPath = `M ${(7 * k).toFixed(2)} ${(12 * k).toFixed(2)} L ${(10 * k).toFixed(2)} ${(15 * k).toFixed(2)} L ${(17 * k).toFixed(2)} ${(8 * k).toFixed(2)}`;
                 return (
-                    <svg viewBox="0 0 24 24" style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }} className="shrink-0 overflow-visible">
-                        <rect x="2" y="2" width="20" height="20" rx="4" stroke={color} strokeWidth={markerStroke} fill={fillColor} vectorEffect="non-scaling-stroke" />
-                        <path d="M7 12l3 3 7-7" stroke={color} strokeWidth={markerStroke} fill="none" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                    <svg
+                        width={markerSize}
+                        height={markerSize}
+                        viewBox={`0 0 ${markerSize} ${markerSize}`}
+                        style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }}
+                        className="shrink-0 overflow-visible block"
+                    >
+                        {hasFill && (
+                            <rect
+                                x={halfS}
+                                y={halfS}
+                                width={boxSize}
+                                height={boxSize}
+                                rx={rx}
+                                ry={rx}
+                                fill={fillColor}
+                            />
+                        )}
+                        {markerStroke > 0 && (
+                            <>
+                                <rect
+                                    x={halfS}
+                                    y={halfS}
+                                    width={boxSize}
+                                    height={boxSize}
+                                    rx={rx}
+                                    ry={rx}
+                                    fill="none"
+                                    stroke={color}
+                                    strokeWidth={markerStroke}
+                                />
+                                <path
+                                    d={checkPath}
+                                    stroke={color}
+                                    strokeWidth={markerStroke}
+                                    fill="none"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                />
+                            </>
+                        )}
                     </svg>
                 );
             }
             // Default square
+            const rx = Math.min(2 * scaleFactor, boxSize / 4);
             return (
-                <div
-                    style={{
-                        width: markerSize,
-                        height: markerSize,
-                        marginRight: markerMarginRight,
-                        borderColor: color,
-                        borderWidth: markerStroke > 0 ? `${markerStroke}px` : 0,
-                        borderStyle: markerStroke > 0 ? 'solid' : 'none',
-                        backgroundColor: fillColor,
-                        borderRadius: 2,
-                        boxSizing: 'border-box',
-                    }}
-                    className="shrink-0"
-                />
+                <svg
+                    width={markerSize}
+                    height={markerSize}
+                    viewBox={`0 0 ${markerSize} ${markerSize}`}
+                    style={{ width: markerSize, height: markerSize, marginRight: markerMarginRight }}
+                    className="shrink-0 overflow-visible block"
+                >
+                    {hasFill && (
+                        <rect
+                            x={halfS}
+                            y={halfS}
+                            width={boxSize}
+                            height={boxSize}
+                            rx={rx}
+                            ry={rx}
+                            fill={fillColor}
+                        />
+                    )}
+                    {markerStroke > 0 && (
+                        <rect
+                            x={halfS}
+                            y={halfS}
+                            width={boxSize}
+                            height={boxSize}
+                            rx={rx}
+                            ry={rx}
+                            fill="none"
+                            stroke={color}
+                            strokeWidth={markerStroke}
+                        />
+                    )}
+                </svg>
             );
         };
 
@@ -144,16 +233,18 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
                 {showLabel && (
                     <div
                         style={{
+                            height: `${labelLineHeightPx}px`,
                             fontSize: labelFontSize,
                             lineHeight: `${labelLineHeightPx}px`,
                             marginBottom: `${labelMarginBottomPx}px`,
-                            fontFamily: style.fontFamily,
+                            fontFamily: getSafeFontFamily(style.fontFamily),
                             fontWeight: style.fontWeight || 'bold',
                             fontStyle: style.fontStyle || 'normal',
                             color: style.color || '#6b7280',
                             textAlign: (style.textAlign as any) || 'left',
                             textTransform: (style.textTransform as any) || 'uppercase',
                             letterSpacing: `${style.letterSpacing || 0}px`,
+                            overflow: 'visible',
                             ...getTextStrokeCss(style, style.color || '#6b7280'),
                         }}
                     >
@@ -165,14 +256,30 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
                         <div key={i} className="flex items-center shrink-0" style={{ height: `${markerSize}px` }}>
                             {renderMarker()}
                             {lineWidth > 0 && (
-                                <div
-                                    className="flex-1 min-w-0"
-                                    style={{
-                                        height: `${lineWidth}px`,
-                                        borderRadius: 0,
-                                        backgroundColor: lineColor,
-                                    }}
-                                />
+                                <div className="flex-1 min-w-0 relative" style={{ height: `${markerSize}px` }}>
+                                    <svg
+                                        width="100%"
+                                        height={Math.max(1, lineWidth)}
+                                        className="w-full overflow-visible block"
+                                        style={{
+                                            position: 'absolute',
+                                            left: 0,
+                                            right: 0,
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                        }}
+                                        xmlns="http://www.w3.org/2000/svg"
+                                    >
+                                        <line
+                                            x1="0"
+                                            y1="50%"
+                                            x2="100%"
+                                            y2="50%"
+                                            stroke={lineColor}
+                                            strokeWidth={lineWidth}
+                                        />
+                                    </svg>
+                                </div>
                             )}
                         </div>
                     ))}
@@ -182,41 +289,63 @@ export const GraphicsElement: React.FC<BaseElementProps> = ({ element, dayData, 
     }
 
     if (element.type === 'note_grid') {
+        const scaleFactor = (pageWidth || 400) / 400;
         const isSquared = style.variant === 'squared' || style.variant === 'grid';
-        const gridSize = style.gridSize || style.gridSpacing || 18;
+        const gridSize = style.gridSize || style.gridSpacing || (18 * scaleFactor);
         const color = style.color || style.borderColor || '#cbd5e1';
         const borderStyle = style.borderStyle || 'solid';
-        const borderWidth = style.borderWidth !== undefined && style.borderWidth > 0 ? style.borderWidth : 0.75;
+        const rawBorderWidth = style.borderWidth !== undefined ? Number(style.borderWidth) : (0.75 * scaleFactor);
+        const borderWidth = Number.isFinite(rawBorderWidth) ? Math.max(0, rawBorderWidth) : (0.75 * scaleFactor);
 
-        let gridStyle: React.CSSProperties = {};
-
-        if (isSquared) {
-            if (borderStyle === 'solid') {
-                gridStyle = { 
-                    backgroundImage: `linear-gradient(${color} ${borderWidth}px, transparent ${borderWidth}px), linear-gradient(90deg, ${color} ${borderWidth}px, transparent ${borderWidth}px)`,
-                    backgroundSize: `${gridSize}px ${gridSize}px`
-                };
-            } else {
-                // For dashed/dotted, use SVG
-                const dashArray = borderStyle === 'dashed' ? '4,2' : (borderStyle === 'dotted' ? '1,2' : 'none');
-                const svg = `<svg width="${gridSize}" height="${gridSize}" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M ${gridSize} 0 L 0 0 0 ${gridSize}" fill="none" stroke="${color}" stroke-width="${borderWidth}" stroke-dasharray="${dashArray}"/>
-                </svg>`;
-                gridStyle = {
-                    backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`,
-                    backgroundSize: `${gridSize}px ${gridSize}px`
-                };
-            }
-        } else {
-            // Dotted pattern using SVG data URI for crisp dot rendering and reliable color support across all scales
-            const dotRadius = Math.max(0.5, borderWidth);
-            const svg = `<svg width="${gridSize}" height="${gridSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${gridSize / 2}" cy="${gridSize / 2}" r="${dotRadius}" fill="${color}"/></svg>`;
-            gridStyle = { 
-                backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`, 
-                backgroundSize: `${gridSize}px ${gridSize}px` 
-            };
+        if (borderWidth <= 0) {
+            return <div className="w-full h-full" />;
         }
-        return <div className="w-full h-full" style={{ ...gridStyle, opacity: style.opacity !== undefined ? style.opacity : 0.7 }}></div>;
+
+        const dashArray = getDashArray(borderStyle, borderWidth, scaleFactor);
+        const half = borderWidth / 2;
+        const dotRadius = Math.max(0.1 * scaleFactor, borderWidth / 2);
+
+        return (
+            <svg
+                width="100%"
+                height="100%"
+                className="w-full h-full block"
+                style={{ opacity: style.opacity !== undefined ? style.opacity : 0.7 }}
+                xmlns="http://www.w3.org/2000/svg"
+            >
+                <defs>
+                    <pattern id={patternId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse">
+                        {isSquared ? (
+                            <>
+                                <line
+                                    x1={0}
+                                    y1={half}
+                                    x2={gridSize}
+                                    y2={half}
+                                    stroke={color}
+                                    strokeWidth={borderWidth}
+                                    strokeDasharray={dashArray}
+                                    strokeLinecap={borderStyle === 'dotted' ? 'round' : 'butt'}
+                                />
+                                <line
+                                    x1={half}
+                                    y1={0}
+                                    x2={half}
+                                    y2={gridSize}
+                                    stroke={color}
+                                    strokeWidth={borderWidth}
+                                    strokeDasharray={dashArray}
+                                    strokeLinecap={borderStyle === 'dotted' ? 'round' : 'butt'}
+                                />
+                            </>
+                        ) : (
+                            <circle cx={gridSize / 2} cy={gridSize / 2} r={dotRadius} fill={color} />
+                        )}
+                    </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill={`url(#${patternId})`} />
+            </svg>
+        );
     }
 
     return null;

@@ -3,6 +3,7 @@ import { BaseElementProps } from './types';
 import { getSpecialDateDisplaySample } from '../../../../core/logic/specialDates';
 import { getSafeFontFamily, ensureFontLoaded } from '../../../../core/logic/fontDetector';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { getDashArray } from '../../../../core/logic/strokeScale';
 
 const applyTextTransform = (text: string, transform?: string) => {
   if (!text) return text;
@@ -47,8 +48,10 @@ export const SpecialEventElement: React.FC<BaseElementProps> = ({
   element,
   dayData,
   style,
-  isEditor
+  isEditor,
+  pageWidth
 }) => {
+  const scaleFactor = (pageWidth || 400) / 400;
   const specialText = dayData?.specialEventText || '';
   const hasEventOnThisDay = !!specialText.trim();
 
@@ -92,25 +95,31 @@ export const SpecialEventElement: React.FC<BaseElementProps> = ({
   const effectiveBorderColor = style.borderColor || (sampleInfo?.borderColor) || '#f472b6';
   const effectiveTextColor = style.color || (sampleInfo?.color) || '#db2777';
 
+  const resolvedBorderW = style.borderWidth !== undefined
+    ? Math.max(0, Number(style.borderWidth))
+    : (variant === 'underline' ? 1.5 * scaleFactor : 1 * scaleFactor);
+
   let containerExtraStyles: React.CSSProperties = {};
   if (variant === 'pill') {
     containerExtraStyles = {
       borderRadius: typeof style.borderRadius === 'number' ? `${style.borderRadius}px` : '9999px',
-      padding: '2px 8px',
+      padding: `${2 * scaleFactor}px ${8 * scaleFactor}px`,
       backgroundColor: effectiveBgColor,
-      border: `${style.borderWidth !== undefined ? style.borderWidth : 1}px ${style.borderStyle || 'solid'} ${effectiveBorderColor}`
+      border: resolvedBorderW > 0 ? `${resolvedBorderW}px ${style.borderStyle || 'solid'} ${effectiveBorderColor}` : 'none'
     };
   } else if (variant === 'tag') {
     containerExtraStyles = {
-      borderRadius: typeof style.borderRadius === 'number' ? `${style.borderRadius}px` : '4px',
-      padding: '2px 6px',
+      borderRadius: typeof style.borderRadius === 'number' ? `${style.borderRadius}px` : `${4 * scaleFactor}px`,
+      padding: `${2 * scaleFactor}px ${6 * scaleFactor}px`,
       backgroundColor: style.backgroundColor || 'transparent',
-      border: `${style.borderWidth !== undefined ? style.borderWidth : 1}px ${style.borderStyle || 'dashed'} ${style.borderColor || '#db2777'}`
+      border: resolvedBorderW > 0 ? `${resolvedBorderW}px ${style.borderStyle || 'dashed'} ${style.borderColor || '#db2777'}` : 'none'
     };
   } else if (variant === 'underline') {
     containerExtraStyles = {
-      borderBottom: `${style.borderWidth || 1.5}px ${style.borderStyle || 'solid'} ${style.borderColor || '#db2777'}`,
-      paddingBottom: '2px'
+      position: 'relative',
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      paddingBottom: `${Math.max(2 * scaleFactor, resolvedBorderW + 1)}px`
     };
   } else {
     // minimal
@@ -161,6 +170,22 @@ export const SpecialEventElement: React.FC<BaseElementProps> = ({
         >
           {displayText}
         </span>
+        {variant === 'underline' && resolvedBorderW > 0 && (
+          <svg
+            className="w-full pointer-events-none block"
+            style={{ height: Math.max(1, resolvedBorderW), marginTop: `${1 * scaleFactor}px`, overflow: 'visible' }}
+          >
+            <line
+              x1="0"
+              y1="50%"
+              x2="100%"
+              y2="50%"
+              stroke={style.borderColor || '#db2777'}
+              strokeWidth={resolvedBorderW}
+              strokeDasharray={getDashArray(style.borderStyle || 'solid', resolvedBorderW, scaleFactor)}
+            />
+          </svg>
+        )}
       </div>
     </div>
   );

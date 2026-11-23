@@ -5,8 +5,8 @@ import {
   Monitor, Plus, ArrowLeft, Trash2, HelpCircle, CheckCheck,
   ChevronDown, ZoomIn, ZoomOut, AlertCircle, Loader2, Wand2
 } from 'lucide-react';
-import { saveFontToDB, getAllFontsFromDB, deleteFontFromDB, StoredFont } from '../../../core/logic/fontStorage';
-import { detectInstalledFonts, getCachedInstalledFonts, CANDIDATE_SYSTEM_FONTS, registerLocalFontHandle, ensureFontLoaded, getSafeFontFamily, injectLocalFontFaceStyles } from '../../../core/logic/fontDetector';
+import { saveFontToDB, getAllFontsFromDB, getFontFromDB, deleteFontFromDB, cleanStoredFontName, StoredFont } from '../../../core/logic/fontStorage';
+import { detectInstalledFonts, getCachedInstalledFonts, CANDIDATE_SYSTEM_FONTS, registerLocalFontHandle, getLocalFontHandle, ensureFontLoaded, getSafeFontFamily, injectLocalFontFaceStyles, registerFontBinaryInDocument, bindUploadedFontFile, cleanFontFamilyName } from '../../../core/logic/fontDetector';
 import { SYSTEM_FONTS, AVAILABLE_FONTS } from '../../../core/constants/elements';
 
 export interface SelectedTextInfo {
@@ -310,12 +310,10 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     setTimeout(() => setCopiedNotification(null), 3000);
   };
 
-  // Helper to register FontFace in the document
+  // Helper to register FontFace in the document & @font-face CSS rule
   const registerFontFace = async (family: string, buffer: ArrayBuffer) => {
     try {
-      const fontFace = new FontFace(family, buffer);
-      const loadedFace = await fontFace.load();
-      document.fonts.add(loadedFace);
+      await registerFontBinaryInDocument(family, buffer, { weight: '400', style: 'normal' });
     } catch (e) {
       console.warn(`Could not register FontFace for ${family}:`, e);
     }
@@ -380,9 +378,12 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
         const storedList = await getAllFontsFromDB();
         for (const stored of storedList) {
           if (stored.buffer && stored.buffer.byteLength > 0) {
-            const familyName = stored.name.replace(/\.[^/.]+$/, '').trim() || 'CustomFont';
+            const familyName = cleanStoredFontName(stored.name) || 'CustomFont';
             const parsed = await parseAndAddFont(stored.name, familyName, 'uploaded', stored.buffer);
-            if (parsed && !loaded.some(f => f.family === parsed.family)) {
+            if (stored.name && stored.name !== familyName) {
+              await registerFontBinaryInDocument(stored.name, stored.buffer, { weight: '400', style: 'normal' }).catch(() => {});
+            }
+            if (parsed && !loaded.some(f => f.family.toLowerCase() === parsed.family.toLowerCase())) {
               loaded.push(parsed);
             }
           }
@@ -401,9 +402,10 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
 
         // Preselect font matching initialFontFamily if possible
         if (initialFontFamily && loaded.length > 0) {
+          const targetClean = cleanFontFamilyName(initialFontFamily).toLowerCase();
           const matchingIdx = loaded.findIndex(
-            f => f.family.toLowerCase() === initialFontFamily.toLowerCase() ||
-                 f.name.toLowerCase().includes(initialFontFamily.toLowerCase())
+            f => f.family.toLowerCase() === targetClean ||
+                 f.name.toLowerCase().includes(targetClean)
           );
           if (matchingIdx >= 0) {
             setActiveFontIndex(matchingIdx);
@@ -432,17 +434,15 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        const buffer = await file.arrayBuffer();
-        const rawFamily = file.name.replace(/\.[^/.]+$/, '').trim();
-        const family = rawFamily;
+        const { primaryName, buffer } = await bindUploadedFontFile(file);
+        const family = primaryName || cleanStoredFontName(file.name) || 'CustomFont';
         
-        const parsed = await parseAndAddFont(file.name, family, 'uploaded', buffer);
+        const parsed = await parseAndAddFont(family, family, 'uploaded', buffer);
         if (parsed) {
-          await saveFontToDB(file.name, buffer);
-          setFonts(prev => [parsed, ...prev]);
+          setFonts(prev => [parsed, ...prev.filter(f => f.family.toLowerCase() !== family.toLowerCase())]);
           setActiveFontIndex(0);
           if (onRegisterFont) onRegisterFont(family);
-          showToast(`Fonte "${file.name}" carregada! (${parsed.font.glyphs.length} glifos)`);
+          showToast(`Fonte "${family}" carregada! (${parsed.font.glyphs.length} glifos)`);
         }
       } catch (err: any) {
         showToast(`Erro ao carregar fonte: ${err.message}`);
@@ -775,7 +775,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
     try {
       let parsedItem: ActiveFontItem | null = null;
       const key = familyName.toLowerCase();
-      let fontHandle = localFontDataMapRef.current.get(key);
+      let fontHandle = localFontDataMapRef.current.get(key) || getLocalFontHandle(familyName);
 
       // If not cached yet, query local fonts once to grab the binary FontData handle
       const winAny = typeof window !== 'undefined' ? (window as any) : null;
@@ -785,6 +785,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
           if (Array.isArray(allHandles)) {
             allHandles.forEach((fd: any) => {
               if (fd && fd.family) {
+                registerLocalFontHandle(fd);
                 const k = fd.family.toLowerCase();
                 const ex = localFontDataMapRef.current.get(k);
                 if (!ex || (fd.style && /regular|normal|book|roman/i.test(fd.style))) {
@@ -792,7 +793,7 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
                 }
               }
             });
-            fontHandle = localFontDataMapRef.current.get(key);
+            fontHandle = localFontDataMapRef.current.get(key) || getLocalFontHandle(familyName);
           }
         } catch (_) {}
       }
@@ -801,6 +802,14 @@ export const OpenTypeEditor: React.FC<OpenTypeEditorProps> = ({
         const blob: Blob = await fontHandle.blob();
         const buffer = await blob.arrayBuffer();
         parsedItem = await parseAndAddFont(familyName, familyName, 'local', buffer);
+      }
+
+      // Fallback para busca tolerante no IndexedDB (fontes enviadas anteriormente)
+      if (!parsedItem) {
+        const stored = await getFontFromDB(familyName);
+        if (stored && stored.buffer) {
+          parsedItem = await parseAndAddFont(familyName, familyName, 'uploaded', stored.buffer);
+        }
       }
 
       if (!parsedItem) {

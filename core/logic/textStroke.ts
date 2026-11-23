@@ -264,12 +264,27 @@ export function prepareClonedDocForHtml2Canvas(clonedDoc: Document): void {
   // Apply text stroke shadow polyfill
   applyHtml2CanvasTextStrokeFallback(clonedDoc);
 
-  // Disable cross-origin link stylesheets that trigger CORS/400 errors during html2canvas parsing
+  // Ensure injected binary & local @font-face stylesheets exist in clonedDoc.head for accurate html2canvas font capture
+  try {
+    if (typeof document !== 'undefined' && clonedDoc.head) {
+      ['agendamaster-binary-fonts-css', 'agendamaster-local-fonts-css'].forEach((styleId) => {
+        const srcStyle = document.getElementById(styleId);
+        if (srcStyle && srcStyle.textContent && !clonedDoc.getElementById(styleId)) {
+          const copy = clonedDoc.createElement('style');
+          copy.id = styleId;
+          copy.textContent = srcStyle.textContent;
+          clonedDoc.head.appendChild(copy);
+        }
+      });
+    }
+  } catch (_) {}
+
+  // Disable only malformed Google Fonts range links that trigger net::ERR_FAILED 400 during html2canvas parsing
   try {
     const links = clonedDoc.querySelectorAll('link[rel="stylesheet"]');
     links.forEach((l: any) => {
       const href = l.getAttribute('href') || '';
-      if (href.includes('fonts.googleapis.com') && (href.includes('wght@0,300..900') || href.includes(':ital,wght@'))) {
+      if (href.includes('fonts.googleapis.com') && href.includes('wght@0,300..900')) {
         l.remove();
       }
     });

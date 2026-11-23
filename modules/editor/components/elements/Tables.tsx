@@ -1,6 +1,8 @@
 import React, { useRef, useLayoutEffect, useEffect, useState, useCallback, memo } from 'react';
 import { TableElementProps } from './types';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { ensureFontLoaded, getSafeFontFamily } from '../../../../core/logic/fontDetector';
+import { getDashArray } from '../../../../core/logic/strokeScale';
 
 const applyTextTransform = (text: string, transform?: string) => {
     if (!text) return text;
@@ -239,6 +241,15 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const colStyles = style.table?.colStyles || {};
     const cellStyles = style.table?.cellStyles || {};
 
+    useEffect(() => {
+        const fontsToLoad = new Set<string>();
+        if (globalTextStyle.fontFamily) fontsToLoad.add(globalTextStyle.fontFamily);
+        Object.values(rowStyles).forEach((rs: any) => rs?.fontFamily && fontsToLoad.add(rs.fontFamily));
+        Object.values(colStyles).forEach((cs: any) => cs?.fontFamily && fontsToLoad.add(cs.fontFamily));
+        Object.values(cellStyles).forEach((cs: any) => cs?.fontFamily && fontsToLoad.add(cs.fontFamily));
+        fontsToLoad.forEach(f => ensureFontLoaded(f));
+    }, [globalTextStyle.fontFamily, rowStyles, colStyles, cellStyles]);
+
     const zebraRows = style.table?.zebraRows ?? Boolean((style.table as any)?.alternateRowColor);
     const zebraColor = style.table?.zebraColor || (style.table as any)?.alternateRowColor || '#f9fafb';
     const headerBgColor = (style.table as any)?.headerBackgroundColor || '#f3f4f6';
@@ -255,7 +266,6 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
     const insideBorderWidth = Math.max(0, !Number.isFinite(rawInsideWidth) || rawInsideWidth <= 0 ? 0 : Math.round(rawInsideWidth * 100) / 100);
     const borderStyle = style.table?.borderStyle || 'solid';
     const borderRadius = style.table?.borderRadius || 0;
-    const useContainerBorder = borderRadius > 0 || borderStyle !== 'solid';
 
     const borders = style.table?.borders || {
         top: true,
@@ -281,11 +291,6 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
         accY += (rowHeights[r] !== undefined ? rowHeights[r] : (100 / rows));
         rowDividerPositions.push(accY);
     }
-
-    const borderCssTop = borders.top && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
-    const borderCssBottom = borders.bottom && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
-    const borderCssLeft = borders.left && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
-    const borderCssRight = borders.right && outerBorderWidth > 0 ? `${outerBorderWidth}px ${borderStyle} ${borderColor}` : undefined;
 
     // Pre-calculate exact integer pixel heights for each row honoring custom rowHeights
     const totalRowPct = Array.from({ length: rows }).reduce<number>((sum, _, r) => {
@@ -345,8 +350,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
         }
     }
 
-    const isSolidBorder = borderStyle === 'solid';
-    const hasOverlayOuter = !useContainerBorder && outerBorderWidth > 0;
+    const hasOverlayOuter = outerBorderWidth > 0;
     const topInset = hasOverlayOuter && borders.top ? outerBorderWidth : 0;
     const bottomInset = hasOverlayOuter && borders.bottom ? outerBorderWidth : 0;
     const leftInset = hasOverlayOuter && borders.left ? outerBorderWidth : 0;
@@ -358,10 +362,6 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
             className="w-full h-full relative select-none"
             style={{
                 borderRadius: borderRadius > 0 ? `${borderRadius}px` : undefined,
-                borderTop: useContainerBorder ? borderCssTop : undefined,
-                borderBottom: useContainerBorder ? borderCssBottom : undefined,
-                borderLeft: useContainerBorder ? borderCssLeft : undefined,
-                borderRight: useContainerBorder ? borderCssRight : undefined,
                 boxSizing: 'border-box',
                 overflow: 'hidden',
             }}
@@ -437,7 +437,7 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                             flexDirection: 'column', 
                             justifyContent: justifyContent, 
                             alignItems: 'stretch', 
-                            fontFamily: tStyle.fontFamily, 
+                            fontFamily: getSafeFontFamily(tStyle.fontFamily), 
                             fontSize: `${effectiveFontSize}px`, 
                             fontWeight: tStyle.fontWeight, 
                             fontStyle: tStyle.fontStyle || 'normal',
@@ -480,67 +480,114 @@ export const TableElement: React.FC<TableElementProps> = ({ element, isEditor, s
                 );
             })}
 
-            {/* Unified Pixel-Locked Borders Overlay — guarantees identical thickness and flush corners without protruding edges */}
-            <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
-                {hasOverlayOuter && (
-                    <>
-                        {borders.top && (
-                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
-                        )}
-                        {borders.bottom && (
-                            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
-                        )}
-                        {borders.left && (
-                            <div style={{ position: 'absolute', top: `${topInset}px`, bottom: `${bottomInset}px`, left: 0, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
-                        )}
-                        {borders.right && (
-                            <div style={{ position: 'absolute', top: `${topInset}px`, bottom: `${bottomInset}px`, right: 0, width: `${outerBorderWidth}px`, backgroundColor: borderColor }} />
-                        )}
-                    </>
-                )}
+            {/* Unified Vector SVG Borders Overlay — guarantees identical thickness across solid/dashed/dotted and exact PDF parity */}
+            {(outerBorderWidth > 0 || insideBorderWidth > 0) && effectiveTableWidthPx > 0 && effectiveTableHeightPx > 0 && (() => {
+                const W = effectiveTableWidthPx;
+                const H = effectiveTableHeightPx;
+                const outerDash = getDashArray(borderStyle, outerBorderWidth, scaleFactor);
+                const insideDash = getDashArray(borderStyle, insideBorderWidth, scaleFactor);
+                const allFourOuter = Boolean(borders.top && borders.bottom && borders.left && borders.right);
 
-                {horizontalDividers.map(d => (
-                    <div
-                        key={d.key}
-                        style={isSolidBorder ? {
-                            position: 'absolute',
-                            top: `${d.y}px`,
-                            left: `${leftInset}px`,
-                            right: `${rightInset}px`,
-                            height: `${insideBorderWidth}px`,
-                            backgroundColor: borderColor,
-                        } : {
-                            position: 'absolute',
-                            top: `${d.y}px`,
-                            left: `${leftInset}px`,
-                            right: `${rightInset}px`,
-                            height: 0,
-                            borderTop: `${insideBorderWidth}px ${borderStyle} ${borderColor}`,
-                        }}
-                    />
-                ))}
+                return (
+                    <svg
+                        width={W}
+                        height={H}
+                        viewBox={`0 0 ${W} ${H}`}
+                        className="absolute inset-0 w-full h-full pointer-events-none z-20"
+                        style={{ overflow: 'hidden' }}
+                    >
+                        {hasOverlayOuter && (
+                            borderRadius > 0 && allFourOuter ? (
+                                <rect
+                                    x={outerBorderWidth / 2}
+                                    y={outerBorderWidth / 2}
+                                    width={Math.max(0, W - outerBorderWidth)}
+                                    height={Math.max(0, H - outerBorderWidth)}
+                                    rx={Math.max(0, borderRadius - outerBorderWidth / 2)}
+                                    ry={Math.max(0, borderRadius - outerBorderWidth / 2)}
+                                    fill="none"
+                                    stroke={borderColor}
+                                    strokeWidth={outerBorderWidth}
+                                    strokeDasharray={outerDash}
+                                />
+                            ) : (
+                                <>
+                                    {borders.top && (
+                                        <line
+                                            x1={0}
+                                            y1={outerBorderWidth / 2}
+                                            x2={W}
+                                            y2={outerBorderWidth / 2}
+                                            stroke={borderColor}
+                                            strokeWidth={outerBorderWidth}
+                                            strokeDasharray={outerDash}
+                                        />
+                                    )}
+                                    {borders.bottom && (
+                                        <line
+                                            x1={0}
+                                            y1={Math.max(0, H - outerBorderWidth / 2)}
+                                            x2={W}
+                                            y2={Math.max(0, H - outerBorderWidth / 2)}
+                                            stroke={borderColor}
+                                            strokeWidth={outerBorderWidth}
+                                            strokeDasharray={outerDash}
+                                        />
+                                    )}
+                                    {borders.left && (
+                                        <line
+                                            x1={outerBorderWidth / 2}
+                                            y1={topInset}
+                                            x2={outerBorderWidth / 2}
+                                            y2={Math.max(topInset, H - bottomInset)}
+                                            stroke={borderColor}
+                                            strokeWidth={outerBorderWidth}
+                                            strokeDasharray={outerDash}
+                                        />
+                                    )}
+                                    {borders.right && (
+                                        <line
+                                            x1={Math.max(0, W - outerBorderWidth / 2)}
+                                            y1={topInset}
+                                            x2={Math.max(0, W - outerBorderWidth / 2)}
+                                            y2={Math.max(topInset, H - bottomInset)}
+                                            stroke={borderColor}
+                                            strokeWidth={outerBorderWidth}
+                                            strokeDasharray={outerDash}
+                                        />
+                                    )}
+                                </>
+                            )
+                        )}
 
-                {verticalDividers.map(d => (
-                    <div
-                        key={d.key}
-                        style={isSolidBorder ? {
-                            position: 'absolute',
-                            left: `${d.x}px`,
-                            top: `${topInset}px`,
-                            bottom: `${bottomInset}px`,
-                            width: `${insideBorderWidth}px`,
-                            backgroundColor: borderColor,
-                        } : {
-                            position: 'absolute',
-                            left: `${d.x}px`,
-                            top: `${topInset}px`,
-                            bottom: `${bottomInset}px`,
-                            width: 0,
-                            borderLeft: `${insideBorderWidth}px ${borderStyle} ${borderColor}`,
-                        }}
-                    />
-                ))}
-            </div>
+                        {horizontalDividers.map(d => (
+                            <line
+                                key={d.key}
+                                x1={leftInset}
+                                y1={d.y}
+                                x2={Math.max(leftInset, W - rightInset)}
+                                y2={d.y}
+                                stroke={borderColor}
+                                strokeWidth={insideBorderWidth}
+                                strokeDasharray={insideDash}
+                            />
+                        ))}
+
+                        {verticalDividers.map(d => (
+                            <line
+                                key={d.key}
+                                x1={d.x}
+                                y1={topInset}
+                                x2={d.x}
+                                y2={Math.max(topInset, H - bottomInset)}
+                                stroke={borderColor}
+                                strokeWidth={insideBorderWidth}
+                                strokeDasharray={insideDash}
+                            />
+                        ))}
+                    </svg>
+                );
+            })()}
 
             {/* Interactive Grid Resizers Overlay (Draggable Borders for Columns and Rows) */}
             {isEditor && (

@@ -3,6 +3,97 @@ import { AgendaConfig, BackgroundConfig, BackgroundRulesConfig, CategoryBackgrou
 export type BackgroundCategoryType = 'miolo' | 'mensais' | 'divisorias' | 'iniciais';
 
 /**
+ * Verifica se um número de página (1-based) pertence a uma string de intervalo manual (ex: "1, 3, 5-10").
+ */
+export function isPageInRange(page: number, rangeStr: string): boolean {
+    if (!rangeStr) return false;
+    const parts = rangeStr.split(',').map(p => p.trim()).filter(Boolean);
+    for (const part of parts) {
+        if (part.includes('-')) {
+            const [startRaw, endRaw] = part.split('-');
+            const start = parseInt(startRaw.trim(), 10);
+            const end = parseInt(endRaw.trim(), 10);
+            if (!isNaN(start) && !isNaN(end) && page >= Math.min(start, end) && page <= Math.max(start, end)) {
+                return true;
+            }
+        } else {
+            const num = parseInt(part, 10);
+            if (!isNaN(num) && num === page) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Expande uma string de intervalo manual (ex: "1, 3, 5-10") para lista de páginas dentro de um limite seguro.
+ */
+export function parsePageNumbersFromRange(rangeStr: string, maxPage: number = 1500): number[] {
+    if (!rangeStr) return [];
+    const pages = new Set<number>();
+    const parts = rangeStr.split(',').map(p => p.trim()).filter(Boolean);
+    for (const part of parts) {
+        if (part.includes('-')) {
+            const [startRaw, endRaw] = part.split('-');
+            const start = parseInt(startRaw.trim(), 10);
+            const end = parseInt(endRaw.trim(), 10);
+            if (!isNaN(start) && !isNaN(end)) {
+                const lo = Math.max(1, Math.min(start, end));
+                const hi = Math.min(maxPage, Math.max(start, end));
+                for (let p = lo; p <= hi; p++) pages.add(p);
+            }
+        } else {
+            const num = parseInt(part, 10);
+            if (!isNaN(num) && num >= 1 && num <= maxPage) {
+                pages.add(num);
+            }
+        }
+    }
+    return Array.from(pages).sort((a, b) => a - b);
+}
+
+const isIntroCategory = (category: BackgroundCategoryType): boolean =>
+    category === 'iniciais' || category === 'mensais' || category === 'divisorias';
+
+const doesLegacyBgMatch = (
+    bg: BackgroundConfig,
+    pageIndex: number,
+    category: BackgroundCategoryType,
+    categoryRelativeIndex: number,
+    enforceCategory: boolean = true
+): boolean => {
+    if (!bg || !bg.type || bg.type === 'none') return false;
+
+    const target = bg.targetType || 'universal';
+    const filter = bg.pageFilter || 'all';
+
+    // Respeita flags legadas de exclusão por tipo de página
+    if (bg.showOnIntroPages === false && isIntroCategory(category)) return false;
+    if (bg.showOnDailyPages === false && category === 'miolo') return false;
+
+    if (enforceCategory) {
+        if (target === 'daily' && category !== 'miolo') return false;
+        if (target === 'intro' && category !== 'iniciais') return false;
+        if ((target === 'monthly' || target === 'monthly_intro') && category !== 'mensais') return false;
+        if ((target === 'divider' || target === 'divider_verso') && category !== 'divisorias') return false;
+    }
+
+    if (filter === 'even' || target === 'even') {
+        if (pageIndex % 2 !== 0 && categoryRelativeIndex % 2 !== 0) return false;
+        if (pageIndex % 2 !== 0) return false;
+    } else if (filter === 'odd' || target === 'odd') {
+        if (pageIndex % 2 === 0) return false;
+    }
+
+    if ((filter === 'custom' || target === 'custom' || (bg.customPages && bg.customPages.trim() !== '')) && bg.customPages) {
+        if (!isPageInRange(pageIndex, bg.customPages)) return false;
+    }
+
+    return true;
+};
+
+/**
  * Função principal para resolver qual plano de fundo uma página deve receber,
  * aplicando estritamente a hierarquia de prioridades solicitada:
  * 
@@ -38,18 +129,18 @@ export function getEffectiveBackgroundForPage(
         if (catConfig) {
             const isParityEven = categoryRelativeIndex % 2 === 0;
             const parityBg = isParityEven ? catConfig.even : catConfig.odd;
-            if (parityBg && parityBg.type && parityBg.type !== 'none') {
+            if (parityBg && parityBg.type && parityBg.type !== 'none' && doesLegacyBgMatch(parityBg, pageIndex, category, categoryRelativeIndex, false)) {
                 return parityBg;
             }
 
             // 3️⃣ Fundo específico da categoria (Priority 3)
-            if (catConfig.default && catConfig.default.type && catConfig.default.type !== 'none') {
+            if (catConfig.default && catConfig.default.type && catConfig.default.type !== 'none' && doesLegacyBgMatch(catConfig.default, pageIndex, category, categoryRelativeIndex, false)) {
                 return catConfig.default;
             }
         }
 
-        // 4️⃣ Fundo geral da agenda (Priority 4)
-        if (rules.global && rules.global.type && rules.global.type !== 'none') {
+        // 4️⃣ Fundo geral da agenda (Priority 4) - respeitando flags legadas se ainda estiverem no objeto
+        if (rules.global && rules.global.type && rules.global.type !== 'none' && doesLegacyBgMatch(rules.global, pageIndex, category, categoryRelativeIndex, true)) {
             return rules.global;
         }
     }
@@ -57,26 +148,8 @@ export function getEffectiveBackgroundForPage(
     // Fallback: processar lista legada de backgrounds
     if (legacyGlobalBgs && legacyGlobalBgs.length > 0) {
         for (const bg of legacyGlobalBgs) {
-            if (bg && bg.type && bg.type !== 'none') {
-                const target = bg.targetType || 'universal';
-                const filter = bg.pageFilter || 'all';
-
-                let categoryMatch = true;
-                if (target === 'daily' && category !== 'miolo') categoryMatch = false;
-                if (target === 'intro' && category !== 'iniciais') categoryMatch = false;
-                if ((target === 'monthly' || target === 'monthly_intro') && category !== 'mensais') categoryMatch = false;
-                if ((target === 'divider' || target === 'divider_verso') && category !== 'divisorias') categoryMatch = false;
-
-                let parityMatch = true;
-                if (filter === 'even' || target === 'even') {
-                    if (categoryRelativeIndex % 2 !== 0) parityMatch = false;
-                } else if (filter === 'odd' || target === 'odd') {
-                    if (categoryRelativeIndex % 2 === 0) parityMatch = false;
-                }
-
-                if (categoryMatch && parityMatch) {
-                    return bg;
-                }
+            if (doesLegacyBgMatch(bg, pageIndex, category, categoryRelativeIndex, true)) {
+                return bg;
             }
         }
     }
@@ -84,44 +157,91 @@ export function getEffectiveBackgroundForPage(
     return undefined;
 }
 
+const routeLegacyBgIntoRules = (rules: BackgroundRulesConfig, rawBg: BackgroundConfig): void => {
+    if (!rawBg || !rawBg.type || rawBg.type === 'none') return;
+
+    const bg: BackgroundConfig = { ...rawBg };
+    const target = bg.targetType || 'universal';
+    const filter = bg.pageFilter || 'all';
+
+    // 1. Se tiver páginas específicas manuais
+    if ((filter === 'custom' || target === 'custom') && bg.customPages && bg.customPages.trim() !== '') {
+        const pageNums = parsePageNumbersFromRange(bg.customPages);
+        if (pageNums.length > 0) {
+            if (!rules.specificPages) rules.specificPages = {};
+            for (const p of pageNums) {
+                if (!rules.specificPages[p]) {
+                    rules.specificPages[p] = { ...bg };
+                }
+            }
+            return;
+        }
+    }
+
+    const assignToCategory = (catKey: BackgroundCategoryType) => {
+        if (!rules[catKey]) rules[catKey] = {};
+        if (filter === 'even' || target === 'even') {
+            if (!rules[catKey]!.even) rules[catKey]!.even = { ...bg };
+        } else if (filter === 'odd' || target === 'odd') {
+            if (!rules[catKey]!.odd) rules[catKey]!.odd = { ...bg };
+        } else {
+            if (!rules[catKey]!.default) rules[catKey]!.default = { ...bg };
+        }
+    };
+
+    if (target === 'daily') {
+        if (bg.showOnDailyPages !== false) assignToCategory('miolo');
+        return;
+    }
+    if (target === 'intro') {
+        if (bg.showOnIntroPages !== false) assignToCategory('iniciais');
+        return;
+    }
+    if (target === 'monthly' || target === 'monthly_intro') {
+        if (bg.showOnIntroPages !== false) assignToCategory('mensais');
+        return;
+    }
+    if (target === 'divider' || target === 'divider_verso') {
+        if (bg.showOnIntroPages !== false) assignToCategory('divisorias');
+        return;
+    }
+
+    // Caso universal / all / even / odd respeitando showOnIntroPages e showOnDailyPages
+    const allowIntro = bg.showOnIntroPages !== false;
+    const allowDaily = bg.showOnDailyPages !== false;
+
+    if (!allowIntro && !allowDaily) return;
+
+    if (allowIntro && allowDaily && filter === 'all' && (target === 'universal' || target === 'all')) {
+        if (!rules.global || rules.global.type === 'none') {
+            rules.global = { ...bg };
+        }
+        return;
+    }
+
+    if (allowDaily) assignToCategory('miolo');
+    if (allowIntro) {
+        assignToCategory('iniciais');
+        assignToCategory('mensais');
+        assignToCategory('divisorias');
+    }
+};
+
 /**
  * Converte configurações legadas do projeto para a nova estrutura de regras hierárquicas.
  */
 export function migrateLegacyBackgroundsToRules(config: Partial<AgendaConfig>): BackgroundRulesConfig {
     const rules: BackgroundRulesConfig = config.backgroundRules ? JSON.parse(JSON.stringify(config.backgroundRules)) : {};
 
-    // 1. Se rules.global não estiver definido, mas config.background sim, herda o fundo global
+    // 1. Se rules.global não estiver definido, mas config.background sim, migra respeitando flags de escopo
     if ((!rules.global || rules.global.type === 'none') && config.background && config.background.type && config.background.type !== 'none') {
-        rules.global = { ...config.background };
+        routeLegacyBgIntoRules(rules, config.background);
     }
 
     // 2. Se a estrutura de regras estava vazia e existem backgrounds legados no array config.backgrounds
     if (!config.backgroundRules && config.backgrounds && config.backgrounds.length > 0) {
         for (const bg of config.backgrounds) {
-            if (!bg || bg.type === 'none') continue;
-
-            const target = bg.targetType || 'universal';
-            const filter = bg.pageFilter || 'all';
-
-            if (target === 'universal' || target === 'all') {
-                if (!rules.global || rules.global.type === 'none') rules.global = { ...bg };
-            } else {
-                let catKey: BackgroundCategoryType = 'miolo';
-                if (target === 'daily') catKey = 'miolo';
-                else if (target === 'intro') catKey = 'iniciais';
-                else if (target === 'monthly' || target === 'monthly_intro') catKey = 'mensais';
-                else if (target === 'divider' || target === 'divider_verso') catKey = 'divisorias';
-
-                if (!rules[catKey]) rules[catKey] = {};
-
-                if (filter === 'even' || target === 'even') {
-                    if (!rules[catKey]!.even) rules[catKey]!.even = { ...bg };
-                } else if (filter === 'odd' || target === 'odd') {
-                    if (!rules[catKey]!.odd) rules[catKey]!.odd = { ...bg };
-                } else {
-                    if (!rules[catKey]!.default) rules[catKey]!.default = { ...bg };
-                }
-            }
+            routeLegacyBgIntoRules(rules, bg);
         }
     }
 

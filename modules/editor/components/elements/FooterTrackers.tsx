@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BaseElementProps } from './types';
 import { FooterTrackerConfig, FooterTrackerType, FooterTrackerSection } from '../../../../types';
+import { ensureFontLoaded, getSafeFontFamily } from '../../../../core/logic/fontDetector';
+import { getDashArray } from '../../../../core/logic/strokeScale';
 
 // SVGs for Water Tracker
 const GlassIcon: React.FC<{ stroke: string; fill: string; strokeWidth: number; className?: string }> = ({
@@ -645,6 +647,12 @@ export const DEFAULT_COMPOSITE_SECTIONS: FooterTrackerSection[] = [
 ];
 
 export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, style, pageHeight, pageWidth }) => {
+    useEffect(() => {
+        if (style?.fontFamily) {
+            ensureFontLoaded(style.fontFamily);
+        }
+    }, [style?.fontFamily]);
+
     const fallbackType: FooterTrackerType = (['water', 'mood', 'weather', 'meals', 'sleep', 'meds', 'gratitude', 'fitness'].includes(style.variant as string)
         ? (style.variant as FooterTrackerType)
         : 'water');
@@ -681,13 +689,18 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
         showBox: false
     };
 
+    const scaleFactor = (pageWidth || 400) / 400;
     const strokeColor = config.strokeColor || style.color || '#374151';
     const fillColor = config.fillColor || style.backgroundColor || 'transparent';
-    const strokeWidth = typeof config.strokeWidth === 'number' ? config.strokeWidth : (style.borderWidth ?? 1.2);
-    const itemSize = config.itemSize || 20;
-    const spacing = config.spacing !== undefined ? config.spacing : 5;
-    const fontFamily = style.fontFamily || 'Inter';
-    const fontSize = style.fontSize || 10;
+    const rawSvgStroke = typeof config.strokeWidth === 'number'
+        ? config.strokeWidth
+        : (typeof style.borderWidth === 'number' ? style.borderWidth / scaleFactor : 1.2);
+    const strokeWidth = Number.isFinite(rawSvgStroke) ? Math.max(0, rawSvgStroke) : 1.2;
+    const cssStrokeWidth = strokeWidth * scaleFactor;
+    const itemSize = config.itemSize || (20 * scaleFactor);
+    const spacing = config.spacing !== undefined ? config.spacing : (5 * scaleFactor);
+    const fontFamily = getSafeFontFamily(style.fontFamily || 'Inter');
+    const fontSize = style.fontSize || (10 * scaleFactor);
     const fontWeight = style.fontWeight || '600';
     const textColor = style.color || strokeColor;
 
@@ -880,6 +893,9 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
             }
 
             const defaultHours = ['5h', '6h', '7h', '8h', '9h+'];
+            const circleSize = Math.max(14 * scaleFactor, itemSize * 0.8);
+            const circleHalfS = cssStrokeWidth / 2;
+            const circleR = Math.max(1, (circleSize / 2) - circleHalfS);
             return (
                 <div className="flex items-center gap-1.5">
                     <div style={{ width: itemSize, height: itemSize }} className="shrink-0">
@@ -894,20 +910,35 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
                         {Array.from({ length: count }).map((_, idx) => (
                             <div
                                 key={idx}
-                                className="flex items-center justify-center rounded-full shrink-0"
+                                className="relative flex items-center justify-center rounded-full shrink-0"
                                 style={{
-                                    width: Math.max(14, itemSize * 0.8),
-                                    height: Math.max(14, itemSize * 0.8),
-                                    border: `${strokeWidth}px solid ${strokeColor}`,
-                                    backgroundColor: fillColor,
-                                    fontSize: Math.max(7, fontSize * 0.72),
+                                    width: circleSize,
+                                    height: circleSize,
+                                    fontSize: Math.max(7 * scaleFactor, fontSize * 0.72),
                                     color: textColor,
                                     fontFamily,
                                     fontWeight: 'bold'
                                 }}
                                 title={`${defaultHours[idx % defaultHours.length]} de sono`}
                             >
-                                {customLabels?.[idx] || defaultHours[idx % defaultHours.length]}
+                                <svg
+                                    width={circleSize}
+                                    height={circleSize}
+                                    viewBox={`0 0 ${circleSize} ${circleSize}`}
+                                    className="absolute inset-0 pointer-events-none overflow-visible"
+                                >
+                                    <circle
+                                        cx={circleSize / 2}
+                                        cy={circleSize / 2}
+                                        r={circleR}
+                                        fill={fillColor}
+                                        stroke={cssStrokeWidth > 0 ? strokeColor : 'none'}
+                                        strokeWidth={cssStrokeWidth}
+                                    />
+                                </svg>
+                                <span className="relative z-10 leading-none">
+                                    {customLabels?.[idx] || defaultHours[idx % defaultHours.length]}
+                                </span>
                             </div>
                         ))}
                     </div>
@@ -938,6 +969,8 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
         }
 
         if (type === 'gratitude') {
+            const gratitudeLineW = cssStrokeWidth > 0 ? cssStrokeWidth : (1 * scaleFactor);
+            const gratitudeStyle = config.lineStyle || 'dashed';
             return (
                 <div className="flex-1 flex items-center gap-2 min-w-[80px]">
                     <div style={{ width: itemSize, height: itemSize }} className="shrink-0">
@@ -948,13 +981,22 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
                             className="w-full h-full"
                         />
                     </div>
-                    <div
-                        className="flex-1 h-0"
-                        style={{
-                            borderBottom: `${strokeWidth || 1}px ${config.lineStyle || 'dashed'} ${strokeColor}`,
-                            opacity: 0.8
-                        }}
-                    />
+                    {cssStrokeWidth > 0 && (
+                        <div className="flex-1 relative" style={{ height: Math.max(1, gratitudeLineW), opacity: 0.8 }}>
+                            <svg width="100%" height={Math.max(1, gratitudeLineW)} className="w-full overflow-visible block">
+                                <line
+                                    x1="0"
+                                    y1="50%"
+                                    x2="100%"
+                                    y2="50%"
+                                    stroke={strokeColor}
+                                    strokeWidth={gratitudeLineW}
+                                    strokeDasharray={getDashArray(gratitudeStyle, gratitudeLineW, scaleFactor)}
+                                    strokeLinecap={gratitudeStyle === 'dotted' ? 'round' : 'butt'}
+                                />
+                            </svg>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -997,21 +1039,48 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
             ? [DEFAULT_COMPOSITE_SECTIONS[0], DEFAULT_COMPOSITE_SECTIONS[1]]
             : [];
 
+    const boxBorderWidth = config.boxBorderWidth !== undefined ? Math.max(0, Number(config.boxBorderWidth)) : (1 * scaleFactor);
+    const boxPaddingVal = config.boxPadding !== undefined ? Number(config.boxPadding) : (5 * scaleFactor);
+    const boxRadiusVal = config.boxBorderRadius !== undefined ? Number(config.boxBorderRadius) : (6 * scaleFactor);
+    const topDividerWidth = config.topDividerWidth !== undefined ? Math.max(0, Number(config.topDividerWidth)) : (1 * scaleFactor);
+    const topDividerStyle = config.topDividerStyle || 'solid';
+    const topDividerColor = config.topDividerColor || config.boxBorderColor || '#e2e8f0';
+
     const containerStyle: React.CSSProperties = {
         width: '100%',
         height: '100%',
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         opacity: style.opacity ?? 1,
         boxSizing: 'border-box',
-        padding: config.showBox ? `${config.boxPadding || 5}px` : '2px 4px',
+        padding: config.showBox ? `${boxPaddingVal}px` : `${2 * scaleFactor}px ${4 * scaleFactor}px`,
         backgroundColor: config.showBox ? (config.boxBackgroundColor || '#f9fafb') : 'transparent',
-        border: config.showBox ? `${config.boxBorderWidth || 1}px solid ${config.boxBorderColor || '#e5e7eb'}` : 'none',
-        borderRadius: config.showBox ? `${config.boxBorderRadius || 6}px` : 0,
-        borderTop: config.showTopDivider
-            ? `${config.topDividerWidth || 1}px ${config.topDividerStyle || 'solid'} ${config.topDividerColor || config.boxBorderColor || '#e2e8f0'}`
-            : (config.showBox ? `${config.boxBorderWidth || 1}px solid ${config.boxBorderColor || '#e5e7eb'}` : 'none')
+        border: (config.showBox && boxBorderWidth > 0) ? `${boxBorderWidth}px solid ${config.boxBorderColor || '#e5e7eb'}` : 'none',
+        borderRadius: config.showBox ? `${boxRadiusVal}px` : 0,
+    };
+
+    const renderTopDividerOverlay = () => {
+        if (!config.showTopDivider || topDividerWidth <= 0) return null;
+        return (
+            <svg
+                width="100%"
+                height={Math.max(1, topDividerWidth)}
+                className="absolute top-0 left-0 right-0 pointer-events-none overflow-visible z-20"
+            >
+                <line
+                    x1="0"
+                    y1={topDividerWidth / 2}
+                    x2="100%"
+                    y2={topDividerWidth / 2}
+                    stroke={topDividerColor}
+                    strokeWidth={topDividerWidth}
+                    strokeDasharray={getDashArray(topDividerStyle, topDividerWidth, scaleFactor)}
+                    strokeLinecap={topDividerStyle === 'dotted' ? 'round' : 'butt'}
+                />
+            </svg>
+        );
     };
 
     // If Composite mode: Render all active sections side-by-side in one cohesive footer
@@ -1020,6 +1089,7 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
 
         return (
             <div style={containerStyle} className="select-none overflow-hidden">
+                {renderTopDividerOverlay()}
                 <div
                     className="w-full flex items-center flex-wrap"
                     style={{
@@ -1138,6 +1208,7 @@ export const FooterTrackerElement: React.FC<BaseElementProps> = ({ element, styl
 
     return (
         <div style={singleContainerStyle} className="select-none overflow-hidden">
+            {renderTopDividerOverlay()}
             {showLabel && labelText && (
                 <div
                     style={{

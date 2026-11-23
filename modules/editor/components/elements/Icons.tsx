@@ -27,7 +27,7 @@ export const IconElement: React.FC<BaseElementProps> = ({ element, style, pageHe
         >
             <IconComponent 
                 size="100%" 
-                strokeWidth={style.borderWidth || 2}
+                strokeWidth={style.borderWidth ?? 2}
                 style={{
                     fill: style.backgroundColor || 'transparent'
                 }}

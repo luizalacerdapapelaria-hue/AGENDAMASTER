@@ -350,6 +350,7 @@ export interface LayoutElement {
     includeMunicipal?: boolean; // Incluir feriados municipais
     useGlobalStyle?: boolean; // Se true, herda estilo do full_calendar encontrado nas introPages
     gridSize?: number; // Tamanho da grade para formas e gráficos
+    coverFullPage?: boolean; // Quando true, cobre toda a folha física ignorando margens (frente e verso)
   highlightCurrentDay?: boolean;
   currentDayHighlightColor?: string;
   currentDayHighlightTextColor?: string;
@@ -577,6 +578,9 @@ export interface CustomTemplateItem extends IntroPage {
     customVerso?: boolean;
     projectType?: ProjectType;
     isPermanent?: boolean;
+    fillerPageContent?: 'blank' | 'notes' | 'habit_tracker' | 'quote' | string;
+    fillerPageElements?: LayoutElement[];
+    fillerPageBackground?: BackgroundConfig;
     createdAt?: string;
 }
 
@@ -632,6 +636,7 @@ export interface WeekendTransitionConfig {
 }
 
 export interface AgendaConfig {
+  schemaVersion?: number; // Versão do esquema do projeto para migração segura de versões antigas
   name?: string; // Nome do projeto
   projectType?: ProjectType; // Novo: Tipo de projeto
   isPermanent?: boolean; // Se true, agenda permanente (não datada, sem feriados fixos e sem bloqueio de ano)
@@ -694,6 +699,7 @@ export interface AgendaConfig {
   showPaddingDaysNumbers?: boolean; // Se true, exibe os números dos dias do mês anterior; se false, deixa as caixas em branco
   quoteCategory?: 'all' | 'feminine_strength' | 'faith' | 'motivational' | 'gratitude_mindfulness' | 'entrepreneurship_creativity' | 'self_care' | 'self_love' | 'success_habits' | string; // Categoria padrão de frases motivacionais
   quoteCustomList?: string[]; // Lista personalizada de frases motivacionais do projeto
+  embeddedFonts?: Record<string, { name: string; base64: string; mimeType?: string }>; // Fontes customizadas/locais embutidas no projeto
   cover?: CoverProjectConfig; // Studio de Capas & Gabaritos de Cartonagem
 }
 

@@ -16,9 +16,10 @@ import { OpenTypeEditor } from './components/OpenTypeEditor';
 import { MockupStudio } from './components/MockupStudio';
 import { compressImage } from './utils/imageCompressor';
 import { ImageManager, useImageSrc } from './utils/imageManager';
-import { getEffectiveBackgroundForPage, BackgroundCategoryType } from '../../core/logic/backgroundRules';
-import { saveFontToDB, getAllFontsFromDB } from '../../core/logic/fontStorage';
-import { detectInstalledFonts, getCachedInstalledFonts, ensureFontLoaded, injectLocalFontFaceStyles, getSafeFontFamily } from '../../core/logic/fontDetector';
+import { getEffectiveBackgroundForPage, BackgroundCategoryType, isPageInRange } from '../../core/logic/backgroundRules';
+import { CURRENT_PROJECT_SCHEMA_VERSION, migrateProjectConfig, migrateCustomTemplatesArray } from '../../core/logic/projectMigration';
+import { saveFontToDB, getAllFontsFromDB, cleanStoredFontName } from '../../core/logic/fontStorage';
+import { detectInstalledFonts, getCachedInstalledFonts, ensureFontLoaded, injectLocalFontFaceStyles, getSafeFontFamily, registerFontBinaryInDocument, hydrateProjectFonts, prepareFontsForProjectExport, bindUploadedFontFile, requestLocalFontsPermission, cleanFontFamilyName } from '../../core/logic/fontDetector';
 import { PdfImportModal } from './components/PdfImportModal';
 import { TemplateGalleryModal } from './components/TemplateGalleryModal';
 import { VectorShapeGalleryModal } from './components/VectorShapeGalleryModal';
@@ -31,6 +32,7 @@ import { FavoriteColorSwatches } from './components/FavoriteColorSwatches';
 import { getProjectStyles, applyColorStyleToElement } from '../../core/logic/styleSystem';
 import { applyHtml2CanvasTextStrokeFallback, prepareClonedDocForHtml2Canvas } from '../../core/logic/textStroke';
 import { VECTOR_SHAPES, getVectorShapeById, VectorShapeDefinition, getSvgPathBounds } from './components/elements/vectorShapesData';
+import { CSS_PX_PER_MM, formatStrokeReadout, ptToUnit, STROKE_PT_PRESETS } from '../../core/logic/strokeScale';
 import * as icons from 'lucide-react';
 import { CoverCanvasOverlay } from './components/cover/CoverCanvasOverlay';
 import { CoverToolsPanel } from './components/cover/CoverToolsPanel';
@@ -59,7 +61,7 @@ import {
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignStartVertical, AlignEndVertical, BoxSelect, Box,
   Minimize2, Maximize2, Loader2, Settings, Search,
-  FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, FileImage, Printer, Lock, Ruler, WrapText, Scissors, MoreHorizontal, Italic, RotateCcw,
+  FileDown, Download, Info, ArrowDownAZ, Settings2, FlipHorizontal, FlipVertical, Upload, Clock, Palmtree, Star, Heart, Leaf, ChevronLeft, ChevronRight, CheckCircle2, Eye, BookOpen, MousePointer2, Hand, CheckSquare, Smartphone, Monitor, Zap, Sparkles, Printer, Lock, Ruler, WrapText, Scissors, MoreHorizontal, Italic, RotateCcw,
   RefreshCw, ArrowLeftRight, Droplets, PenTool, CalendarHeart,
   ArrowRight, DollarSign, Wallet, Bookmark
 } from 'lucide-react';
@@ -80,8 +82,8 @@ const PreviewPageScaleWrapper: React.FC<{ children: React.ReactNode; widthMm: nu
     const safeW = Math.max(20, Number(widthMm) || 148);
     const safeH = Math.max(20, Number(heightMm) || 210);
 
-    const nativeWidth = safeW * 3.77952;
-    const nativeHeight = safeH * 3.77952;
+    const nativeWidth = safeW * CSS_PX_PER_MM;
+    const nativeHeight = safeH * CSS_PX_PER_MM;
 
     useEffect(() => {
         if (propScale !== undefined) return;
@@ -1002,63 +1004,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
   ];
 
-  const [config, _setConfig] = useState<AgendaConfig>({
-    name: initialConfig?.name || 'Meu Novo Projeto',
-    projectType: initialConfig?.projectType || 'agenda',
-    isPermanent: initialConfig?.isPermanent ?? false,
-    year: initialConfig?.year || new Date().getFullYear() + 1,
-    pageCount: initialConfig?.pageCount,
-    startMonth: initialConfig?.startMonth ?? 0,
-    durationMonths: initialConfig?.durationMonths ?? 12,
-    startOfWeekDay: initialConfig?.startOfWeekDay,
-    weeklyStartMode: initialConfig?.weeklyStartMode,
-    showPaddingDaysNumbers: initialConfig?.showPaddingDaysNumbers,
-    layoutType: initialConfig?.layoutType || '1_per_page',
-    pageSize: initialConfig?.pageSize || 'A5',
-    customPageSize: initialConfig?.customPageSize || (initialConfig?.pageSize === 'Custom' ? { width: 148, height: 210 } : undefined),
-    orientation: initialConfig?.orientation || 'portrait',
-    includeHolidays: initialConfig?.includeHolidays ?? true,
-    includeMoonPhases: initialConfig?.includeMoonPhases ?? false,
-    includeQuotes: initialConfig?.includeQuotes ?? false,
-    quoteCategory: initialConfig?.quoteCategory,
-    quoteCustomList: initialConfig?.quoteCustomList,
-    includeVerses: initialConfig?.includeVerses ?? true,
-    mirrorEvenPages: initialConfig?.mirrorEvenPages ?? true,
-    mirrorContentOnVerso: initialConfig?.mirrorContentOnVerso ?? false,
-    customVerso: initialConfig?.customVerso,
-    versoAdvancesSequence: initialConfig?.versoAdvancesSequence,
-    startMonthOnRightPage: initialConfig?.startMonthOnRightPage ?? true,
-    includeMonthlyDividers: initialConfig?.includeMonthlyDividers ?? true,
-    includeMonthlyIntroPages: initialConfig?.includeMonthlyIntroPages ?? true,
-    fillerPageContent: initialConfig?.fillerPageContent || 'blank',
-    monthlyDividerVersoContent: initialConfig?.monthlyDividerVersoContent || 'blank',
-    monthlyDividerStyle: initialConfig?.monthlyDividerStyle,
-    disableSequenceSkip: initialConfig?.disableSequenceSkip || false,
-    margins: initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
-    initialMargins: initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
-    bindingMargins: initialConfig?.bindingMargins || initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
-    municipalHolidays: initialConfig?.municipalHolidays || [],
-    specialDates: initialConfig?.specialDates || [],
-    showSpecialDateBadges: initialConfig?.showSpecialDateBadges ?? true,
-    specialDateBadgePosition: initialConfig?.specialDateBadgePosition || 'top',
-    customCalendarStyle: initialConfig?.customCalendarStyle,
-    background: initialConfig?.background,
-    backgrounds: initialConfig?.backgrounds,
-    backgroundRules: initialConfig?.backgroundRules,
-    styles: initialConfig?.styles,
-    cover: initialConfig?.cover,
-    elements: initialConfig?.elements !== undefined ? initialConfig.elements : getDefaultElements(),
-    elementsVerso: initialConfig?.elementsVerso,
-    elementsSaturday: initialConfig?.elementsSaturday,
-    elementsSunday: initialConfig?.elementsSunday,
-    elementsTop: initialConfig?.elementsTop,
-    elementsBottom: initialConfig?.elementsBottom,
-    elementsWeeklyLeft: initialConfig?.elementsWeeklyLeft,
-    elementsWeeklyRight: initialConfig?.elementsWeeklyRight,
-    elementsWeeklyVersoLeft: initialConfig?.elementsWeeklyVersoLeft,
-    elementsWeeklyVersoRight: initialConfig?.elementsWeeklyVersoRight,
-    introPages: initialConfig?.introPages !== undefined ? initialConfig.introPages : INTRO_TEMPLATES,
-    monthlyIntroPages: initialConfig?.monthlyIntroPages || []
+  const [config, _setConfig] = useState<AgendaConfig>(() => {
+    if (initialConfig) {
+      try {
+        return migrateProjectConfig(initialConfig);
+      } catch (_) {
+        // Fallback seguro caso venha objeto parcial em fluxo especial
+      }
+    }
+    return {
+      schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
+      name: initialConfig?.name || 'Meu Novo Projeto',
+      projectType: initialConfig?.projectType || 'agenda',
+      isPermanent: initialConfig?.isPermanent ?? false,
+      year: initialConfig?.year || new Date().getFullYear() + 1,
+      pageCount: initialConfig?.pageCount,
+      startMonth: initialConfig?.startMonth ?? 0,
+      durationMonths: initialConfig?.durationMonths ?? 12,
+      startOfWeekDay: initialConfig?.startOfWeekDay,
+      weeklyStartMode: initialConfig?.weeklyStartMode,
+      showPaddingDaysNumbers: initialConfig?.showPaddingDaysNumbers,
+      layoutType: initialConfig?.layoutType || '1_per_page',
+      pageSize: initialConfig?.pageSize || 'A5',
+      customPageSize: initialConfig?.customPageSize || (initialConfig?.pageSize === 'Custom' ? { width: 148, height: 210 } : undefined),
+      orientation: initialConfig?.orientation || 'portrait',
+      includeHolidays: initialConfig?.includeHolidays ?? true,
+      includeMoonPhases: initialConfig?.includeMoonPhases ?? false,
+      includeQuotes: initialConfig?.includeQuotes ?? false,
+      quoteCategory: initialConfig?.quoteCategory,
+      quoteCustomList: initialConfig?.quoteCustomList,
+      includeVerses: initialConfig?.includeVerses ?? true,
+      mirrorEvenPages: initialConfig?.mirrorEvenPages ?? true,
+      mirrorContentOnVerso: initialConfig?.mirrorContentOnVerso ?? false,
+      customVerso: initialConfig?.customVerso,
+      versoAdvancesSequence: initialConfig?.versoAdvancesSequence,
+      startMonthOnRightPage: initialConfig?.startMonthOnRightPage ?? true,
+      includeMonthlyDividers: initialConfig?.includeMonthlyDividers ?? true,
+      includeMonthlyIntroPages: initialConfig?.includeMonthlyIntroPages ?? true,
+      fillerPageContent: initialConfig?.fillerPageContent || 'blank',
+      monthlyDividerVersoContent: initialConfig?.monthlyDividerVersoContent || 'blank',
+      monthlyDividerStyle: initialConfig?.monthlyDividerStyle,
+      disableSequenceSkip: initialConfig?.disableSequenceSkip || false,
+      margins: initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+      initialMargins: initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+      bindingMargins: initialConfig?.bindingMargins || initialConfig?.initialMargins || initialConfig?.margins || { top: 15, bottom: 15, inside: 20, outside: 10 },
+      municipalHolidays: initialConfig?.municipalHolidays || [],
+      specialDates: initialConfig?.specialDates || [],
+      showSpecialDateBadges: initialConfig?.showSpecialDateBadges ?? true,
+      specialDateBadgePosition: initialConfig?.specialDateBadgePosition || 'top',
+      customCalendarStyle: initialConfig?.customCalendarStyle,
+      background: initialConfig?.background,
+      backgrounds: initialConfig?.backgrounds,
+      backgroundRules: initialConfig?.backgroundRules,
+      styles: initialConfig?.styles,
+      cover: initialConfig?.cover,
+      elements: initialConfig?.elements !== undefined ? initialConfig.elements : getDefaultElements(),
+      elementsVerso: initialConfig?.elementsVerso,
+      elementsSaturday: initialConfig?.elementsSaturday,
+      elementsSunday: initialConfig?.elementsSunday,
+      elementsTop: initialConfig?.elementsTop,
+      elementsBottom: initialConfig?.elementsBottom,
+      elementsWeeklyLeft: initialConfig?.elementsWeeklyLeft,
+      elementsWeeklyRight: initialConfig?.elementsWeeklyRight,
+      elementsWeeklyVersoLeft: initialConfig?.elementsWeeklyVersoLeft,
+      elementsWeeklyVersoRight: initialConfig?.elementsWeeklyVersoRight,
+      introPages: initialConfig?.introPages !== undefined ? initialConfig.introPages : INTRO_TEMPLATES,
+      monthlyIntroPages: initialConfig?.monthlyIntroPages || []
+    };
   });
 
   const latestConfigRef = useRef<AgendaConfig>(config);
@@ -1066,43 +1078,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   useEffect(() => {
     if (initialConfig) {
-      _setConfig(prev => {
-        const nextProjectType = initialConfig.projectType || prev.projectType;
-        const nextLayoutType = initialConfig.layoutType || prev.layoutType;
-        const isWeekly = nextProjectType === 'planner' || nextLayoutType.startsWith('weekly');
-
-        let nextElements = initialConfig.elements !== undefined ? initialConfig.elements : prev.elements;
-        if (!isWeekly && nextElements && initialConfig.elements === undefined) {
-          nextElements = nextElements.filter(el => el.type !== 'planner_day_box');
-          if (nextElements.length === 0) {
-            nextElements = getDefaultElements();
-          }
-        }
-
-        return {
-          ...prev,
+      let resolvedConfig: AgendaConfig;
+      try {
+        resolvedConfig = migrateProjectConfig(initialConfig);
+      } catch (_) {
+        resolvedConfig = {
+          ...config,
           ...initialConfig,
-          initialMargins: initialConfig.initialMargins || initialConfig.margins || prev.initialMargins,
-          bindingMargins: initialConfig.bindingMargins || initialConfig.initialMargins || initialConfig.margins || prev.bindingMargins,
-          projectType: nextProjectType,
-          layoutType: nextLayoutType,
-          elements: nextElements,
-          elementsWeeklyLeft: isWeekly ? initialConfig.elementsWeeklyLeft : undefined,
-          elementsWeeklyRight: isWeekly ? initialConfig.elementsWeeklyRight : undefined,
-          elementsWeeklyVersoLeft: isWeekly ? initialConfig.elementsWeeklyVersoLeft : undefined,
-          elementsWeeklyVersoRight: isWeekly ? initialConfig.elementsWeeklyVersoRight : undefined,
-          municipalHolidays: initialConfig.municipalHolidays || prev.municipalHolidays || [],
-          specialDates: initialConfig.specialDates || prev.specialDates || [],
-          showSpecialDateBadges: initialConfig.showSpecialDateBadges ?? prev.showSpecialDateBadges ?? true,
-          specialDateBadgePosition: initialConfig.specialDateBadgePosition || prev.specialDateBadgePosition || 'top'
+          schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
         };
-      });
+      }
 
-      if (initialConfig.projectType === 'cover') {
+      const isWeekly = resolvedConfig.projectType === 'planner' || resolvedConfig.layoutType.startsWith('weekly');
+      if (!isWeekly && initialConfig.elements === undefined && resolvedConfig.elements.length === 0) {
+        resolvedConfig.elements = getDefaultElements();
+      }
+
+      _setConfig(resolvedConfig);
+
+      if (resolvedConfig.projectType === 'cover') {
         setEditMode('cover');
-      } else if (initialConfig.layoutType === 'weekly_vertical' || initialConfig.layoutType === 'weekly_horizontal') {
+      } else if (resolvedConfig.layoutType === 'weekly_vertical' || resolvedConfig.layoutType === 'weekly_horizontal') {
         setEditorViewMode('weekly_left');
-      } else if (initialConfig.layoutType === '1_per_page' || initialConfig.projectType === 'agenda') {
+      } else if (resolvedConfig.layoutType === '1_per_page' || resolvedConfig.projectType === 'agenda') {
         setEditorViewMode('standard');
       }
 
@@ -1110,7 +1108,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       const initialPdf = (initialConfig as any)?.__initialPdfFile;
       if (initialPdf && initialPdf instanceof File) {
         setPdfImportInitialFile(initialPdf);
-        const isWeekly = initialConfig.layoutType?.startsWith('weekly') || initialConfig.projectType === 'planner';
         setPdfImportInitialDestination(isWeekly ? 'miolo_left' : 'miolo_default');
         setPdfImportModalOpen(true);
       }
@@ -1121,9 +1118,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
+        const snapshotToSave: AgendaConfig = {
+          ...config,
+          schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
+        };
         localStorage.setItem('agendamaster_autosave_project', JSON.stringify({
-          name: config.name || 'Último Projeto',
-          config
+          name: snapshotToSave.name || 'Último Projeto',
+          config: snapshotToSave
         }));
       } catch (_) {}
     }, 1200);
@@ -1191,6 +1192,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [customFonts, setCustomFonts] = useState<string[]>([]);
   const [localFonts, setLocalFonts] = useState<string[]>(() => getCachedInstalledFonts());
   const [localFontsLoading, setLocalFontsLoading] = useState(false);
+  const [missingProjectFonts, setMissingProjectFonts] = useState<string[]>([]);
+  const [needsLocalFontPermission, setNeedsLocalFontPermission] = useState(false);
+  const [projectFontBannerDismissed, setProjectFontBannerDismissed] = useState(false);
+  const [fontRefreshTick, setFontRefreshTick] = useState(0);
   const [manualFonts, setManualFonts] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem('agendamaster_manual_fonts');
@@ -1216,7 +1221,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [customTemplates, setCustomTemplates] = useState<CustomTemplateItem[]>(() => {
       try {
           const saved = localStorage.getItem('agendamaster_custom_page_templates');
-          return saved ? JSON.parse(saved) : [];
+          if (!saved) return [];
+          const parsed = JSON.parse(saved);
+          return Array.isArray(parsed) ? migrateCustomTemplatesArray(parsed) : [];
       } catch (e) {
           return [];
       }
@@ -1364,11 +1371,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const [renderedPrintCount, setRenderedPrintCount] = useState(0); 
   const [printStatus, setPrintStatus] = useState<'idle' | 'generating' | 'ready'>('idle');
   const [pdfExporting, setPdfExporting] = useState(false);
-  const [pdfExportProgress, setPdfExportProgress] = useState(0);
-  const [pdfScaleMode, setPdfScaleMode] = useState<'fast' | 'standard' | 'high'>('standard');
-  const [pdfExportMethod, setPdfExportMethod] = useState<'vector' | 'canvas'>('vector');
   const [previewPageIndex, setPreviewPageIndex] = useState<number>(0);
-  const pdfExportCancelledRef = useRef<boolean>(false);
 
   // PWA (Progressive Web Application) Installation States
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -1707,6 +1710,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
+  const relinkFontInputRef = useRef<HTMLInputElement>(null);
+  const relinkTargetFontRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const workspaceRef = useRef<HTMLElement>(null);
@@ -1737,8 +1742,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
   const handleExport = async () => {
     try {
-      setToastMessage('Preparando imagens e salvando projeto...');
-      const exportable = await ImageManager.prepareConfigForExport(latestConfigRef.current);
+      setToastMessage('Preparando imagens, fontes e salvando projeto...');
+      let exportable = await ImageManager.prepareConfigForExport(latestConfigRef.current);
+      exportable = await prepareFontsForProjectExport(exportable);
       exportProject(exportable);
       setToastMessage('Projeto salvo com sucesso! Aguarde o download concluir.');
     } catch (e) {
@@ -1770,6 +1776,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (!includeGuides && overlayEl) {
         overlayEl.style.display = 'none';
       }
+
+      await hydrateProjectFonts(config).catch(() => {});
+      try { await (document as any).fonts?.ready; } catch (_) {}
 
       const { default: html2canvas } = await import('html2canvas');
       const { jsPDF } = await import('jspdf');
@@ -1834,27 +1843,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     fileInputRef.current?.click();
   };
 
+  const runProjectFontHydration = useCallback(async (targetConfig?: AgendaConfig | null) => {
+    if (!targetConfig) return;
+    try {
+      const hydration = await hydrateProjectFonts(targetConfig);
+      setMissingProjectFonts(hydration.missingFonts);
+      setNeedsLocalFontPermission(hydration.needsLocalPermission);
+      setFontRefreshTick(t => t + 1);
+    } catch (err) {
+      console.warn('[FontDetector] Falha ao hidratar fontes do projeto:', err);
+    }
+  }, []);
+
   // Carregar fontes personalizadas do IndexedDB ao montar o componente
   useEffect(() => {
     const loadStoredFonts = async () => {
       try {
         const stored = await getAllFontsFromDB();
-        const loadedNames: string[] = [];
+        const loadedNamesSet = new Set<string>();
         
         for (const font of stored) {
+          if (!font?.buffer || font.buffer.byteLength === 0) continue;
           try {
-            const fontFace = new FontFace(font.name, font.buffer);
-            const loadedFace = await fontFace.load();
-            (document as any).fonts.add(loadedFace);
-            loadedNames.push(font.name);
-            console.log(`[FontStorage] Fonte '${font.name}' carregada com sucesso do IndexedDB.`);
+            const cleanName = cleanStoredFontName(font.name) || font.name;
+            await registerFontBinaryInDocument(cleanName, font.buffer, { weight: '400', style: 'normal' });
+            if (font.name && font.name !== cleanName) {
+              await registerFontBinaryInDocument(font.name, font.buffer, { weight: '400', style: 'normal' });
+            }
+            loadedNamesSet.add(cleanName);
           } catch (err) {
             console.error(`[FontStorage] Erro ao carregar fonte do IndexedDB:`, err);
           }
         }
         
-        if (loadedNames.length > 0) {
-          setCustomFonts(loadedNames);
+        if (loadedNamesSet.size > 0) {
+          setCustomFonts(Array.from(loadedNamesSet));
+          setFontRefreshTick(t => t + 1);
         }
       } catch (e) {
         console.error('[FontStorage] Erro geral ao buscar fontes do IndexedDB:', e);
@@ -1864,14 +1888,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     loadStoredFonts();
   }, []);
 
-  // -- PRELOAD AND MIGRATE IMAGES ON MOUNT --
+  // -- PRELOAD AND MIGRATE IMAGES + FONTS ON MOUNT --
   useEffect(() => {
     if (initialConfig?.projectType === 'cover') {
       setEditMode('cover');
     }
-    const initializeImages = async () => {
+    const initializeImagesAndFonts = async () => {
       try {
         const snapshot = latestConfigRef.current;
+        await runProjectFontHydration(snapshot);
         await ImageManager.preloadConfigImages(snapshot);
         let didMigrate = false;
         const migrated = await ImageManager.migrateConfigImages(snapshot, () => {
@@ -1881,53 +1906,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           setConfigSilent(migrated);
         }
       } catch (err) {
-        console.error('Erro ao inicializar e migrar imagens:', err);
+        console.error('Erro ao inicializar imagens e fontes:', err);
       }
     };
-    initializeImages();
-  }, [initialConfig]);
-
-  // -- NORMALIZE LEGACY COVER WIRE-O & SAFE ZONE CONFIG --
-  useEffect(() => {
-    if (!config.cover) return;
-    const needsSafeZoneCleanup = config.cover.guides?.showSafeZoneLine === true;
-    const needsLegacyWireMigration = needsSafeZoneCleanup && config.cover.wireO?.marginMm === 8.5;
-    if (needsSafeZoneCleanup || needsLegacyWireMigration) {
-      setConfigSilent({
-        ...config,
-        cover: {
-          ...config.cover,
-          guides: {
-            ...config.cover.guides,
-            showSafeZoneLine: false
-          },
-          wireO: {
-            ...config.cover.wireO,
-            marginMm: needsLegacyWireMigration ? 5 : (config.cover.wireO?.marginMm ?? 5)
-          }
-        }
-      });
-    }
-  }, [config.cover]);
+    initializeImagesAndFonts();
+  }, [initialConfig, runProjectFontHydration]);
 
   // -- LOCAL STORAGE PERSISTENCE --
   useEffect(() => {
-    const savedConfig = localStorage.getItem('agendamaster_current_project');
-    if (savedConfig && !config.name) { // Only load if current config is "empty" or default
-      try {
-        // setConfig(JSON.parse(savedConfig));
-        // We don't auto-load to avoid overwriting initial setup, 
-        // but we could offer a "Restore" button.
-      } catch (e) {
-        console.error('Error loading from localStorage', e);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        localStorage.setItem('agendamaster_current_project', JSON.stringify(config));
+        localStorage.setItem('agendamaster_current_project', JSON.stringify({
+          ...config,
+          schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
+        }));
       } catch (err) {
         console.warn('Falha ao salvar projeto no localStorage:', err);
       }
@@ -1969,15 +1961,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
 
       const importedConfig = result.config;
-      const migratedConfig = await ImageManager.migrateConfigImages({
-        ...importedConfig,
-        startMonthOnRightPage: importedConfig.startMonthOnRightPage ?? true,
-        includeMonthlyDividers: importedConfig.includeMonthlyDividers ?? true,
-        includeMonthlyIntroPages: importedConfig.includeMonthlyIntroPages ?? true,
-        fillerPageContent: importedConfig.fillerPageContent || 'blank',
-        monthlyDividerVersoContent: importedConfig.monthlyDividerVersoContent || 'blank'
-      });
+      const migratedConfig = await ImageManager.migrateConfigImages(importedConfig);
       setConfig(migratedConfig);
+      setProjectFontBannerDismissed(false);
+      void runProjectFontHydration(migratedConfig);
       if (Array.isArray(migratedConfig.quoteCustomList) && migratedConfig.quoteCustomList.length > 0) {
         setCustomQuotes(migratedConfig.quoteCustomList);
         try {
@@ -2061,40 +2048,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           throw new Error('O arquivo importado não é um formato de lista válido de modelos.');
         }
 
-        const validTemplates: CustomTemplateItem[] = [];
-        
-        parsed.forEach((item: any, idx: number) => {
-          if (item && typeof item === 'object' && item.name && Array.isArray(item.elements)) {
-            const isMiolo = item.templateType === 'miolo' || (item.id && String(item.id).startsWith('miolo-'));
-            const cleanTemplate: CustomTemplateItem = {
-              id: item.id && !customTemplates.some(t => t.id === item.id) ? item.id : (isMiolo ? 'miolo-' : 'custom-') + Math.random().toString(36).substr(2, 9),
-              name: item.name,
-              templateType: item.templateType || (isMiolo ? 'miolo' : 'page'),
-              layoutType: item.layoutType,
-              projectType: item.projectType,
-              elements: item.elements.map((el: any) => ({
-                ...el,
-                id: el.id || Math.random().toString(36).substr(2, 9)
-              })),
-              elementsVerso: Array.isArray(item.elementsVerso) ? item.elementsVerso.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsWeeklyLeft: Array.isArray(item.elementsWeeklyLeft) ? item.elementsWeeklyLeft.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsWeeklyRight: Array.isArray(item.elementsWeeklyRight) ? item.elementsWeeklyRight.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsWeeklyVersoLeft: Array.isArray(item.elementsWeeklyVersoLeft) ? item.elementsWeeklyVersoLeft.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsWeeklyVersoRight: Array.isArray(item.elementsWeeklyVersoRight) ? item.elementsWeeklyVersoRight.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsTop: Array.isArray(item.elementsTop) ? item.elementsTop.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsBottom: Array.isArray(item.elementsBottom) ? item.elementsBottom.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsSaturday: Array.isArray(item.elementsSaturday) ? item.elementsSaturday.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsSunday: Array.isArray(item.elementsSunday) ? item.elementsSunday.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              elementsWeekendTransition: Array.isArray(item.elementsWeekendTransition) ? item.elementsWeekendTransition.map((el: any) => ({ ...el, id: el.id || Math.random().toString(36).substr(2, 9) })) : undefined,
-              weekendTransitionContentType: item.weekendTransitionContentType,
-              customVerso: typeof item.customVerso === 'boolean' ? item.customVerso : undefined,
-              background: item.background,
-              createdAt: item.createdAt || new Date().toISOString()
-            };
-            validTemplates.push(cleanTemplate);
-          } else {
-            console.warn(`[Import Templates] Modelo descartado no índice ${idx} devido a formato inválido.`);
-          }
+        const normalizedTemplates = migrateCustomTemplatesArray(parsed);
+        const validTemplates: CustomTemplateItem[] = normalizedTemplates.map((tmpl) => {
+          const isMiolo = tmpl.templateType === 'miolo' || String(tmpl.id).startsWith('miolo-');
+          return {
+            ...tmpl,
+            id:
+              tmpl.id && !customTemplates.some(t => t.id === tmpl.id)
+                ? tmpl.id
+                : (isMiolo ? 'miolo-' : 'custom-') + Math.random().toString(36).substring(2, 11),
+          };
         });
 
         if (validTemplates.length === 0) {
@@ -2579,46 +2542,81 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (!file) return;
 
     try {
-      // Remover extensões e caracteres especiais do nome da fonte
-      const fontName = file.name.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_') + '_' + Math.random().toString(36).substr(2, 5);
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const arrayBuffer = event.target?.result as ArrayBuffer;
-        
-        try {
-          const fontFace = new FontFace(fontName, arrayBuffer);
-          const loadedFace = await fontFace.load();
-          (document as any).fonts.add(loadedFace);
-          
-          // Salvar no IndexedDB
-          await saveFontToDB(fontName, arrayBuffer);
-          
-          setCustomFonts(prev => [...prev, fontName]);
-          
-          // Se tiver um elemento selecionado, já aplica a nova fonte
-          if (selectedIds.length > 0) {
-              updateElementStyle(selectedIds[0], { fontFamily: fontName } as any);
-          }
-        } catch (err) {
-          console.error('Erro ao processar fonte:', err);
-          alert('Erro ao carregar arquivo de fonte. Verifique se o formato é válido (TTF, OTF, WOFF).');
-        }
-      };
-      reader.readAsArrayBuffer(file);
+      const { primaryName } = await bindUploadedFontFile(file);
+      const cleanName = cleanFontFamilyName(primaryName) || cleanStoredFontName(file.name) || 'CustomFont';
+
+      setCustomFonts(prev => (prev.some(f => f.toLowerCase() === cleanName.toLowerCase()) ? prev : [...prev, cleanName]));
+      setMissingProjectFonts(prev => prev.filter(f => f.toLowerCase() !== cleanName.toLowerCase()));
+      setFontRefreshTick(t => t + 1);
+
+      // Se tiver um elemento selecionado, já aplica a nova fonte
+      if (selectedIds.length > 0) {
+        updateElementStyle(selectedIds[0], { fontFamily: cleanName } as any);
+      }
+      setToastMessage(`Fonte "${cleanName}" carregada e salva para próximos projetos!`);
     } catch (err) {
       console.error('Font upload error:', err);
+      alert('Erro ao carregar arquivo de fonte. Verifique se o formato é válido (TTF, OTF, WOFF).');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleRelinkProjectFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const explicitTarget = relinkTargetFontRef.current;
+    relinkTargetFontRef.current = null;
+
+    try {
+      const uploadedNames: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const aliasesToBind = explicitTarget
+          ? [explicitTarget]
+          : (files.length === 1 && missingProjectFonts.length === 1 ? [missingProjectFonts[0]] : []);
+        const { primaryName } = await bindUploadedFontFile(file, aliasesToBind);
+        if (primaryName) uploadedNames.push(primaryName);
+      }
+
+      if (uploadedNames.length > 0) {
+        setCustomFonts(prev => {
+          const next = new Set(prev);
+          uploadedNames.forEach(n => next.add(n));
+          return Array.from(next);
+        });
+      }
+
+      await runProjectFontHydration(latestConfigRef.current);
+      setToastMessage(
+        explicitTarget
+          ? `Fonte "${explicitTarget}" restaurada no projeto!`
+          : `Fontes vinculadas! Layout atualizado automaticamente.`
+      );
+    } catch (err) {
+      console.error('Relink font error:', err);
+      alert('Erro ao vincular arquivo de fonte (TTF, OTF, WOFF).');
+    } finally {
+      e.target.value = '';
     }
   };
 
   const handleLoadLocalFonts = async () => {
     setLocalFontsLoading(true);
     try {
+      // Solicita explicitamente permissão no clique do usuário (Chromium queryLocalFonts)
+      const perm = await requestLocalFontsPermission();
       const detected = await detectInstalledFonts();
-      if (detected && detected.length > 0) {
-        setLocalFonts(detected);
-        injectLocalFontFaceStyles(detected);
-        
-        // Se houver um elemento selecionado, garante que a fonte dele seja imediatamente carregada e aplicada
+      const merged = Array.from(new Set([...(perm.families || []), ...(detected || [])])).sort((a, b) => a.localeCompare(b));
+
+      if (merged.length > 0) {
+        setLocalFonts(merged);
+        injectLocalFontFaceStyles(merged);
+
+        // Hidrata todas as fontes usadas no projeto aberto e nos elementos selecionados
+        await runProjectFontHydration(latestConfigRef.current);
+
         if (selectedIds.length > 0) {
           const currentList = getActiveElements();
           const selectedEl = currentList.find(item => item.id === selectedIds[0]);
@@ -2626,9 +2624,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             await ensureFontLoaded(selectedEl.style.fontFamily);
           }
         }
-        setToastMessage(`✨ ${detected.length} fontes do seu computador prontas para uso!`);
+        setToastMessage(`✨ ${merged.length} fontes do seu computador ativadas e aplicadas!`);
       } else {
-        setToastMessage('Nenhuma fonte adicional detectada no computador.');
+        setToastMessage('Nenhuma fonte adicional detectada. Verifique a permissão de fontes do navegador.');
       }
     } catch (e) {
       console.warn('Detecção de fontes do computador:', e);
@@ -2652,6 +2650,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
       // Registra e carrega a fonte imediatamente
       await ensureFontLoaded(trimmed);
+      setFontRefreshTick(t => t + 1);
 
       if (selectedIds.length > 0) {
         updateElementStyle(selectedIds[0], { fontFamily: trimmed });
@@ -2674,21 +2673,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       if (detected && detected.length > 0) {
         setLocalFonts(detected);
         injectLocalFontFaceStyles(detected);
+        void runProjectFontHydration(latestConfigRef.current);
       }
     }).catch((err: any) => {
       console.warn('Detecção automática de fontes locais:', err);
     });
 
-    // 3. Listener para re-renderização quando uma nova fonte é aplicada com sucesso
+    // 3. Listener com debounce para repintar o canvas quando uma fonte assíncrona finaliza o carregamento
+    let repaintTimer: ReturnType<typeof setTimeout> | null = null;
     const onFontApplied = () => {
-      // Força atualização suave do canvas
-      setConfig(prev => ({ ...prev }));
+      if (repaintTimer) clearTimeout(repaintTimer);
+      repaintTimer = setTimeout(() => {
+        setFontRefreshTick(t => t + 1);
+      }, 60);
     };
     window.addEventListener('font-applied', onFontApplied);
     return () => {
+      if (repaintTimer) clearTimeout(repaintTimer);
       window.removeEventListener('font-applied', onFontApplied);
     };
-  }, []);
+  }, [runProjectFontHydration]);
 
   // Desativa automaticamente modo de simulação de preenchimento máximo (simulateMaxSpace) de todos os elementos
   const clearSimulationMode = useCallback(() => {
@@ -2723,6 +2727,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       hasSim(config.elementsSunday) ||
       hasSim(config.elementsTop) ||
       hasSim(config.elementsBottom) ||
+      hasSim(config.fillerPageElements) ||
       config.introPages?.some(p => hasSim(p.elements)) ||
       config.monthlyIntroPages?.some(p => hasSim(p.elements));
 
@@ -2740,6 +2745,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       elementsSunday: clearList(prev.elementsSunday),
       elementsTop: clearList(prev.elementsTop),
       elementsBottom: clearList(prev.elementsBottom),
+      fillerPageElements: clearList(prev.fillerPageElements),
       introPages: prev.introPages?.map(p => ({
         ...p,
         elements: clearList(p.elements) || []
@@ -2796,21 +2802,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   }, [printStatus, renderedPrintCount, generatedData.length]);
 
 
-
-  const isPageInRange = (page: number, rangeStr: string): boolean => {
-    if (!rangeStr) return false;
-    const parts = rangeStr.split(',').map(p => p.trim());
-    for (const part of parts) {
-        if (part.includes('-')) {
-            const [start, end] = part.split('-').map(n => parseInt(n.trim()));
-            if (!isNaN(start) && !isNaN(end) && page >= start && page <= end) return true;
-        } else {
-            const num = parseInt(part);
-            if (!isNaN(num) && num === page) return true;
-        }
-    }
-    return false;
-  };
 
   const getEffectiveBg = (pageBg?: BackgroundConfig, fallbackBg?: BackgroundConfig) => {
     if (pageBg && pageBg.type) {
@@ -2869,6 +2860,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       }
 
       return true;
+  };
+
+  const getCurrentEditorPageNumber = () => {
+    let pageNum = (editorViewMode === 'weekly_left' || editorViewMode === 'weekly_verso_left' || editorViewMode === 'verso') ? 2 : 1;
+    if (editorViewMode !== 'weekly_left' && editorViewMode !== 'weekly_verso_left' && editorViewMode !== 'verso') {
+        const globalBgs = config.backgrounds && config.backgrounds.length > 0 ? config.backgrounds : (config.background ? [config.background] : []);
+        const activeType = editMode === 'intro' ? 'intro' : editMode === 'monthly_intro' ? 'monthly_intro' : editMode === 'divider' ? 'divider' : 'daily';
+
+        if (editMode === 'daily' && activeBgIndex !== undefined && globalBgs[activeBgIndex]) {
+            const activeBg = globalBgs[activeBgIndex];
+            if (activeBg.targetType === 'even' || activeBg.pageFilter === 'even') {
+                pageNum = 2;
+            } else if (activeBg.targetType === 'odd' || activeBg.pageFilter === 'odd') {
+                pageNum = 1;
+            }
+        } else {
+            const matchingForMode = globalBgs.filter(bg => isBgMatchingPage(bg, activeType));
+            if (matchingForMode.length === 1 && (matchingForMode[0].targetType === 'even' || matchingForMode[0].pageFilter === 'even')) {
+                pageNum = 2;
+            }
+        }
+
+        if (editorParityToggle === 'even') {
+            pageNum = 2;
+        } else if (editorParityToggle === 'odd') {
+            pageNum = 1;
+        }
+    }
+    return pageNum;
   };
 
   const renderSingleBackground = (bg?: BackgroundConfig, pageNumber?: number, keyPrefix?: string) => {
@@ -2939,12 +2959,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const cancelPrint = () => {
-      pdfExportCancelledRef.current = true;
       setPrintStatus('idle');
       setRenderedPrintCount(0);
       setPdfExporting(false);
-      setPdfExportProgress(0);
-      setToastMessage('Conversão para PDF cancelada.');
+      setToastMessage('Exportação de PDF cancelada.');
   };
 
   const handleKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -3017,8 +3035,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             const val = nudgeValue > 0 ? nudgeValue : 1;
             const effectiveNudge = val * multiplier;
 
-            const usableW = Math.max(1, PAGE_WIDTH_MM - config.margins.inside - config.margins.outside);
-            const usableH = Math.max(1, PAGE_HEIGHT_MM - config.margins.top - config.margins.bottom);
+            const isEvenNudge = Boolean(config.mirrorEvenPages && (getCurrentEditorPageNumber() % 2 === 0));
+            const marginLeftMm = isEvenNudge ? (config.margins?.outside ?? 10) : (config.margins?.inside ?? 20);
+            const marginRightMm = isEvenNudge ? (config.margins?.inside ?? 20) : (config.margins?.outside ?? 10);
+            const marginTopMm = config.margins?.top ?? 15;
+            const marginBottomMm = config.margins?.bottom ?? 15;
+            const usableW = Math.max(1, PAGE_WIDTH_MM - marginLeftMm - marginRightMm);
+            const usableH = Math.max(1, PAGE_HEIGHT_MM - marginTopMm - marginBottomMm);
 
             let stepX = 0;
             let stepY = 0;
@@ -3033,13 +3056,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 stepY = (effectiveNudge / baseCanvasHeightPx) * 100;
             }
 
+            const physMinX = -((marginLeftMm / usableW) * 100);
+            const physMaxRight = 100 + ((marginRightMm / usableW) * 100);
+            const physMinY = -((marginTopMm / usableH) * 100);
+            const physMaxBottom = 100 + ((marginBottomMm / usableH) * 100);
+
             const newElements = activeList.map(el => {
                 if (!selectedIds.includes(el.id)) return el;
-                const newEl = { ...el };
-                if (e.key === 'ArrowUp') newEl.y = Math.max(0, newEl.y - stepY);
-                if (e.key === 'ArrowDown') newEl.y = Math.min(100 - newEl.h, newEl.y + stepY);
-                if (e.key === 'ArrowLeft') newEl.x = Math.max(0, newEl.x - stepX);
-                if (e.key === 'ArrowRight') newEl.x = Math.min(100 - newEl.w, newEl.x + stepX);
+                const newEl = {
+                    ...el,
+                    ...(el.style?.coverFullPage ? { style: { ...el.style, coverFullPage: false } } : {})
+                };
+                const minXBound = Math.min(physMinX, physMaxRight - newEl.w);
+                const maxXBound = Math.max(physMinX, physMaxRight - newEl.w);
+                const minYBound = Math.min(physMinY, physMaxBottom - newEl.h);
+                const maxYBound = Math.max(physMinY, physMaxBottom - newEl.h);
+                if (e.key === 'ArrowUp') newEl.y = Math.max(minYBound, newEl.y - stepY);
+                if (e.key === 'ArrowDown') newEl.y = Math.min(maxYBound, newEl.y + stepY);
+                if (e.key === 'ArrowLeft') newEl.x = Math.max(minXBound, newEl.x - stepX);
+                if (e.key === 'ArrowRight') newEl.x = Math.min(maxXBound, newEl.x + stepX);
                 return newEl;
             });
             updateActiveElements(newElements);
@@ -3295,7 +3330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               if (editorViewMode === 'standard') return config.elementsWeeklyLeft ?? config.elements;
           }
           if (editorViewMode === 'verso') {
-              return config.elementsVerso || config.elements;
+              return config.elementsVerso ?? config.elements;
           }
           if (config.layoutType === '1_per_page_weekend_shared') {
               if (editorViewMode === 'saturday') return config.elementsSaturday || config.elements;
@@ -3430,7 +3465,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         const isFromLeft = from === 'weekly_left' || from === 'weekly_verso_left';
         const newX = isFromLeft ? element.x - 100 : element.x + 100;
         
-        const newElement = { ...element, x: Math.max(0, Math.min(100 - element.w, newX)) };
+        const newElement = { ...element, x: Math.max(-100, Math.min(200 - element.w, newX)) };
         const newToList = [...toList, newElement];
 
         // Update mode so getActiveElements works for the current drag
@@ -3483,7 +3518,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               return;
           }
           if (editorViewMode === 'verso') {
-              setter(prev => ({ ...prev, elementsVerso: getNew(prev.elementsVerso || prev.elements) }));
+              setter(prev => ({ ...prev, elementsVerso: getNew(prev.elementsVerso ?? prev.elements) }));
               return;
           }
           if (config.layoutType === '1_per_page_weekend_shared') {
@@ -3773,10 +3808,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           });
       } else if (ref === 'page') {
           // Align relative to the physical page limits (0 to PAGE_WIDTH_MM / PAGE_HEIGHT_MM)
+          const isEvenEditorPage = Boolean(config.mirrorEvenPages && (getCurrentEditorPageNumber() % 2 === 0));
           const marginTop = config.margins?.top ?? 15;
           const marginBottom = config.margins?.bottom ?? 15;
-          const marginLeft = config.margins?.inside ?? 20;
-          const marginRight = config.margins?.outside ?? 10;
+          const marginLeft = isEvenEditorPage ? (config.margins?.outside ?? 10) : (config.margins?.inside ?? 20);
+          const marginRight = isEvenEditorPage ? (config.margins?.inside ?? 20) : (config.margins?.outside ?? 10);
           
           const usableW = Math.max(1, PAGE_WIDTH_MM - marginLeft - marginRight);
           const usableH = Math.max(1, PAGE_HEIGHT_MM - marginTop - marginBottom);
@@ -3850,7 +3886,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     const isTextual = ['date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year', 'text', 'verse', 'quote', 'holiday', 'holiday_list'].includes(el.type);
 
-    let fontFamily = effectiveStyle?.fontFamily || 'Inter, sans-serif';
+    let fontFamily = getSafeFontFamily(effectiveStyle?.fontFamily);
     let fontWeight = effectiveStyle?.fontWeight || 'normal';
     let fontStyle = effectiveStyle?.fontStyle || 'normal';
 
@@ -4273,6 +4309,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       naturalWPx = (el.w / 100) * containerWPx;
       naturalHPx = (el.h / 100) * containerHPx;
     } else if (el.type === 'note_grid') {
+      const isEvenEditor = Boolean(config.mirrorEvenPages && (getCurrentEditorPageNumber() % 2 === 0));
+      const fullBounds = getFullPageBoundsForParity(isEvenEditor);
+      if (effectiveStyle?.coverFullPage) {
+        return {
+          x: Math.round(fullBounds.x * 100) / 100,
+          y: Math.round(fullBounds.y * 100) / 100,
+          w: Math.round(fullBounds.w * 100) / 100,
+          h: Math.round(fullBounds.h * 100) / 100,
+          style: effectiveStyle
+        };
+      }
       const gridSize = (effectiveStyle?.gridSize || effectiveStyle?.gridSpacing || 15) * scaleFactor;
       naturalWPx = Math.max(gridSize, Math.round(((el.w / 100) * containerWPx) / gridSize) * gridSize);
       naturalHPx = Math.max(gridSize, Math.round(((el.h / 100) * containerHPx) / gridSize) * gridSize);
@@ -4292,11 +4339,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     if (naturalWPx <= 0 || naturalHPx <= 0) return null;
 
+    const isEvenFit = Boolean(config.mirrorEvenPages && (getCurrentEditorPageNumber() % 2 === 0));
+    const fullPageBounds = getFullPageBoundsForParity(isEvenFit);
+    const extendsOutsideMargins = el.x < -0.5 || el.y < -0.5 || (el.x + el.w) > 100.5 || (el.y + el.h) > 100.5;
+    const minXLimit = extendsOutsideMargins ? fullPageBounds.x : 0;
+    const maxRightLimit = extendsOutsideMargins ? (fullPageBounds.x + fullPageBounds.w) : 100;
+    const minYLimit = extendsOutsideMargins ? fullPageBounds.y : 0;
+    const maxBottomLimit = extendsOutsideMargins ? (fullPageBounds.y + fullPageBounds.h) : 100;
+    const maxWLimit = maxRightLimit - minXLimit;
+    const maxHLimit = maxBottomLimit - minYLimit;
+
     let newW = (naturalWPx / containerWPx) * 100;
     let newH = (naturalHPx / containerHPx) * 100;
 
-    newW = Math.min(100, Math.max(0.5, Math.round(newW * 10) / 10));
-    newH = Math.min(100, Math.max(0.5, Math.round(newH * 10) / 10));
+    newW = Math.min(maxWLimit, Math.max(0.5, Math.round(newW * 10) / 10));
+    newH = Math.min(maxHLimit, Math.max(0.5, Math.round(newH * 10) / 10));
 
     let newX = el.x;
     let newY = el.y;
@@ -4336,10 +4393,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         let visX = centerX - visW / 2;
         let visY = centerY - visH / 2;
 
-        if (visX < 0) visX = 0;
-        if (visX + visW > 100) visX = Math.max(0, 100 - visW);
-        if (visY < 0) visY = 0;
-        if (visY + visH > 100) visY = Math.max(0, 100 - visH);
+        if (visX < minXLimit) visX = minXLimit;
+        if (visX + visW > maxRightLimit) visX = Math.max(minXLimit, maxRightLimit - visW);
+        if (visY < minYLimit) visY = minYLimit;
+        if (visY + visH > maxBottomLimit) visY = Math.max(minYLimit, maxBottomLimit - visH);
 
         const adjustedCenterX = visX + visW / 2;
         const adjustedCenterY = visY + visH / 2;
@@ -4347,13 +4404,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         newX = adjustedCenterX - newW / 2;
         newY = adjustedCenterY - newH / 2;
     } else {
-        if (newX < 0) newX = 0;
-        if (newX + newW > 100) newX = Math.max(0, 100 - newW);
-        if (newY < 0) newY = 0;
+        if (newX < minXLimit) newX = minXLimit;
+        if (newX + newW > maxRightLimit) newX = Math.max(minXLimit, maxRightLimit - newW);
+        if (newY < minYLimit) newY = minYLimit;
         if (el.type === 'table') {
-            if (newY + newH > 100) newH = Math.max(10, 100 - newY);
+            if (newY + newH > maxBottomLimit) newH = Math.max(10, maxBottomLimit - newY);
         } else {
-            if (newY + newH > 100) newY = Math.max(0, 100 - newH);
+            if (newY + newH > maxBottomLimit) newY = Math.max(minYLimit, maxBottomLimit - newH);
         }
     }
 
@@ -4670,6 +4727,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               elementsWeekendTransition: template.elementsWeekendTransition ? template.elementsWeekendTransition.map(cloneEl) : prev.elementsWeekendTransition,
               weekendTransitionContentType: template.weekendTransitionContentType || prev.weekendTransitionContentType,
               background: template.background !== undefined ? template.background : prev.background,
+              ...(template.fillerPageContent !== undefined ? { fillerPageContent: template.fillerPageContent } : {}),
+              ...(template.fillerPageElements !== undefined ? { fillerPageElements: template.fillerPageElements.map(cloneEl) } : {}),
+              ...(template.fillerPageBackground !== undefined ? { fillerPageBackground: template.fillerPageBackground } : {}),
           }));
           if (template.layoutType === 'weekly_one_page_vertical' || template.layoutType === 'weekly_one_page_horizontal') {
               setEditorViewMode('standard');
@@ -4791,6 +4851,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           elementsWeekendTransition: config.elementsWeekendTransition ? config.elementsWeekendTransition.map(cloneEl) : undefined,
           weekendTransitionContentType: config.weekendTransitionContentType,
           background: config.background,
+          ...(config.fillerPageContent !== undefined ? { fillerPageContent: config.fillerPageContent } : {}),
+          ...(config.fillerPageElements !== undefined ? { fillerPageElements: config.fillerPageElements.map(cloneEl) } : {}),
+          ...(config.fillerPageBackground !== undefined ? { fillerPageBackground: config.fillerPageBackground } : {}),
           createdAt: new Date().toISOString()
       };
 
@@ -6650,7 +6713,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             newElement.style.color = ft.strokeColor || '#2563eb';
             newElement.style.footerTracker = ft;
         }
-        if (type === 'note_grid') { newElement.w = 40; newElement.h = 20; newElement.style.opacity = 0.5; newElement.style.borderWidth = 0; }
+        if (type === 'note_grid') {
+            newElement.w = 40;
+            newElement.h = 20;
+            newElement.style.opacity = 0.5;
+            newElement.style.borderWidth = 0.8;
+            newElement.style.gridSize = 15;
+            newElement.style.gridSpacing = 15;
+        }
         
         if (type === 'mini_calendar') { 
             const usableW_MM = PAGE_WIDTH_MM - config.margins.inside - config.margins.outside;
@@ -8047,21 +8117,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const isTwoPerPage = config.layoutType === '2_per_page';
     const isSharedWeekend = config.layoutType === '1_per_page_weekend_shared';
 
-    if (isWeekly && (!config.elementsWeeklyLeft || config.elementsWeeklyLeft.length === 0 || !config.elementsWeeklyRight || config.elementsWeeklyRight.length === 0)) {
+    if (isWeekly && (config.elementsWeeklyLeft === undefined || config.elementsWeeklyRight === undefined)) {
         setConfig(prev => ({
             ...prev,
-            elementsWeeklyLeft: (prev.elementsWeeklyLeft && prev.elementsWeeklyLeft.length > 0) ? prev.elementsWeeklyLeft : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
-            elementsWeeklyRight: (prev.elementsWeeklyRight && prev.elementsWeeklyRight.length > 0) ? prev.elementsWeeklyRight : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
+            elementsWeeklyLeft: prev.elementsWeeklyLeft !== undefined ? prev.elementsWeeklyLeft : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })),
+            elementsWeeklyRight: prev.elementsWeeklyRight !== undefined ? prev.elementsWeeklyRight : prev.elements.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) }))
         }));
     }
 
-    if (isWeekly && config.customVerso && (!config.elementsWeeklyVersoLeft || config.elementsWeeklyVersoLeft.length === 0 || !config.elementsWeeklyVersoRight || config.elementsWeeklyVersoRight.length === 0)) {
+    if (isWeekly && config.customVerso && (config.elementsWeeklyVersoLeft === undefined || config.elementsWeeklyVersoRight === undefined)) {
         setConfig(prev => ({
             ...prev,
-            elementsWeeklyVersoLeft: (prev.elementsWeeklyVersoLeft && prev.elementsWeeklyVersoLeft.length > 0)
+            elementsWeeklyVersoLeft: prev.elementsWeeklyVersoLeft !== undefined
                 ? prev.elementsWeeklyVersoLeft
                 : (prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })),
-            elementsWeeklyVersoRight: (prev.elementsWeeklyVersoRight && prev.elementsWeeklyVersoRight.length > 0)
+            elementsWeeklyVersoRight: prev.elementsWeeklyVersoRight !== undefined
                 ? prev.elementsWeeklyVersoRight
                 : (prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) }))
         }));
@@ -8100,15 +8170,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     }
 
     const isSinglePageLayout = !config.layoutType.startsWith('weekly') || config.layoutType === 'weekly_one_page_vertical' || config.layoutType === 'weekly_one_page_horizontal';
-    if (isSinglePageLayout && config.customVerso && (!config.elementsVerso || config.elementsVerso.length === 0)) {
+    if (isSinglePageLayout && config.customVerso && config.elementsVerso === undefined) {
         setConfig(prev => ({
             ...prev,
-            elementsVerso: (prev.elementsVerso && prev.elementsVerso.length > 0)
+            elementsVerso: prev.elementsVerso !== undefined
                 ? prev.elementsVerso
                 : prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
         }));
     }
-  }, [config.layoutType, config.customVerso, config.elementsVerso?.length]);
+  }, [config.layoutType, config.customVerso]);
 
   // Copiar o layout inferior no layout superior (e vice-versa) para 2DPP e Fim de Semana Dividido
   const copy2DppBottomToTop = useCallback(() => {
@@ -8695,7 +8765,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
             const updatedList = activeList.map(el => {
                 const moved = movedElementsMap.get(el.id);
-                return moved ? { ...el, x: moved.x, y: moved.y } : el;
+                if (!moved) return el;
+                return {
+                    ...el,
+                    x: moved.x,
+                    y: moved.y,
+                    ...(el.style?.coverFullPage ? { style: { ...el.style, coverFullPage: false } } : {})
+                };
             });
 
             dragRef.current.pendingList = updatedList;
@@ -8972,6 +9048,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             }
 
             newElementConfig.x = finalX; newElementConfig.y = finalY; newElementConfig.w = finalW; newElementConfig.h = finalH;
+            if (newElementConfig.style?.coverFullPage) {
+                newElementConfig.style = { ...newElementConfig.style, coverFullPage: false };
+            }
 
             const scale = (textTypes.includes(element.type) && isCorner)
                 ? (finalW / (initial.w || 1))
@@ -9618,8 +9697,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         }
     });
 
+    const isHalfOrCoverTemplate = ['top', 'bottom', 'saturday', 'sunday', 'weekend_transition', 'cover'].includes(templateType || '');
+    const isTargetEvenPage = pageNumber !== undefined
+        ? (Boolean(config.mirrorEvenPages) && pageNumber % 2 === 0)
+        : (isEditor && Boolean(config.mirrorEvenPages) && getCurrentEditorPageNumber() % 2 === 0);
+
     const elementsWithIndices = sanitizedElements.map(el => {
         const assignedDay = effectiveIndices[el.id] ?? el.style.dayIndex ?? 0;
+        let resolvedBounds: { x?: number; y?: number; w?: number; h?: number } = {};
+        if (el.style?.coverFullPage && !isHalfOrCoverTemplate) {
+            resolvedBounds = getFullPageBoundsForParity(isTargetEvenPage);
+        }
+
         let finalStyle = {
             ...el.style,
             dayIndex: assignedDay,
@@ -9658,6 +9747,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
         return {
             ...el,
+            ...resolvedBounds,
             style: finalStyle
         };
     });
@@ -9772,7 +9862,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               willChange: isEditor && isSelectedThis && (isDragging || !!resizeDir) ? 'left, top, width, height' : 'auto'
           };
           const containerClass = `absolute group ${isSelected ? 'ring-2 ring-indigo-500 z-50' : 'hover:ring-1 hover:ring-indigo-300'} ${isEditor || activeTab === 'preview' ? 'cursor-pointer' : ''} ${isEditor ? 'cursor-move' : ''}`;
-          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list', 'special_event', 'quote', 'verse'].includes(el.type);
+          const isWrapperType = ['lines','box','circle','vector_shape','note_grid','habit_tracker','mini_calendar','full_calendar','table','permanent_day_header', 'planner_day_box', 'icon', 'moon', 'holiday_list', 'special_event', 'quote', 'verse', 'footer_tracker', 'date_placeholder', 'day_number', 'day_name', 'month_name', 'month_number', 'year'].includes(el.type);
           const shouldClip = ['lines', 'note_grid', 'habit_tracker', 'mini_calendar', 'full_calendar', 'table', 'permanent_day_header', 'vector_shape'].includes(el.type);
           
           const currentQuote = (el.style?.quoteDisplayMode === 'fixed' && el.style?.quoteFixedText)
@@ -9898,6 +9988,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 </button>
                             </div>
                         )}
+                        {el.type === 'note_grid' && (
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1 z-50 whitespace-nowrap select-none bg-white/95 p-0.5 rounded-full border border-indigo-200 shadow-md">
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const bounds = getFullPageBoundsForParity(isTargetEvenPage);
+                                        updateActiveElements(getActiveElements().map(item =>
+                                            item.id === el.id
+                                                ? { ...item, ...bounds, style: { ...item.style, coverFullPage: true } }
+                                                : item
+                                        ));
+                                    }}
+                                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
+                                        el.style?.coverFullPage
+                                            ? 'bg-indigo-600 text-white shadow-2xs'
+                                            : 'text-indigo-700 hover:bg-indigo-50'
+                                    }`}
+                                    title="Expandir grid para cobrir toda a página física (ignora margens na frente e no verso)"
+                                >
+                                    Cobrir Página Inteira
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateActiveElements(getActiveElements().map(item =>
+                                            item.id === el.id
+                                                ? { ...item, x: 0, y: 0, w: 100, h: 100, style: { ...item.style, coverFullPage: false } }
+                                                : item
+                                        ));
+                                    }}
+                                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition-all cursor-pointer ${
+                                        !el.style?.coverFullPage && Math.abs(el.x) < 0.2 && Math.abs(el.y) < 0.2 && Math.abs(el.w - 100) < 0.2 && Math.abs(el.h - 100) < 0.2
+                                            ? 'bg-slate-700 text-white shadow-2xs'
+                                            : 'text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                    title="Ajustar grid apenas à área útil dentro das margens"
+                                >
+                                    Só Margens
+                                </button>
+                            </div>
+                        )}
 
                         {(() => {
                             const isDateElem = ['month_name', 'day_name', 'day_number', 'month_number'].includes(el.type) ||
@@ -9961,7 +10094,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     style={{ 
                         justifyContent: el.style.verticalAlign === 'middle' ? 'center' : (el.style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start'),
                         alignItems: el.style.textAlign === 'center' ? 'center' : (el.style.textAlign === 'right' ? 'flex-end' : (el.style.textAlign === 'justify' ? 'stretch' : 'flex-start')),
-                        ...(!isWrapperType ? el.style : {}) 
+                        ...(!isWrapperType ? {
+                            ...(el.type === 'image' ? {
+                                ...el.style,
+                                borderWidth: typeof el.style.borderWidth === 'number' ? el.style.borderWidth * (pageWidth / 400) : el.style.borderWidth,
+                                borderRadius: typeof el.style.borderRadius === 'number' ? el.style.borderRadius * (pageWidth / 400) : el.style.borderRadius,
+                            } : {}),
+                            ...(el.style.fontFamily ? { fontFamily: getSafeFontFamily(el.style.fontFamily) } : {})
+                        } : {}) 
                     }}
                 >
                     {isWrapperType ? (
@@ -9985,6 +10125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             pageHeight={pageHeight}
                             calendarIndex={miniCalendarIndexMap.get(el.id)}
                             isWeekly={config.layoutType.startsWith('weekly')}
+                            fontRefreshVersion={fontRefreshTick}
                         />
                     ) : (
                         <span style={{ pointerEvents: isSelected ? 'auto' : 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'inherit', alignItems: 'inherit', justifyContent: 'inherit' }}>
@@ -10007,6 +10148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 pageHeight={pageHeight}
                                 calendarIndex={miniCalendarIndexMap.get(el.id)}
                                 isWeekly={config.layoutType.startsWith('weekly')}
+                                fontRefreshVersion={fontRefreshTick}
                             />
                         </span>
                     )}
@@ -10068,32 +10210,84 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       return { top: 15, bottom: 15, inside: 20, outside: 10 };
   }, [initialConfig]);
 
+  const getPageMarginsForParity = useCallback((isEven: boolean) => {
+      const top = config.margins?.top ?? 15;
+      const bottom = config.margins?.bottom ?? 15;
+      const inside = config.margins?.inside ?? 20;
+      const outside = config.margins?.outside ?? 10;
+      const left = (config.mirrorEvenPages && isEven) ? outside : inside;
+      const right = (config.mirrorEvenPages && isEven) ? inside : outside;
+      const usableW = Math.max(1, PAGE_WIDTH_MM - left - right);
+      const usableH = Math.max(1, PAGE_HEIGHT_MM - top - bottom);
+      return { top, bottom, inside, outside, left, right, usableW, usableH };
+  }, [config.margins, config.mirrorEvenPages, PAGE_WIDTH_MM, PAGE_HEIGHT_MM]);
+
+  const getFullPageBoundsForParity = useCallback((isEven: boolean) => {
+      const { top, left, usableW, usableH } = getPageMarginsForParity(isEven);
+      return {
+          x: -((left / usableW) * 100),
+          y: -((top / usableH) * 100),
+          w: (PAGE_WIDTH_MM / usableW) * 100,
+          h: (PAGE_HEIGHT_MM / usableH) * 100
+      };
+  }, [getPageMarginsForParity, PAGE_WIDTH_MM, PAGE_HEIGHT_MM]);
+
   const getMirroredElements = (elements: LayoutElement[]): LayoutElement[] => {
-      if (!config.mirrorEvenPages) return elements;
+      const isFullHorizBleed = (el: LayoutElement, usableW: number) => {
+          if (el.style?.coverFullPage) return true;
+          if (el.x <= -0.5 && (el.x + el.w) >= 100.5) return true;
+          if (usableW > 0 && Math.abs(((el.w / 100) * usableW) - PAGE_WIDTH_MM) <= 1.5 && el.x <= 0.5 && (el.x + el.w) >= 99.5) return true;
+          return false;
+      };
+
+      if (!config.mirrorEvenPages) {
+          return elements.map(el => el.style?.coverFullPage ? { ...el, ...getFullPageBoundsForParity(false) } : el);
+      }
 
       const effectiveMargins = getEffectiveBindingMargins(config);
-      const isZeroMargins = (config.margins?.inside || 0) === 0 && (config.margins?.outside || 0) === 0;
+      const insideMm = config.margins?.inside ?? 0;
+      const outsideMm = config.margins?.outside ?? 0;
+      const isZeroMargins = insideMm === 0 && outsideMm === 0;
+      const usableW = Math.max(1, PAGE_WIDTH_MM - insideMm - outsideMm);
+      const evenFullBounds = getFullPageBoundsForParity(true);
 
       // Se mirrorContentOnVerso for explicitamente false, apenas as margens da página invertem; o conteúdo mantém a mesma posição/orientação
       if (config.mirrorContentOnVerso === false) {
           if (isZeroMargins) {
-              const insideMm = effectiveMargins.inside || 0;
-              const outsideMm = effectiveMargins.outside || 0;
-              const deltaMm = insideMm - outsideMm;
-              if (deltaMm !== 0 && PAGE_WIDTH_MM > 0) {
-                  const shiftPercent = -((deltaMm) / PAGE_WIDTH_MM) * 100;
-                  return elements.map(el => {
-                      if (el.w >= 99.5) return el;
+              const effInside = effectiveMargins.inside || 0;
+              const effOutside = effectiveMargins.outside || 0;
+              const deltaMm = effInside - effOutside;
+              return elements.map(el => {
+                  if (el.style?.coverFullPage) return { ...el, ...evenFullBounds };
+                  if (el.w >= 99.5 || isFullHorizBleed(el, PAGE_WIDTH_MM)) return el;
+                  if (deltaMm !== 0 && PAGE_WIDTH_MM > 0) {
+                      const shiftPercent = -((deltaMm) / PAGE_WIDTH_MM) * 100;
                       const maxX = Math.max(0, 100 - el.w);
-                      const newX = Math.round(Math.max(0, Math.min(maxX, el.x + shiftPercent)) * 1000) / 1000;
+                      const newX = el.x < 0
+                          ? Math.round((el.x + shiftPercent) * 1000) / 1000
+                          : Math.round(Math.max(0, Math.min(maxX, el.x + shiftPercent)) * 1000) / 1000;
                       return { ...el, x: newX };
-                  });
-              }
+                  }
+                  return el;
+              });
           }
-          return elements;
+
+          return elements.map(el => {
+              if (el.style?.coverFullPage) {
+                  return { ...el, ...evenFullBounds };
+              }
+              if (insideMm !== outsideMm && isFullHorizBleed(el, usableW)) {
+                  const bleedShiftPercent = ((insideMm - outsideMm) / usableW) * 100;
+                  return { ...el, x: Math.round((el.x + bleedShiftPercent) * 1000) / 1000 };
+              }
+              return el;
+          });
       }
 
       return elements.map(el => {
+          if (el.style?.coverFullPage) {
+              return { ...el, ...evenFullBounds };
+          }
           const newX = 100 - el.x - el.w;
           let newTextAlign = el.style.textAlign;
           const isCalendarType = el.type === 'mini_calendar' || el.type === 'full_calendar';
@@ -10279,31 +10473,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   };
 
   const renderEditorPage = () => {
-    let editorPageNum = (editorViewMode === 'weekly_left' || editorViewMode === 'weekly_verso_left' || editorViewMode === 'verso') ? 2 : 1;
-    if (editorViewMode !== 'weekly_left' && editorViewMode !== 'weekly_verso_left' && editorViewMode !== 'verso') {
-        const globalBgs = config.backgrounds && config.backgrounds.length > 0 ? config.backgrounds : (config.background ? [config.background] : []);
-        const activeType = editMode === 'intro' ? 'intro' : editMode === 'monthly_intro' ? 'monthly_intro' : editMode === 'divider' ? 'divider' : 'daily';
-        
-        if (editMode === 'daily' && activeBgIndex !== undefined && globalBgs[activeBgIndex]) {
-            const activeBg = globalBgs[activeBgIndex];
-            if (activeBg.targetType === 'even' || activeBg.pageFilter === 'even') {
-                editorPageNum = 2;
-            } else if (activeBg.targetType === 'odd' || activeBg.pageFilter === 'odd') {
-                editorPageNum = 1;
-            }
-        } else {
-            const matchingForMode = globalBgs.filter(bg => isBgMatchingPage(bg, activeType));
-            if (matchingForMode.length === 1 && (matchingForMode[0].targetType === 'even' || matchingForMode[0].pageFilter === 'even')) {
-                editorPageNum = 2;
-            }
-        }
-
-        if (editorParityToggle === 'even') {
-            editorPageNum = 2;
-        } else if (editorParityToggle === 'odd') {
-            editorPageNum = 1;
-        }
-    }
+    const editorPageNum = getCurrentEditorPageNumber();
 
     const introPage = config.introPages.find(p => p.id === currentIntroPageId);
     const monthlyPage = config.monthlyIntroPages?.find(p => p.id === currentMonthlyIntroPageId);
@@ -10313,19 +10483,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     const editorMarginLeft = isEditorEven ? config.margins.outside : config.margins.inside;
     const editorMarginRight = isEditorEven ? config.margins.inside : config.margins.outside;
 
-    const paddingStyle = { 
-        paddingTop: `${config.margins.top * EDITOR_SCALE}px`, 
-        paddingBottom: `${config.margins.bottom * EDITOR_SCALE}px`, 
-        paddingLeft: `${editorMarginLeft * EDITOR_SCALE}px`, 
-        paddingRight: `${editorMarginRight * EDITOR_SCALE}px` 
+    const marginBoxStyle: React.CSSProperties = {
+        position: 'absolute',
+        top: `${config.margins.top * EDITOR_SCALE}px`,
+        bottom: `${config.margins.bottom * EDITOR_SCALE}px`,
+        left: `${editorMarginLeft * EDITOR_SCALE}px`,
+        right: `${editorMarginRight * EDITOR_SCALE}px`
     };
-    const containerClass = `relative transition-all duration-300 ease-in-out flex flex-col overflow-hidden`;
+    const containerClass = `relative transition-all duration-300 ease-in-out overflow-hidden`;
     
     // In custom divider layout, container background comes from background settings. In other layouts, it comes from backgroundColor.
     let containerStyle: any = { 
         width: `${EDITOR_WIDTH_PX}px`, 
         height: `${EDITOR_HEIGHT_PX}px`, 
-        ...paddingStyle, 
         backgroundColor: (editMode === 'divider' && dividerStyle.layout !== 'custom') ? (dividerStyle.backgroundColor || '#ffffff') : '#ffffff'
     };
 
@@ -10337,7 +10507,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         containerStyle.borderColor = dividerStyle.borderColor || '#e0e7ff';
     }
 
-    const usefulAreaClass = `w-full h-full relative z-10 ${showMargins ? 'outline outline-1 outline-dashed outline-indigo-300' : ''}`;
+    const usefulAreaClass = `z-10 overflow-visible ${showMargins ? 'outline outline-1 outline-dashed outline-indigo-300' : ''}`;
     
     const wrapWithRuler = (children: React.ReactNode) => {
         return (
@@ -10362,8 +10532,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('intro', editorPageNum, introPage?.background)}
-                <div className={usefulAreaClass}>
-                    {renderTemplate(getActiveElements(), null, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentIntroPageId || undefined)}
+                <div className={usefulAreaClass} style={marginBoxStyle}>
+                    {renderTemplate(getActiveElements(), null, true, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentIntroPageId || undefined)}
                 </div>
             </div>
         );
@@ -10375,8 +10545,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('monthly_intro', editorPageNum, monthlyPage?.background)}
-                <div className={usefulAreaClass}>
-                    {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentMonthlyIntroPageId || undefined)}
+                <div className={usefulAreaClass} style={marginBoxStyle}>
+                    {renderTemplate(getActiveElements(), monthDummyDay, true, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', currentMonthlyIntroPageId || undefined)}
                 </div>
             </div>
         );
@@ -10389,8 +10559,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
                     {renderBackgroundsForPage('divider_verso', editorPageNum, dividerStyle.versoBackground)}
-                    <div className={usefulAreaClass}>
-                        {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider_verso')}
+                    <div className={usefulAreaClass} style={marginBoxStyle}>
+                        {renderTemplate(getActiveElements(), monthDummyDay, true, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider_verso')}
                     </div>
                 </div>
             );
@@ -10399,8 +10569,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('divider', editorPageNum, dividerStyle.background)}
-                <div className={usefulAreaClass}>
-                    {renderTemplate(getActiveElements(), monthDummyDay, true, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider')}
+                <div className={usefulAreaClass} style={marginBoxStyle}>
+                    {renderTemplate(getActiveElements(), monthDummyDay, true, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'divider')}
                 </div>
             </div>
         );
@@ -10411,7 +10581,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('standard', editorPageNum, config.fillerPageBackground)}
-                <div className={usefulAreaClass}>
+                <div className={usefulAreaClass} style={marginBoxStyle}>
                     {renderTemplate(getActiveElements(), dummyDay, true, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'intro', 'filler_page')}
                 </div>
             </div>
@@ -10493,7 +10663,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
-                <div className={usefulAreaClass}>
+                <div className={usefulAreaClass} style={marginBoxStyle}>
                     {renderTemplate(
                         elementsToRenderInEditor, 
                         mockBatch[0], 
@@ -10525,14 +10695,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
-                <div className={`${usefulAreaClass} flex flex-col`}>
+                <div className={`${usefulAreaClass} flex flex-col`} style={marginBoxStyle}>
                     <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${isViewingBottom ? 'opacity-40 bg-gray-50' : ''}`}>
                         {renderTemplate(
                             shouldMirrorInEditor ? getMirroredElements(elementsTop) : elementsTop,
                             mockDay1,
                             isInteractiveInEditor && (isViewingTop || isViewingStandard),
                             isViewingTop || isViewingStandard,
-                            undefined,
+                            editorPageNum,
                             EDITOR_WIDTH_PX,
                             EDITOR_HEIGHT_PX / 2,
                             'top'
@@ -10545,7 +10715,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             mockDay2,
                             isInteractiveInEditor && (isViewingBottom || isViewingStandard),
                             isViewingBottom,
-                            undefined,
+                            editorPageNum,
                             EDITOR_WIDTH_PX,
                             EDITOR_HEIGHT_PX / 2,
                             'bottom'
@@ -10560,13 +10730,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
     if (config.layoutType === '1_per_page_weekend_shared') {
         if (editorViewMode === 'verso') {
             const mockWeekday: DayData = getProjectFirstDay(0);
-            const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
-                ? config.elementsVerso
-                : config.elements;
+            const versoElements = config.elementsVerso ?? config.elements;
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
                     {renderBackgroundsForPage('daily', 2)}
-                    <div className={usefulAreaClass}>
+                    <div className={usefulAreaClass} style={marginBoxStyle}>
                         {renderTemplate(versoElements, mockWeekday, true, true, 2, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'verso')}
                     </div>
                 </div>
@@ -10604,8 +10772,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             return wrapWithRuler(
                 <div className={containerClass} style={containerStyle}>
                     {renderBackgroundsForPage('daily', editorPageNum)}
-                    <div className={usefulAreaClass}>
-                        {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockWeekday, isInteractiveInEditor, true, undefined, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard')}
+                    <div className={usefulAreaClass} style={marginBoxStyle}>
+                        {renderTemplate(shouldMirrorInEditor ? getMirroredElements(config.elements) : config.elements, mockWeekday, isInteractiveInEditor, true, editorPageNum, EDITOR_WIDTH_PX, EDITOR_HEIGHT_PX, 'standard')}
                     </div>
                 </div>
             );
@@ -10632,7 +10800,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
-                <div className={`${usefulAreaClass} flex flex-col`}>
+                <div className={`${usefulAreaClass} flex flex-col`} style={marginBoxStyle}>
                     {/* Metade Superior (Sábado) */}
                     <div className={`flex-1 border-b border-dashed border-indigo-200 relative overflow-visible ${!isTopActive ? 'opacity-40 bg-gray-50' : ''}`}>
                         {renderTemplate(
@@ -10640,7 +10808,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             mockSat,
                             isInteractiveInEditor && isTopActive,
                             isTopActive,
-                            undefined,
+                            editorPageNum,
                             EDITOR_WIDTH_PX,
                             EDITOR_HEIGHT_PX / 2,
                             'saturday'
@@ -10661,7 +10829,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             bottomDay,
                             isInteractiveInEditor && isBottomActive,
                             isBottomActive,
-                            undefined,
+                            editorPageNum,
                             EDITOR_WIDTH_PX,
                             EDITOR_HEIGHT_PX / 2,
                             bottomTemplateType
@@ -10687,7 +10855,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         return wrapWithRuler(
             <div className={containerClass} style={containerStyle}>
                 {renderBackgroundsForPage('daily', editorPageNum)}
-                <div className={usefulAreaClass}>
+                <div className={usefulAreaClass} style={marginBoxStyle}>
                     {renderTemplate(
                         elementsToRenderInEditor, 
                         mockWeek[0], 
@@ -10723,18 +10891,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             ? (config.elementsWeeklyVersoRight ?? (config.elementsWeeklyRight ?? config.elements))
             : (config.elementsWeeklyRight ?? config.elements);
 
-        const leftPaddingStyle = {
-            paddingTop: `${config.margins.top * EDITOR_SCALE}px`,
-            paddingBottom: `${config.margins.bottom * EDITOR_SCALE}px`,
-            paddingLeft: `${(config.mirrorEvenPages ? config.margins.outside : config.margins.inside) * EDITOR_SCALE}px`,
-            paddingRight: `${(config.mirrorEvenPages ? config.margins.inside : config.margins.outside) * EDITOR_SCALE}px`
+        const leftMarginBoxStyle: React.CSSProperties = {
+            position: 'absolute',
+            top: `${config.margins.top * EDITOR_SCALE}px`,
+            bottom: `${config.margins.bottom * EDITOR_SCALE}px`,
+            left: `${(config.mirrorEvenPages ? config.margins.outside : config.margins.inside) * EDITOR_SCALE}px`,
+            right: `${(config.mirrorEvenPages ? config.margins.inside : config.margins.outside) * EDITOR_SCALE}px`
         };
 
-        const rightPaddingStyle = {
-            paddingTop: `${config.margins.top * EDITOR_SCALE}px`,
-            paddingBottom: `${config.margins.bottom * EDITOR_SCALE}px`,
-            paddingLeft: `${config.margins.inside * EDITOR_SCALE}px`,
-            paddingRight: `${config.margins.outside * EDITOR_SCALE}px`
+        const rightMarginBoxStyle: React.CSSProperties = {
+            position: 'absolute',
+            top: `${config.margins.top * EDITOR_SCALE}px`,
+            bottom: `${config.margins.bottom * EDITOR_SCALE}px`,
+            left: `${config.margins.inside * EDITOR_SCALE}px`,
+            right: `${config.margins.outside * EDITOR_SCALE}px`
         };
 
         const isLeftActive = isVersoSpread
@@ -10818,7 +10988,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         ? 'ring-4 ring-indigo-500/40 shadow-xl border-indigo-400' 
                                         : 'ring-1 ring-gray-300 hover:ring-2 hover:ring-indigo-300 opacity-90 hover:opacity-100'
                                 }`} 
-                                style={{ ...containerStyle, ...leftPaddingStyle }}
+                                style={containerStyle}
                                 onClick={(e) => {
                                     const target = e.target as HTMLElement;
                                     if (!isLeftActive && !target.closest('.layout-element-wrapper')) {
@@ -10828,13 +10998,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 }}
                             >
                                 {renderBackgroundsForPage('daily', isVersoSpread ? 4 : 2)}
-                                <div className={usefulAreaClass}>
+                                <div className={usefulAreaClass} style={leftMarginBoxStyle}>
                                     {renderTemplate(
                                         elementsLeft, 
                                         null, 
                                         true, 
                                         isLeftActive, 
-                                        undefined, 
+                                        isVersoSpread ? 4 : 2, 
                                         EDITOR_WIDTH_PX, 
                                         EDITOR_HEIGHT_PX, 
                                         templateTypeLeft, 
@@ -10878,7 +11048,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                         ? 'ring-4 ring-indigo-500/40 shadow-xl border-indigo-400' 
                                         : 'ring-1 ring-gray-300 hover:ring-2 hover:ring-indigo-300 opacity-90 hover:opacity-100'
                                 }`} 
-                                style={{ ...containerStyle, ...rightPaddingStyle }}
+                                style={containerStyle}
                                 onClick={(e) => {
                                     const target = e.target as HTMLElement;
                                     if (!isRightActive && !target.closest('.layout-element-wrapper')) {
@@ -10888,13 +11058,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 }}
                             >
                                 {renderBackgroundsForPage('daily', isVersoSpread ? 5 : 3)}
-                                <div className={usefulAreaClass}>
+                                <div className={usefulAreaClass} style={rightMarginBoxStyle}>
                                     {renderTemplate(
                                         elementsRight, 
                                         null, 
                                         true, 
                                         isRightActive, 
-                                        undefined, 
+                                        isVersoSpread ? 5 : 3, 
                                         EDITOR_WIDTH_PX, 
                                         EDITOR_HEIGHT_PX, 
                                         templateTypeRight, 
@@ -11043,12 +11213,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
             marginLeft = config.margins.outside;
             marginRight = config.margins.inside;
         }
-        const pagePadding = `${config.margins.top}mm ${marginRight}mm ${config.margins.bottom}mm ${marginLeft}mm`;
+        const marginAreaStyle: React.CSSProperties = {
+            position: 'absolute',
+            top: `${config.margins.top}mm`,
+            bottom: `${config.margins.bottom}mm`,
+            left: `${marginLeft}mm`,
+            right: `${marginRight}mm`
+        };
 
         return (
-            <div id={`preview-page-${pageCount}`} data-page={pageCount} data-month={pageMonth} data-type={pageType} key={key} className={`bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 ${shouldHideNumbers ? '' : 'transition-transform hover:scale-[1.01]'}`} style={{ ...pageStyle, padding: pagePadding, ...customPageStyle }}>
+            <div id={`preview-page-${pageCount}`} data-page={pageCount} data-month={pageMonth} data-type={pageType} key={key} className={`bg-white shadow-xl print:shadow-none print-break-page relative box-border overflow-hidden shrink-0 ${shouldHideNumbers ? '' : 'transition-transform hover:scale-[1.01]'}`} style={{ ...pageStyle, ...customPageStyle }}>
                 {renderBackgroundsForPage(pageType, pageCount, pageSpecificBg, catRelIndex)}
-                <div className="relative z-10 h-full w-full">
+                <div className="z-10 overflow-visible" style={marginAreaStyle}>
                     {specialBadge && (config.showSpecialDateBadges !== false) && (
                         <div className={`absolute ${config.specialDateBadgePosition === 'bottom' ? 'bottom-0.5' : '-top-1'} left-1/2 -translate-x-1/2 z-30 flex items-center justify-center pointer-events-none max-w-[90%]`}>
                             <div 
@@ -11214,7 +11390,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         );
     };
 
-    const PRINT_SCALE = 3.78; // 96dpi standard
+    const PRINT_SCALE = CSS_PX_PER_MM; // 96dpi standard (96 / 25.4)
     const printW = PAGE_WIDTH_MM * PRINT_SCALE;
     const printH = PAGE_HEIGHT_MM * PRINT_SCALE;
 
@@ -11284,10 +11460,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
     const { layoutType, projectType } = config;
 
-    const hasDividers = (config.includeMonthlyDividers !== false) && config.projectType !== 'notebook';
+    const hasDividers =
+        (config.includeMonthlyDividers !== false) &&
+        config.projectType !== 'notebook' &&
+        config.projectType !== 'cover' &&
+        (config.projectType !== 'devotional' || config.includeMonthlyDividers === true);
     const hasIntroPagesData = Boolean(
-        config.projectType !== 'notebook' && 
-        config.monthlyIntroPages && 
+        config.projectType !== 'notebook' &&
+        config.projectType !== 'cover' &&
+        config.monthlyIntroPages &&
         config.monthlyIntroPages.length > 0
     );
     const hasIntroPages = hasIntroPagesData;
@@ -11472,7 +11653,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 // Página Verso (Par) com a MESMA data/sequência atual
                 const isEvenVerso = (pageCount + 1) % 2 === 0;
-                const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                const versoElements = config.elementsVerso !== undefined
                     ? config.elementsVerso
                     : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                 const containerVerso = renderPageContainer(
@@ -11490,7 +11671,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 i += daysPerPage;
             } else {
                 const isEven = (pageCount + 1) % 2 === 0;
-                const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso && config.elementsVerso.length > 0);
+                const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso !== undefined);
                 const elementsToRender = isCustomVersoPage
                     ? (config.elementsVerso as LayoutElement[])
                     : (isEven ? getMirroredElements(config.elements) : config.elements);
@@ -11623,7 +11804,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                         if (containerFrente) pages.push(containerFrente);
 
                         const isEvenVerso = (pageCount + 1) % 2 === 0;
-                        const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                        const versoElements = config.elementsVerso !== undefined
                             ? config.elementsVerso
                             : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                         const containerVerso = renderPageContainer(
@@ -11670,7 +11851,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                     // Verso correspondente do fim de semana com a mesma data/conteúdo
                     const isEvenVerso = (pageCount + 1) % 2 === 0;
-                    const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                    const versoElements = config.elementsVerso !== undefined
                         ? config.elementsVerso
                         : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                     const containerVerso = renderPageContainer(
@@ -11725,7 +11906,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     if (containerFrente) pages.push(containerFrente);
 
                     const isEvenVerso = (pageCount + 1) % 2 === 0;
-                    const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                    const versoElements = config.elementsVerso !== undefined
                         ? config.elementsVerso
                         : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                     const containerVerso = renderPageContainer(
@@ -11773,7 +11954,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                     // Verso com mesma data
                     const isEvenVerso = (pageCount + 1) % 2 === 0;
-                    const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                    const versoElements = config.elementsVerso !== undefined
                         ? config.elementsVerso
                         : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                     const containerVerso = renderPageContainer(
@@ -11789,7 +11970,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     if (containerVerso) pages.push(containerVerso);
                     i += 1;
                 } else {
-                    const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso && config.elementsVerso.length > 0);
+                    const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso !== undefined);
                     const elementsToRender = isCustomVersoPage
                         ? (config.elementsVerso as LayoutElement[])
                         : (isEven ? getMirroredElements(config.elements) : config.elements);
@@ -11862,7 +12043,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 // Verso Page (Even) for SAME week
                 const isEvenVerso = (pageCount + 1) % 2 === 0;
-                const versoElements = (config.elementsVerso && config.elementsVerso.length > 0)
+                const versoElements = config.elementsVerso !== undefined
                     ? config.elementsVerso
                     : (isEvenVerso ? getMirroredElements(config.elements) : config.elements);
                 const containerVerso = renderPageContainer(
@@ -11875,7 +12056,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 if (containerVerso) pages.push(containerVerso);
             } else {
                 const isEven = (pageCount + 1) % 2 === 0;
-                const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso && config.elementsVerso.length > 0);
+                const isCustomVersoPage = isEven && Boolean(config.customVerso && config.elementsVerso !== undefined);
                 const elementsToRender = isCustomVersoPage
                     ? (config.elementsVerso as LayoutElement[])
                     : (isEven ? getMirroredElements(config.elements) : config.elements);
@@ -11972,7 +12153,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                     if (filler) pages.push(filler);
                 }
 
-                const elementsVL = config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements;
+                const elementsVL = config.elementsWeeklyVersoLeft ?? config.elementsWeeklyLeft ?? config.elements;
                 const containerVL = renderPageContainer(
                     <div className="w-full h-full relative overflow-visible">
                         {renderTemplate(elementsVL, null, false, false, pageCount + 1, printW, printH, 'weekly_verso_left', undefined, week)}
@@ -11982,7 +12163,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                 );
                 if (containerVL) pages.push(containerVL);
 
-                const elementsVR = config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements;
+                const elementsVR = config.elementsWeeklyVersoRight ?? config.elementsWeeklyRight ?? config.elements;
                 const containerVR = renderPageContainer(
                     <div className="w-full h-full relative overflow-visible">
                         {renderTemplate(elementsVR, null, false, false, pageCount + 1, printW, printH, 'weekly_verso_right', undefined, week)}
@@ -12005,8 +12186,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 // Left Page
                 const elementsL = isVersoSpread
-                    ? (config.elementsWeeklyVersoLeft || config.elementsWeeklyLeft || config.elements)
-                    : (config.elementsWeeklyLeft || config.elements);
+                    ? (config.elementsWeeklyVersoLeft ?? config.elementsWeeklyLeft ?? config.elements)
+                    : (config.elementsWeeklyLeft ?? config.elements);
                 const templateTypeL = isVersoSpread ? 'weekly_verso_left' : 'weekly_left';
                 const containerL = renderPageContainer(
                     <div className="w-full h-full relative overflow-visible">
@@ -12023,8 +12204,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
 
                 // Right Page
                 const elementsR = isVersoSpread
-                    ? (config.elementsWeeklyVersoRight || config.elementsWeeklyRight || config.elements)
-                    : (config.elementsWeeklyRight || config.elements);
+                    ? (config.elementsWeeklyVersoRight ?? config.elementsWeeklyRight ?? config.elements)
+                    : (config.elementsWeeklyRight ?? config.elements);
                 const templateTypeR = isVersoSpread ? 'weekly_verso_right' : 'weekly_right';
                 const containerR = renderPageContainer(
                     <div className="w-full h-full relative overflow-visible">
@@ -12050,29 +12231,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
       <div className="space-y-3 pt-3 border-t border-gray-100">
           <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Borda do Quadro (Caixa)</h4>
           <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-1">
                   <label className="text-[10px] font-bold text-gray-500">Espessura</label>
-                  <span className="text-[10px] font-mono text-gray-400">{(style.borderWidth ?? 0)}px</span>
+                  <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
+                      {formatStrokeReadout(style.borderWidth ?? 0, PAGE_WIDTH_MM)}
+                  </span>
               </div>
               <div className="flex items-center gap-2">
                   <input 
                       type="range" 
                       min="0" 
                       max="10" 
-                      step="0.1" 
+                      step="0.05" 
                       value={style.borderWidth ?? 0} 
-                      onChange={(e) => onChange({ borderWidth: parseFloat(e.target.value) || 0 })} 
+                      onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          onChange({ borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                      }} 
                       className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
                   />
                   <input 
                       type="number" 
                       min="0" 
                       max="20" 
-                      step="0.1" 
+                      step="0.05" 
                       value={style.borderWidth ?? 0} 
-                      onChange={(e) => onChange({ borderWidth: parseFloat(e.target.value) || 0 })} 
-                      className="w-14 text-xs p-1 border rounded text-center font-mono" 
+                      onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          onChange({ borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                      }} 
+                      className="w-16 text-xs p-1 border rounded text-center font-mono" 
                   />
+              </div>
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                  {STROKE_PT_PRESETS.map(p => (
+                      <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => onChange({ borderWidth: ptToUnit(p.pt, PAGE_WIDTH_MM) })}
+                          className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-300 text-gray-600 hover:text-indigo-700 cursor-pointer"
+                          title={`Definir para ${p.label} impresso`}
+                      >
+                          {p.label}
+                      </button>
+                  ))}
               </div>
           </div>
           {(style.borderWidth ?? 0) > 0 && (
@@ -12180,6 +12382,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                  }} 
                  className="w-full text-xs p-1.5 border border-gray-200 rounded appearance-none bg-white font-sans text-gray-800"
                >
+                 {(() => {
+                   const cur = values.fontFamily;
+                   const curLow = cur?.trim().toLowerCase();
+                   const listed =
+                     !curLow ||
+                     AVAILABLE_FONTS.some(f => f.toLowerCase() === curLow) ||
+                     allSystemFonts.some(f => f.toLowerCase() === curLow) ||
+                     customFonts.some(f => f.toLowerCase() === curLow);
+                   if (listed || !cur) return null;
+                   return (
+                     <optgroup label="Fonte Atual do Projeto">
+                       <option value={cur} style={{ fontFamily: getSafeFontFamily(cur) }}>{cur}</option>
+                     </optgroup>
+                   );
+                 })()}
                  <optgroup label="Padrão">
                    {AVAILABLE_FONTS.map(font => (
                      <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
@@ -12562,183 +12779,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
   const totalPages = actualTotalPagesCount;
   const progressPercent = Math.min(100, Math.round(((config.introPages.length + (config.monthlyIntroPages?.length || 0) * 12 + renderedPrintCount) / Math.max(1, totalPages)) * 100));
 
-  const executePrint = useCallback(async () => {
-      const isYearRestricted = isProjectYearRestricted(
-          config.projectType,
-          config.year,
-          config.startMonth ?? 0,
-          config.durationMonths ?? 12,
-          user.plan
-      );
-
-      if (isYearRestricted) {
-          alert(`Desculpe! As configurações do arquivo englobam mais de 1 mês do ano de 2028, o que excede o limite do seu plano de assinatura. Para agendas de 2027, é permitido no máximo até Janeiro de 2028 (13 meses de Jan a Jan). Para liberar mais meses de 2028 em diante, é necessária a renovação da sua assinatura.`);
-          return;
-      }
-      pdfExportCancelledRef.current = false;
-      setPdfExporting(true);
-      setPdfExportProgress(0);
-      
-      try {
-          const totalPagesCount = actualTotalPagesCount;
-          const { jsPDF } = await import('jspdf');
-          const html2canvas = (await import('html2canvas')).default;
-          
-          const orientation = config.orientation === 'portrait' ? 'p' : 'l';
-          const pdf = new jsPDF({
-              orientation: orientation,
-              unit: 'mm',
-              format: [PAGE_WIDTH_MM, PAGE_HEIGHT_MM],
-              compress: true
-          });
-          
-          // Integer scale factors (1.0x, 2.0x, 3.0x) are strictly required to guarantee that 1px and 2px lines
-          // rasterize with 100% consistent pixel thickness across all pages and tables without subpixel aliasing.
-          let selectedScale = 2.0;
-          let jpegQuality = 0.96;
-          if (pdfScaleMode === 'fast') {
-              selectedScale = 1.0;
-              jpegQuality = 0.92;
-          } else if (pdfScaleMode === 'high') {
-              selectedScale = 3.0; // 300+ DPI print grade with crisp 3-pixel rasterization
-              jpegQuality = 0.98;
-          }
-          
-          // Process pages in parallel batches of 4 to maximize rendering speed under safety limits
-          const batchSize = 4;
-          let isFirstPdfPage = true;
-          
-          for (let i = 1; i <= totalPagesCount; i += batchSize) {
-              if (pdfExportCancelledRef.current) {
-                  return;
-              }
-              const batchIds = [];
-              for (let b = 0; b < batchSize && (i + b) <= totalPagesCount; b++) {
-                  batchIds.push(i + b);
-              }
-              
-              // Render multiple pages in parallel
-              const batchResults = await Promise.all(batchIds.map(async (pageNum) => {
-                  if (pdfExportCancelledRef.current) return null;
-                  const printContainer = document.getElementById('print-container');
-                  const pageElement = (printContainer?.querySelector(`[data-page="${pageNum}"]`) as HTMLElement) ||
-                                      (printContainer?.querySelector(`#preview-page-${pageNum}`) as HTMLElement) ||
-                                      (document.getElementById(`preview-page-${pageNum}`));
-                  if (!pageElement) {
-                      console.warn(`Página preview-page-${pageNum} não encontrada na renderização.`);
-                      return null;
-                  }
-                  
-                  const canvas = await html2canvas(pageElement, {
-                      scale: selectedScale,
-                      useCORS: true,
-                      logging: false,
-                      backgroundColor: '#ffffff',
-                      allowTaint: false,
-                      imageTimeout: 15000,
-                      onclone: (clonedDoc) => {
-                          prepareClonedDocForHtml2Canvas(clonedDoc);
-                          const crispStyle = clonedDoc.createElement('style');
-                          crispStyle.textContent = `
-                              * { -webkit-font-smoothing: antialiased; }
-                              svg line, svg rect, svg path { shape-rendering: crispEdges !important; }
-                          `;
-                          clonedDoc.head.appendChild(crispStyle);
-                          const clonedPrintContainer = clonedDoc.getElementById('print-container');
-                          if (clonedPrintContainer) {
-                              clonedPrintContainer.style.opacity = '1';
-                              clonedPrintContainer.style.visibility = 'visible';
-                              clonedPrintContainer.style.display = 'block';
-                              clonedPrintContainer.style.zIndex = '1';
-                          }
-                          const clonedEl = (clonedPrintContainer?.querySelector(`[data-page="${pageNum}"]`) as HTMLElement) ||
-                                           (clonedDoc.getElementById(`preview-page-${pageNum}`));
-                          if (clonedEl) {
-                              clonedEl.style.boxShadow = 'none';
-                              clonedEl.style.opacity = '1';
-                              clonedEl.style.visibility = 'visible';
-                              clonedEl.style.display = 'block';
-                          }
-                          clonedDoc.querySelectorAll('.no-print').forEach((el: any) => {
-                              el.style.display = 'none';
-                          });
-                      }
-                  });
-                  
-                  if (pdfExportCancelledRef.current) {
-                      canvas.width = 0;
-                      canvas.height = 0;
-                      return null;
-                  }
-
-                  const imgData = canvas.toDataURL('image/jpeg', jpegQuality);
-                  
-                  // Explicitly clear canvas dimensions to release GPU and hardware memory backing stores
-                  canvas.width = 0;
-                  canvas.height = 0;
-                  
-                  return { pageNum, imgData };
-              }));
-              
-              if (pdfExportCancelledRef.current) {
-                  return;
-              }
-
-              // Add generated pages chronologically to the PDF
-              for (const result of batchResults) {
-                  if (pdfExportCancelledRef.current) return;
-                  if (!result || !result.imgData) continue;
-                  if (!isFirstPdfPage) {
-                      pdf.addPage([PAGE_WIDTH_MM, PAGE_HEIGHT_MM], orientation);
-                  } else {
-                      isFirstPdfPage = false;
-                  }
-                  pdf.addImage(result.imgData, 'JPEG', 0, 0, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, undefined, 'FAST');
-                  
-                  // Explicitly nullify references to free up memory immediately
-                  result.imgData = '';
-              }
-              
-              if (pdfExportCancelledRef.current) return;
-
-              setPdfExportProgress(Math.min(totalPagesCount, i + batchSize - 1));
-              
-              // Small pause to let UI thread breathe and render progress bar
-              await new Promise(resolve => setTimeout(resolve, 5));
-          }
-          
-          if (pdfExportCancelledRef.current) {
-              return;
-          }
-
-          // Se estiver rodando no Electron desktop, usar o fluxo nativo extremamente seguro e polido
-          const winAny = window as any;
-          if (winAny.electronAPI && typeof winAny.electronAPI.savePDFBase64 === 'function') {
-              const pdfDataUri = pdf.output('datauristring');
-              const base64String = pdfDataUri.split(',')[1];
-              const result = await winAny.electronAPI.savePDFBase64(base64String, `${config.name || 'Agenda_Master'}.pdf`);
-              if (result && result.success) {
-                  setPrintStatus('idle');
-              } else if (result && result.cancelled) {
-                  // O usuário cancelou, não faz nada
-              } else {
-                  alert(`Ocorreu um erro ao salvar o PDF: ${result ? result.error : 'Erro desconhecido'}`);
-              }
-          } else {
-              pdf.save(`${config.name || 'Agenda_Master'}.pdf`);
-              setPrintStatus('idle');
-          }
-      } catch (err) {
-          if (!pdfExportCancelledRef.current) {
-              console.error('Erro ao gerar o PDF:', err);
-              alert('Erro ao processar as páginas do PDF. Por favor, feche as abas extras e tente de novo.');
-          }
-      } finally {
-          setPdfExporting(false);
-          setPdfExportProgress(0);
-      }
-  }, [actualTotalPagesCount, config, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, pdfScaleMode]);
-
   const executeVectorPrint = useCallback(async () => {
       const isYearRestricted = isProjectYearRestricted(
           config.projectType,
@@ -12753,11 +12793,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
           return;
       }
       
+      const waitForPrintDomReady = async () => {
+          try {
+              if ((document as any).fonts?.ready) {
+                  await (document as any).fonts.ready;
+              }
+          } catch {}
+          await new Promise<void>(resolve =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          );
+      };
+
       // Se estiver rodando no Electron desktop, usar o fluxo nativo extremamente seguro e polido
       // @ts-ignore
       if (window.electronAPI && typeof window.electronAPI.printToPDF === 'function') {
           setPdfExporting(true);
           try {
+              await waitForPrintDomReady();
               const widthMicrons = Math.round(PAGE_WIDTH_MM * 1000);
               const heightMicrons = Math.round(PAGE_HEIGHT_MM * 1000);
               const landscape = config.orientation !== 'portrait';
@@ -12787,6 +12839,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               setPdfExporting(false);
           }
       } else {
+          await waitForPrintDomReady();
           window.print();
       }
   }, [config.projectType, config.year, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, config.orientation, config.name, user.plan]);
@@ -12800,13 +12853,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
         width: `${(100 / uiScale).toFixed(2)}vw`,
         maxWidth: `${(100 / uiScale).toFixed(2)}vw`
       } : undefined}
-      className={`flex flex-col h-screen overflow-hidden bg-[#faf6f4] text-slate-800 ${isMobile ? 'pb-safe' : ''}`}
+      className={`dashboard-ui-scale-root flex flex-col h-screen overflow-hidden bg-[#faf6f4] text-slate-800 ${isMobile ? 'pb-safe' : ''}`}
     >
       <style>{`
         @media print {
           @page {
             size: ${PAGE_WIDTH_MM}mm ${PAGE_HEIGHT_MM}mm;
             margin: 0;
+          }
+          .dashboard-ui-scale-root {
+            zoom: 1 !important;
+            width: auto !important;
+            max-width: none !important;
+            height: auto !important;
+            max-height: none !important;
           }
           html, body {
             margin: 0 !important;
@@ -12898,23 +12958,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
               ) : pdfExporting ? (
                   <div className="w-full max-w-lg bg-white p-8 rounded-3xl shadow-[0_20px_60px_rgba(184,74,86,0.2)] flex flex-col items-center text-slate-800 animate-in zoom-in duration-300 border border-[#eedad5]">
                         <Loader2 className="w-12 h-12 animate-spin mb-4 text-[#b84a56]" />
-                        <h2 className="text-2xl font-black mb-2 text-center text-slate-900 animate-pulse">Compilando PDF Final...</h2>
+                        <h2 className="text-2xl font-black mb-2 text-center text-slate-900 animate-pulse">Gerando PDF Vetorial...</h2>
                         <p className="text-xs text-slate-500 mb-6 text-center max-w-sm font-medium">
-                            Processando alinhamento milimétrico {pdfExportProgress} de {actualTotalPagesCount} páginas. Por favor, mantenha a janela aberta.
+                            Compilando {actualTotalPagesCount} páginas em vetor nativo de alta precisão. Por favor, mantenha a janela aberta.
                         </p>
-                        
-                        <div className="w-full bg-[#fdeeed] border border-[#f5ded9] rounded-2xl p-4 mb-6 shadow-2xs">
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="text-xs font-bold text-[#9f3d4a]">Progresso da Renderização</span>
-                                <span className="text-xs font-black text-[#9f3d4a]">{Math.round((pdfExportProgress / Math.max(1, actualTotalPagesCount)) * 100)}%</span>
-                            </div>
-                            <div className="w-full h-3 bg-white/80 border border-[#f5ded9] rounded-full overflow-hidden">
-                                <div 
-                                    className="h-full bg-gradient-to-r from-[#b84a56] to-[#c45663] transition-all duration-300" 
-                                    style={{ width: `${Math.round((pdfExportProgress / Math.max(1, actualTotalPagesCount)) * 100)}%` }}
-                                />
-                            </div>
-                        </div>
                         
                         <div className="w-full flex flex-col gap-2.5">
                             <button 
@@ -12923,11 +12970,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                 className="w-full py-3.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#b84a56] hover:text-[#9f3d4a] font-black text-xs uppercase tracking-wider transition-all border border-[#f5ded9] flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-98"
                             >
                                 <X className="w-4 h-4 text-[#b84a56]" />
-                                Cancelar Conversão
+                                Fechar
                             </button>
-                            <p className="text-[11px] text-slate-400 text-center font-medium">
-                                Você pode cancelar a qualquer momento sem perder o seu projeto.
-                            </p>
                         </div>
                   </div>
               ) : (
@@ -12961,10 +13005,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                               >
                                                   <div 
                                                       style={{
-                                                          transform: `scale(${1.6 / 3.78})`,
+                                                          transform: `scale(${1.6 / CSS_PX_PER_MM})`,
                                                           transformOrigin: 'top left',
-                                                          width: `${PAGE_WIDTH_MM * 3.78}px`,
-                                                          height: `${PAGE_HEIGHT_MM * 3.78}px`,
+                                                          width: `${PAGE_WIDTH_MM * CSS_PX_PER_MM}px`,
+                                                          height: `${PAGE_HEIGHT_MM * CSS_PX_PER_MM}px`,
                                                       }} 
                                                       className="origin-top-left pointer-events-none select-none text-gray-900"
                                                   >
@@ -13021,149 +13065,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                               
                               <h2 className="text-xl font-black mb-1 text-center text-slate-900">Seu arquivo está pronto!</h2>
                               <p className="text-xs text-slate-500 mb-5 text-center max-w-xs font-medium">
-                                  Escolha o melhor método de exportação para as suas {actualTotalPagesCount} páginas de acordo com a sua necessidade de uso.
+                                  Seu miolo com {actualTotalPagesCount} páginas está pronto para ser salvo em PDF Vetorial de alta precisão.
                               </p>
 
-                              {/* Seletor de Tecnologia / Método */}
-                              <div className="flex bg-[#fdeeed] p-1 rounded-2xl mb-5 w-full shrink-0 border border-[#eedad5]">
-                                  <button
-                                      type="button"
-                                      onClick={() => setPdfExportMethod('vector')}
-                                      className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${pdfExportMethod === 'vector' ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
-                                  >
-                                      <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" /> PDF Vetorial 💎
-                                  </button>
-                                  <button
-                                      type="button"
-                                      onClick={() => setPdfExportMethod('canvas')}
-                                      className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${pdfExportMethod === 'canvas' ? 'bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
-                                  >
-                                      <FileImage className="w-3.5 h-3.5" /> PDF por Imagem
-                                  </button>
+                              <div className="w-full py-2 px-4 rounded-2xl mb-5 bg-gradient-to-r from-[#b84a56] to-[#c45663] text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-xs shrink-0">
+                                  <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" /> PDF Vetorial 💎
                               </div>
 
-                              {pdfExportMethod === 'vector' ? (
-                                  <div className="w-full text-left space-y-4 mb-5 flex-1">
-                                      <div className="bg-[#fcedea] border border-[#f8d4ce] rounded-2xl p-3.5 flex gap-3">
-                                          <div className="p-2 bg-[#fdeeed] text-[#b84a56] rounded-xl shrink-0 h-8 w-8 flex items-center justify-center border border-[#f5ded9]">
-                                              <Sparkles className="w-4 h-4 fill-[#b84a56] text-[#b84a56]" />
-                                          </div>
-                                          <div>
-                                              <h3 className="text-xs font-black text-[#9f3d4a]">Modo Vetorial (Vantagens Profissionais)</h3>
-                                              <p className="text-[10px] text-slate-700 mt-0.5 leading-relaxed font-medium">
-                                                  Gera o miolo inteiro em <strong>vetores nativos</strong>. Garante nitidez absoluta perfeita nas fontes e linhas (mesmo com zoom de 1000%), gera arquivos super leves (<strong>de 200MB vira ~5MB</strong>) e o processamento é <strong>instantâneo</strong>.
-                                              </p>
-                                          </div>
+                              <div className="w-full text-left space-y-4 mb-5 flex-1">
+                                  <div className="bg-[#fcedea] border border-[#f8d4ce] rounded-2xl p-3.5 flex gap-3">
+                                      <div className="p-2 bg-[#fdeeed] text-[#b84a56] rounded-xl shrink-0 h-8 w-8 flex items-center justify-center border border-[#f5ded9]">
+                                          <Sparkles className="w-4 h-4 fill-[#b84a56] text-[#b84a56]" />
                                       </div>
-
-                                      <div className="border border-[#eedad5] bg-[#faf6f4] rounded-2xl p-4 space-y-3">
-                                          <h4 className="text-[9px] font-black text-[#9f3d4a] uppercase tracking-wider flex items-center gap-2">
-                                              <Info className="w-3.5 h-3.5 text-[#b84a56]" /> Passo a Passo para Salvar o PDF:
-                                          </h4>
-                                          
-                                          <ul className="space-y-2.5">
-                                              <li className="flex items-start gap-2.5">
-                                                  <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">1</div>
-                                                  <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
-                                                      No diálogo que abrir, selecione <strong>"Salvar como PDF"</strong> (ou "Exportar para PDF") no campo Destino.
-                                                  </p>
-                                              </li>
-                                              <li className="flex items-start gap-2.5">
-                                                  <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
-                                                  <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
-                                                      Marque/Ative a opção <strong>"Gráficos de segundo plano"</strong> nas configurações de impressão (se desmarcada, cores e linhas de tabelas somem no PDF).
-                                                  </p>
-                                              </li>
-                                              <li className="flex items-start gap-2.5">
-                                                  <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
-                                                  <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
-                                                      Defina as Margens como <strong>"Nenhuma"</strong> (None). <em>(Se deixar em "Padrão", o navegador encolhe a folha e pode criar páginas em branco extras no PDF!)</em>
-                                                  </p>
-                                              </li>
-                                          </ul>
-                                      </div>
-                                      
-                                      <p className="text-[9px] text-slate-500 leading-normal text-center italic">
-                                          Dica: Se estiver no painel do AI Studio, abra em "Nova Guia" de antemão para ter total controle sobre o menu de impressão do seu navegador.
-                                      </p>
-                                  </div>
-                              ) : (
-                                  <div className="w-full space-y-4 mb-5 flex-1">
-                                      <div className="w-full space-y-2.5 text-left">
-                                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Opção de Velocidade & Qualidade:</label>
-                                  
-                                          {/* Fast choice */}
-                                          <button 
-                                              key="pdf-speed-fast"
-                                              type="button"
-                                              onClick={() => setPdfScaleMode('fast')}
-                                              className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${pdfScaleMode === 'fast' ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-2 ring-[#b84a56]/20' : 'border-[#eedad5] hover:border-[#b84a56]/40 bg-[#faf6f4]'}`}
-                                          >
-                                              <div className={`p-2 rounded-xl ${pdfScaleMode === 'fast' ? 'bg-[#fdeeed] text-[#b84a56]' : 'bg-white text-slate-400'} shrink-0 border border-[#eedad5]`}>
-                                                  <Clock className="w-4 h-4" />
-                                              </div>
-                                              <div className="flex-1 min-w-0">
-                                                  <div className="flex items-center justify-between">
-                                                      <span className="text-xs font-bold text-slate-900 block">⚡ Modo Relâmpago (Super Rápido)</span>
-                                                      <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Até 4x mais rápido</span>
-                                                  </div>
-                                                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
-                                                      Gera o PDF em segundos com resolução padrão (Escala 1.0x). Perfeito para celulares, computadores básicos ou testes rápidos.
-                                                  </p>
-                                              </div>
-                                          </button>
-
-                                          {/* Standard choice */}
-                                          <button 
-                                              key="pdf-speed-standard"
-                                              type="button"
-                                              onClick={() => setPdfScaleMode('standard')}
-                                              className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${pdfScaleMode === 'standard' ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-2 ring-[#b84a56]/20' : 'border-[#eedad5] hover:border-[#b84a56]/40 bg-[#faf6f4]'}`}
-                                          >
-                                              <div className={`p-2 rounded-xl ${pdfScaleMode === 'standard' ? 'bg-[#fdeeed] text-[#b84a56]' : 'bg-white text-slate-400'} shrink-0 border border-[#eedad5]`}>
-                                                  <Smartphone className="w-4 h-4" />
-                                              </div>
-                                              <div className="flex-1 min-w-0">
-                                                  <div className="flex items-center justify-between">
-                                                      <span className="text-xs font-bold text-slate-900 block">🚀 Modo Equilibrado (Recomendado)</span>
-                                                      <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Mais estável</span>
-                                                  </div>
-                                                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
-                                                      Resolução com escala inteira uniforme (Escala 2.0x) para linhas e tabelas com traços 100% homogêneos e nítidos.
-                                                  </p>
-                                              </div>
-                                          </button>
-
-                                          {/* High quality choice */}
-                                          <button 
-                                              key="pdf-speed-high"
-                                              type="button"
-                                              onClick={() => setPdfScaleMode('high')}
-                                              className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${pdfScaleMode === 'high' ? 'border-[#b84a56] bg-[#fdeeed]/60 ring-2 ring-[#b84a56]/20' : 'border-[#eedad5] hover:border-[#b84a56]/40 bg-[#faf6f4]'}`}
-                                          >
-                                              <div className={`p-2 rounded-xl ${pdfScaleMode === 'high' ? 'bg-[#fdeeed] text-[#b84a56]' : 'bg-white text-slate-400'} shrink-0 border border-[#eedad5]`}>
-                                                  <CheckSquare className="w-4 h-4" />
-                                              </div>
-                                              <div className="flex-1 min-w-0">
-                                                  <div className="flex items-center justify-between">
-                                                      <span className="text-xs font-bold text-slate-900 block">💎 Alta Fidelidade (Impressão Física)</span>
-                                                      <span className="text-[9px] font-black text-[#9f3d4a] bg-[#fdeeed] border border-[#f5ded9] px-1.5 py-0.5 rounded-full uppercase">Alta Resolução</span>
-                                                  </div>
-                                                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed font-medium">
-                                                      Suporte de alta fidelidade e escala máxima (Escala 3.0x, 300+ DPI) para impressão profissional perfeita.
-                                                  </p>
-                                              </div>
-                                          </button>
-                                      </div>
-
-                                      <div className="w-full bg-[#fdeeed]/60 border border-[#f5ded9] rounded-2xl p-3.5 text-left flex items-start gap-2.5">
-                                          <Info className="w-4 h-4 text-[#b84a56] shrink-0 mt-0.5" />
-                                          <p className="text-[11px] text-[#9f3d4a] leading-relaxed font-medium">
-                                              Nosso motor foi otimizado para renderizar em lotes simultâneos. Independente do modo acima, a compilação agora está <strong>até 4x mais rápida</strong> que antes!
+                                      <div>
+                                          <h3 className="text-xs font-black text-[#9f3d4a]">Modo Vetorial (Vantagens Profissionais)</h3>
+                                          <p className="text-[10px] text-slate-700 mt-0.5 leading-relaxed font-medium">
+                                              Gera o miolo inteiro em <strong>vetores nativos</strong>. Garante nitidez absoluta perfeita nas fontes e linhas (mesmo com zoom de 1000%), gera arquivos super leves (<strong>de 200MB vira ~5MB</strong>) e o processamento é <strong>instantâneo</strong>.
                                           </p>
                                       </div>
                                   </div>
-                              )}
+
+                                  <div className="border border-[#eedad5] bg-[#faf6f4] rounded-2xl p-4 space-y-3">
+                                      <h4 className="text-[9px] font-black text-[#9f3d4a] uppercase tracking-wider flex items-center gap-2">
+                                          <Info className="w-3.5 h-3.5 text-[#b84a56]" /> Passo a Passo para Salvar o PDF:
+                                      </h4>
+                                      
+                                      <ul className="space-y-2.5">
+                                          <li className="flex items-start gap-2.5">
+                                              <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">1</div>
+                                              <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
+                                                  No diálogo que abrir, selecione <strong>"Salvar como PDF"</strong> (ou "Exportar para PDF") no campo Destino.
+                                              </p>
+                                          </li>
+                                          <li className="flex items-start gap-2.5">
+                                              <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">2</div>
+                                              <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
+                                                  Marque/Ative a opção <strong>"Gráficos de segundo plano"</strong> nas configurações de impressão (se desmarcada, cores e linhas de tabelas somem no PDF).
+                                              </p>
+                                          </li>
+                                          <li className="flex items-start gap-2.5">
+                                              <div className="w-4 h-4 rounded-full bg-[#fdeeed] text-[#b84a56] border border-[#f5ded9] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">3</div>
+                                              <p className="text-[10px] text-slate-700 leading-relaxed font-medium">
+                                                  Defina as Margens como <strong>"Nenhuma"</strong> (None). <em>(Se deixar em "Padrão", o navegador encolhe a folha e pode criar páginas em branco extras no PDF!)</em>
+                                              </p>
+                                          </li>
+                                      </ul>
+                                  </div>
+                                  
+                                  <p className="text-[9px] text-slate-500 leading-normal text-center italic">
+                                      Dica: Se estiver no painel do AI Studio, abra em "Nova Guia" de antemão para ter total controle sobre o menu de impressão do seu navegador.
+                                  </p>
+                              </div>
                           </div>
 
                           <div className="flex gap-3 w-full shrink-0 pt-4 border-t border-[#eedad5] mt-4">
@@ -13174,21 +13126,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                   Cancelar
                               </button>
                               
-                              {pdfExportMethod === 'vector' ? (
-                                  <button 
-                                      onClick={executeVectorPrint}
-                                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white font-black text-xs uppercase tracking-wider transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-                                  >
-                                      <Printer className="w-4 h-4"/> Salvar Vetorial (Imprimir)
-                                  </button>
-                              ) : (
-                                  <button 
-                                      onClick={executePrint}
-                                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white font-black text-xs uppercase tracking-wider transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-                                  >
-                                      <FileDown className="w-4 h-4"/> Baixar PDF Agora
-                                  </button>
-                              )}
+                              <button 
+                                  onClick={executeVectorPrint}
+                                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#b84a56] to-[#c45663] hover:from-[#a83f4b] hover:to-[#b84a56] text-white font-black text-xs uppercase tracking-wider transition-all shadow-md shadow-[#b84a56]/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                              >
+                                  <Printer className="w-4 h-4"/> Salvar Vetorial (Imprimir)
+                              </button>
                           </div>
                           <button 
                               type="button"
@@ -13971,6 +13914,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                   accept=".ttf,.otf,.woff,.woff2" 
                   className="hidden" 
                 />
+                <input
+                  type="file"
+                  multiple
+                  ref={relinkFontInputRef}
+                  onChange={handleRelinkProjectFontUpload}
+                  accept=".ttf,.otf,.woff,.woff2"
+                  className="hidden"
+                />
                 <input 
                   type="file" 
                   ref={imageInputRef} 
@@ -14575,13 +14526,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                 setConfig(prev => ({
                                                     ...prev,
                                                     customVerso: checked,
-                                                    elementsVerso: (checked && (!prev.elementsVerso || prev.elementsVerso.length === 0))
+                                                    elementsVerso: (checked && prev.elementsVerso === undefined)
                                                         ? prev.elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) }))
                                                         : prev.elementsVerso,
-                                                    elementsWeeklyVersoLeft: (checked && (!prev.elementsWeeklyVersoLeft || prev.elementsWeeklyVersoLeft.length === 0))
+                                                    elementsWeeklyVersoLeft: (checked && prev.elementsWeeklyVersoLeft === undefined)
                                                         ? (prev.elementsWeeklyLeft ?? prev.elements).map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) }))
                                                         : prev.elementsWeeklyVersoLeft,
-                                                    elementsWeeklyVersoRight: (checked && (!prev.elementsWeeklyVersoRight || prev.elementsWeeklyVersoRight.length === 0))
+                                                    elementsWeeklyVersoRight: (checked && prev.elementsWeeklyVersoRight === undefined)
                                                         ? (prev.elementsWeeklyRight ?? prev.elements).map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) }))
                                                         : prev.elementsWeeklyVersoRight
                                                 }));
@@ -14663,7 +14614,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         </label>
                                                         <select 
                                                             value={config.fillerPageContent || 'blank'} 
-                                                            onChange={(e) => setConfig(prev => ({ ...prev, fillerPageContent: e.target.value as any }))}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value as any;
+                                                                setConfig(prev => ({
+                                                                    ...prev,
+                                                                    fillerPageContent: val,
+                                                                    fillerPageElements: undefined,
+                                                                    fillerPageBackground: undefined
+                                                                }));
+                                                                setSelectedIds([]);
+                                                            }}
                                                             className="w-full text-xs p-2 border-2 border-indigo-200 rounded-xl bg-white shadow-2xs font-bold text-gray-950 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none cursor-pointer"
                                                         >
                                                             <option value="blank">📄 Página em Branco (100% limpa)</option>
@@ -15326,14 +15286,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             )}
                                         </div>
 
-                                        <div className="flex gap-1.5">
+                                        <div className="grid grid-cols-2 gap-1.5">
                                             <button 
                                                 type="button"
                                                 onClick={() => { 
                                                     setPdfImportInitialDestination('filler_page'); 
                                                     setPdfImportModalOpen(true); 
                                                 }}
-                                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
                                                 title="Importar layout de PDF para a Página de Preenchimento"
                                             >
                                                 <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
@@ -15345,11 +15305,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     setTemplateCategory('intro');
                                                     setTemplateModal(true);
                                                 }}
-                                                className="flex items-center justify-center gap-1 py-1.5 px-2.5 bg-gray-50 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                className="flex items-center justify-center gap-1 py-1.5 px-2 bg-gray-50 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
                                                 title="Modelos Prontos"
                                             >
                                                 <Layout className="w-3.5 h-3.5 text-gray-600" />
                                                 <span>Modelos</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    savePageAsTemplate({
+                                                        id: 'filler_page',
+                                                        name: 'Página de Preenchimento',
+                                                        elements: getActiveElements(),
+                                                        background: config.fillerPageBackground
+                                                    }, 'page');
+                                                }}
+                                                className="col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 hover:bg-emerald-100 transition-all text-[10px] font-bold uppercase tracking-wider shadow-2xs cursor-pointer"
+                                                title="Salvar este layout da página de preenchimento na sua biblioteca Meus Modelos"
+                                            >
+                                                <Bookmark className="w-3.5 h-3.5 text-emerald-600" />
+                                                <span>Salvar como Modelo Reutilizável</span>
                                             </button>
                                         </div>
 
@@ -15404,7 +15380,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                     </span>
                                                 </div>
                                                 <p className="text-[10px] text-emerald-800 leading-tight">
-                                                    Esta página possui edições exclusivas feitas no canvas. Você pode adicionar ou mover qualquer elemento livremente.
+                                                    As edições feitas aqui são salvas automaticamente junto com o seu projeto (autosave e arquivo .json) e aplicadas em todas as páginas de preenchimento do PDF.
                                                 </p>
                                                 <button
                                                     type="button"
@@ -15427,7 +15403,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             </div>
                                         ) : (
                                             <div className="p-2 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[10px] text-indigo-900 leading-relaxed">
-                                                💡 <strong>Edição no Canvas:</strong> Selecione elementos no menu abaixo ou clique no canvas para mover, redimensionar e customizar livremente como desejar!
+                                                💡 <strong>Salvamento Automático:</strong> Ao editar ou adicionar elementos no canvas, o layout é salvo junto com o projeto automaticamente. Use <strong>Salvar como Modelo Reutilizável</strong> para reutilizar em outros projetos.
                                             </div>
                                         )}
                                     </div>
@@ -15875,6 +15851,75 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                             )}
                         </div>
 
+                        {!projectFontBannerDismissed && missingProjectFonts.length > 0 && (
+                            <div className="mb-2.5 w-full max-w-3xl bg-amber-50/95 border border-amber-300/80 rounded-2xl px-3.5 py-2.5 shadow-sm flex flex-wrap items-center justify-between gap-2.5 z-10 no-print">
+                                <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                                    <TypeIcon className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                                    <div className="min-w-0">
+                                        <p className="text-[11px] font-black text-amber-950 leading-snug">
+                                            {missingProjectFonts.length === 1
+                                                ? '1 fonte deste projeto precisa ser reativada neste navegador:'
+                                                : `${missingProjectFonts.length} fontes deste projeto precisam ser reativadas neste navegador:`}
+                                        </p>
+                                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                                            {missingProjectFonts.slice(0, 6).map(fontName => (
+                                                <button
+                                                    key={fontName}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        relinkTargetFontRef.current = fontName;
+                                                        relinkFontInputRef.current?.click();
+                                                    }}
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-amber-300 text-[10px] font-bold text-amber-900 hover:bg-amber-100 cursor-pointer transition-colors"
+                                                    title={`Clique para vincular o arquivo .ttf/.otf da fonte "${fontName}"`}
+                                                >
+                                                    <span>{fontName}</span>
+                                                    <Upload className="w-2.5 h-2.5 text-amber-600" />
+                                                </button>
+                                            ))}
+                                            {missingProjectFonts.length > 6 && (
+                                                <span className="text-[10px] font-bold text-amber-800">+{missingProjectFonts.length - 6} outra(s)</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    {needsLocalFontPermission && (
+                                        <button
+                                            type="button"
+                                            onClick={handleLoadLocalFonts}
+                                            disabled={localFontsLoading}
+                                            className="px-2.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer shadow-xs transition-colors disabled:opacity-60"
+                                            title="Libera a leitura direta das fontes já instaladas neste computador"
+                                        >
+                                            {localFontsLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Monitor className="w-3 h-3" />}
+                                            <span>Ativar Fontes do PC</span>
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            relinkTargetFontRef.current = null;
+                                            relinkFontInputRef.current?.click();
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-colors"
+                                        title="Selecionar arquivos .ttf ou .otf para restaurar automaticamente"
+                                    >
+                                        <Upload className="w-3 h-3" />
+                                        <span>Subir Fonte (.ttf/.otf)</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setProjectFontBannerDismissed(true)}
+                                        className="p-1 rounded-lg text-amber-700 hover:bg-amber-200/60 cursor-pointer"
+                                        title="Fechar aviso"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {config.layoutType === '1_per_page_weekend_shared' && editMode === 'daily' && (
                             <div className="mb-4 bg-white p-1 rounded-lg shadow-sm flex items-center space-x-1.5 z-10 border border-indigo-100 flex-wrap gap-y-1.5">
                                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Visualização:</span>
@@ -16290,6 +16335,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                     <Layout className="w-3.5 h-3.5 text-gray-600" />
                                     <span>Modelos</span>
                                 </button>
+                                <button
+                                    onClick={() => {
+                                        savePageAsTemplate({
+                                            id: 'filler_page',
+                                            name: 'Página de Preenchimento',
+                                            elements: getActiveElements(),
+                                            background: config.fillerPageBackground
+                                        }, 'page');
+                                    }}
+                                    className="px-2.5 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-emerald-700 hover:bg-emerald-50 border border-emerald-200 shadow-2xs"
+                                    title="Salvar layout atual da página de preenchimento em Meus Modelos"
+                                >
+                                    <Bookmark className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Salvar como Modelo</span>
+                                </button>
                                 {config.fillerPageElements !== undefined && (
                                     <button
                                         onClick={() => {
@@ -16660,7 +16720,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         const val = parseFloat(e.target.value);
                                                                         if (!isNaN(val)) {
                                                                             const newRaw = setVisualBounds(selectedElement, { x: val }, usableWidthMM, usableHeightMM);
-                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw, ...(el.style?.coverFullPage ? { style: { ...el.style, coverFullPage: false } } : {})} : el));
                                                                         }
                                                                     }} 
                                                                     className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
@@ -16670,13 +16730,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Posição Y (mm)</label>
                                                                 <input 
                                                                     type="number" 
-                                                                    step="1"
+                                                                    step="1" 
                                                                     value={Math.round(vis.y)} 
                                                                     onChange={(e) => {
                                                                         const val = parseFloat(e.target.value);
                                                                         if (!isNaN(val)) {
                                                                             const newRaw = setVisualBounds(selectedElement, { y: val }, usableWidthMM, usableHeightMM);
-                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                            updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw, ...(el.style?.coverFullPage ? { style: { ...el.style, coverFullPage: false } } : {})} : el));
                                                                         }
                                                                     }} 
                                                                     className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
@@ -16692,13 +16752,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         type="number" 
                                                                         min="1" 
                                                                         max={usableWidthMM * 2} 
-                                                                        step="1"
+                                                                        step="1" 
                                                                         value={Math.round(vis.w)} 
                                                                         onChange={(e) => {
                                                                             const val = parseFloat(e.target.value);
                                                                             if (!isNaN(val)) {
                                                                                 const newRaw = setVisualBounds(selectedElement, { w: val }, usableWidthMM, usableHeightMM);
-                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw, ...(el.style?.coverFullPage ? { style: { ...el.style, coverFullPage: false } } : {})} : el));
                                                                             }
                                                                         }} 
                                                                         className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
@@ -16712,13 +16772,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         type="number" 
                                                                         min="1" 
                                                                         max={usableHeightMM * 2} 
-                                                                        step="1"
+                                                                        step="1" 
                                                                         value={Math.round(vis.h)} 
                                                                         onChange={(e) => {
                                                                             const val = parseFloat(e.target.value);
                                                                             if (!isNaN(val)) {
                                                                                 const newRaw = setVisualBounds(selectedElement, { h: val }, usableWidthMM, usableHeightMM);
-                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw} : el));
+                                                                                updateActiveElements(getActiveElements().map(el => selectedIds.includes(el.id) ? {...el, ...newRaw, ...(el.style?.coverFullPage ? { style: { ...el.style, coverFullPage: false } } : {})} : el));
                                                                             }
                                                                         }} 
                                                                         className="w-full text-xs p-1 border border-gray-200 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
@@ -16906,18 +16966,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     </div>
                                                                 )}
 
-                                                                <div className="space-y-2">
+                                                                <div className="space-y-2.5">
                                                                     <div className="space-y-1">
-                                                                        <div className="flex items-center justify-between">
+                                                                        <div className="flex items-center justify-between gap-1">
                                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda Externa</label>
-                                                                            <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1 py-0.5 rounded">{(selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1)}px</span>
+                                                                            <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
+                                                                                {formatStrokeReadout(selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                            </span>
                                                                         </div>
                                                                         <div className="flex items-center gap-2">
                                                                             <input 
                                                                                 type="range" 
                                                                                 min="0" 
                                                                                 max="20" 
-                                                                                step="0.1" 
+                                                                                step="0.05" 
                                                                                 value={selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
                                                                                 onChange={(e) => {
                                                                                     const val = parseFloat(e.target.value);
@@ -16929,27 +16991,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                 type="number" 
                                                                                 min="0" 
                                                                                 max="20" 
-                                                                                step="0.1" 
+                                                                                step="0.05" 
                                                                                 value={selectedElement.style.table.outerBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
                                                                                 onChange={(e) => {
                                                                                     const val = parseFloat(e.target.value);
                                                                                     updateTableConfig(selectedElement.id, { outerBorderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
                                                                                 }} 
-                                                                                className="w-14 text-xs p-1 border rounded text-center font-mono" 
+                                                                                className="w-16 text-xs p-1 border rounded text-center font-mono" 
                                                                             />
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {STROKE_PT_PRESETS.map(p => (
+                                                                                <button
+                                                                                    key={`outer-${p.label}`}
+                                                                                    type="button"
+                                                                                    onClick={() => updateTableConfig(selectedElement.id, { outerBorderWidth: ptToUnit(p.pt, PAGE_WIDTH_MM) })}
+                                                                                    className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-300 text-gray-600 hover:text-indigo-700 cursor-pointer"
+                                                                                >
+                                                                                    {p.label}
+                                                                                </button>
+                                                                            ))}
                                                                         </div>
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <div className="flex items-center justify-between">
+                                                                        <div className="flex items-center justify-between gap-1">
                                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Linhas Internas</label>
-                                                                            <span className="text-[10px] font-mono text-gray-500">{(selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1)}px</span>
+                                                                            <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
+                                                                                {formatStrokeReadout(selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                            </span>
                                                                         </div>
                                                                         <div className="flex items-center gap-2">
                                                                             <input 
                                                                                 type="range" 
                                                                                 min="0" 
                                                                                 max="10" 
-                                                                                step="0.1" 
+                                                                                step="0.05" 
                                                                                 value={selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
                                                                                 onChange={(e) => {
                                                                                     const val = parseFloat(e.target.value);
@@ -16962,15 +17038,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                 type="number" 
                                                                                 min="0" 
                                                                                 max="10" 
-                                                                                step="0.1" 
+                                                                                step="0.05" 
                                                                                 value={selectedElement.style.table.insideBorderWidth ?? selectedElement.style.table.borderWidth ?? 1} 
                                                                                 onChange={(e) => {
                                                                                     const val = parseFloat(e.target.value);
                                                                                     const safeVal = Number.isFinite(val) ? Math.max(0, val) : 0;
                                                                                     updateTableConfig(selectedElement.id, { insideBorderWidth: safeVal, borderWidth: safeVal });
                                                                                 }} 
-                                                                                className="w-14 text-xs p-1 border rounded text-center font-mono" 
+                                                                                className="w-16 text-xs p-1 border rounded text-center font-mono" 
                                                                             />
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {STROKE_PT_PRESETS.map(p => (
+                                                                                <button
+                                                                                    key={`inside-${p.label}`}
+                                                                                    type="button"
+                                                                                    onClick={() => {
+                                                                                        const safeVal = ptToUnit(p.pt, PAGE_WIDTH_MM);
+                                                                                        updateTableConfig(selectedElement.id, { insideBorderWidth: safeVal, borderWidth: safeVal });
+                                                                                    }}
+                                                                                    className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-300 text-gray-600 hover:text-indigo-700 cursor-pointer"
+                                                                                >
+                                                                                    {p.label}
+                                                                                </button>
+                                                                            ))}
                                                                         </div>
                                                                     </div>
                                                                 </div>
@@ -17693,9 +17784,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                         </div>
                                                     </div>
 
-                                                    <div className="flex items-center justify-between">
-                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda do Selo</label>
-                                                        <input type="number" min="0" max="6" value={selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 1} onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseInt(e.target.value) || 0 })} className="w-16 text-xs p-1 border rounded" />
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda do Selo</label>
+                                                            <span className="text-[9.5px] font-mono text-indigo-600 font-bold">
+                                                                {formatStrokeReadout(selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 1, PAGE_WIDTH_MM)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center justify-end">
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                max="6"
+                                                                step="0.05"
+                                                                value={selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 1}
+                                                                onChange={(e) => {
+                                                                    const val = parseFloat(e.target.value);
+                                                                    updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                }}
+                                                                className="w-20 text-xs p-1 border rounded text-center font-mono"
+                                                            />
+                                                        </div>
                                                     </div>
 
                                                     <div className="p-2 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-1.5">
@@ -17851,17 +17960,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 className="w-20" 
                                                             />
                                                         </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda da Forma</label>
-                                                            <input 
-                                                                type="number" 
-                                                                min="0" 
-                                                                max="10" 
-                                                                step="0.5" 
-                                                                value={selectedElement.style.borderWidth ?? 1} 
-                                                                onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) })} 
-                                                                className="w-16 text-xs p-1 border rounded" 
-                                                            />
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center justify-between gap-1">
+                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura Borda</label>
+                                                                <span className="text-[9.5px] font-mono text-indigo-600 font-bold">
+                                                                    {formatStrokeReadout(selectedElement.style.borderWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center justify-end">
+                                                                <input 
+                                                                    type="number" 
+                                                                    min="0" 
+                                                                    max="10" 
+                                                                    step="0.05" 
+                                                                    value={selectedElement.style.borderWidth ?? 1} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                    }} 
+                                                                    className="w-20 text-xs p-1 border rounded text-center font-mono" 
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -17914,17 +18033,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura ({selectedElement.style.borderWidth || 2})</label>
-                                                            <input 
-                                                                type="range" 
-                                                                min="0.5" 
-                                                                max="5" 
-                                                                step="0.5" 
-                                                                value={selectedElement.style.borderWidth || 2} 
-                                                                onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) })} 
-                                                                className="w-24" 
-                                                            />
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center justify-between">
+                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura do Traço</label>
+                                                                <span className="text-[10px] font-mono text-gray-500">{selectedElement.style.borderWidth ?? 2}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="range" 
+                                                                    min="0.1" 
+                                                                    max="5" 
+                                                                    step="0.05" 
+                                                                    value={selectedElement.style.borderWidth ?? 2} 
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0.1, val) : 2 });
+                                                                    }} 
+                                                                    className="flex-1" 
+                                                                />
+                                                                <input
+                                                                    type="number"
+                                                                    min="0.1"
+                                                                    max="5"
+                                                                    step="0.05"
+                                                                    value={selectedElement.style.borderWidth ?? 2}
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0.1, val) : 2 });
+                                                                    }}
+                                                                    className="w-14 text-xs p-1 border rounded text-center font-mono"
+                                                                />
+                                                            </div>
                                                         </div>
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Opacidade</label>
@@ -18401,11 +18540,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                         <label className="block text-[10px] font-bold text-gray-500 uppercase">Fonte do Cabeçalho</label>
                                                                         <select 
                                                                             value={selectedElement.style.plannerDayBox?.headerFontFamily || 'Inter'} 
-                                                                            onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, headerFontFamily: e.target.value } 
-                                                                            })} 
+                                                                            onChange={async (e) => {
+                                                                                const newFont = e.target.value;
+                                                                                updateElementStyle(selectedElement.id, { 
+                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, headerFontFamily: newFont } 
+                                                                                });
+                                                                                await ensureFontLoaded(newFont);
+                                                                            }} 
                                                                             className="w-full text-xs p-1.5 border border-gray-200 rounded bg-white"
                                                                         >
+                                                                            {(() => {
+                                                                                const cur = selectedElement.style.plannerDayBox?.headerFontFamily;
+                                                                                const curLow = cur?.trim().toLowerCase();
+                                                                                const listed = !curLow || AVAILABLE_FONTS.some(f => f.toLowerCase() === curLow) || allSystemFonts.some(f => f.toLowerCase() === curLow) || customFonts.some(f => f.toLowerCase() === curLow);
+                                                                                if (listed || !cur) return null;
+                                                                                return (
+                                                                                    <optgroup label="Fonte Atual do Projeto">
+                                                                                        <option value={cur} style={{ fontFamily: getSafeFontFamily(cur) }}>{cur}</option>
+                                                                                    </optgroup>
+                                                                                );
+                                                                            })()}
                                                                             <optgroup label="Padrão">
                                                                                 {AVAILABLE_FONTS.map(font => (
                                                                                     <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
@@ -18535,19 +18689,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                         className="w-6 h-5 p-0 border-0 cursor-pointer rounded"
                                                                                     />
                                                                                 </div>
-                                                                                <div className="flex items-center justify-between">
-                                                                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Espessura</label>
-                                                                                    <input 
-                                                                                        type="number" 
-                                                                                        min="0" 
-                                                                                        max="5" 
-                                                                                        step="0.1" 
-                                                                                        value={selectedElement.style.plannerDayBox?.headerBorderWidth ?? 1} 
-                                                                                        onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                                            plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderWidth: parseFloat(e.target.value) || 0 } 
-                                                                                        })} 
-                                                                                        className="w-12 text-[10px] p-1 border rounded" 
-                                                                                    />
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center justify-between">
+                                                                                        <label className="text-[10px] font-bold text-gray-400 uppercase">Espessura</label>
+                                                                                        <span className="text-[9.5px] font-mono text-indigo-600 font-bold">
+                                                                                            {formatStrokeReadout(selectedElement.style.plannerDayBox?.headerBorderWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center justify-end">
+                                                                                        <input 
+                                                                                            type="number" 
+                                                                                            min="0" 
+                                                                                            max="5" 
+                                                                                            step="0.05" 
+                                                                                            value={selectedElement.style.plannerDayBox?.headerBorderWidth ?? 1} 
+                                                                                            onChange={(e) => {
+                                                                                                const val = parseFloat(e.target.value);
+                                                                                                updateElementStyle(selectedElement.id, { 
+                                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, headerBorderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 } 
+                                                                                                });
+                                                                                            }} 
+                                                                                            className="w-16 text-[10px] p-1 border rounded text-center font-mono" 
+                                                                                        />
+                                                                                    </div>
                                                                                 </div>
                                                                                 <select 
                                                                                     value={selectedElement.style.plannerDayBox?.headerBorderStyle || 'solid'} 
@@ -18594,14 +18758,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                                         <label className="block text-[9px] font-bold text-gray-500 uppercase">Fonte</label>
                                                                                         <select
                                                                                             value={selectedElement.style.plannerDayBox?.holidayFontFamily || selectedElement.style.plannerDayBox?.headerFontFamily || 'Inter'}
-                                                                                            onChange={(e) => updateElementStyle(selectedElement.id, {
-                                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, holidayFontFamily: e.target.value }
-                                                                                            })}
+                                                                                            onChange={async (e) => {
+                                                                                                const newFont = e.target.value;
+                                                                                                updateElementStyle(selectedElement.id, {
+                                                                                                    plannerDayBox: { ...selectedElement.style.plannerDayBox, holidayFontFamily: newFont }
+                                                                                                });
+                                                                                                await ensureFontLoaded(newFont);
+                                                                                            }}
                                                                                             className="w-full text-xs p-1 border rounded bg-white"
                                                                                         >
-                                                                                            {AVAILABLE_FONTS.map(font => (
-                                                                                                <option key={font} value={font}>{font}</option>
-                                                                                            ))}
+                                                                                            {(() => {
+                                                                                                const cur = selectedElement.style.plannerDayBox?.holidayFontFamily || selectedElement.style.plannerDayBox?.headerFontFamily;
+                                                                                                const curLow = cur?.trim().toLowerCase();
+                                                                                                const listed = !curLow || AVAILABLE_FONTS.some(f => f.toLowerCase() === curLow) || allSystemFonts.some(f => f.toLowerCase() === curLow) || customFonts.some(f => f.toLowerCase() === curLow);
+                                                                                                if (listed || !cur) return null;
+                                                                                                return (
+                                                                                                    <optgroup label="Fonte Atual do Projeto">
+                                                                                                        <option value={cur} style={{ fontFamily: getSafeFontFamily(cur) }}>{cur}</option>
+                                                                                                    </optgroup>
+                                                                                                );
+                                                                                            })()}
+                                                                                            <optgroup label="Padrão">
+                                                                                                {AVAILABLE_FONTS.map(font => (
+                                                                                                    <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
+                                                                                                ))}
+                                                                                            </optgroup>
+                                                                                            <optgroup label={`Fontes do Computador (${allSystemFonts.length})`}>
+                                                                                                {allSystemFonts.map(font => (
+                                                                                                    <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
+                                                                                                ))}
+                                                                                            </optgroup>
+                                                                                            {customFonts.length > 0 && (
+                                                                                                <optgroup label="Minhas Fontes">
+                                                                                                    {customFonts.map(font => (
+                                                                                                        <option key={font} value={font} style={{ fontFamily: getSafeFontFamily(font) }}>{font}</option>
+                                                                                                    ))}
+                                                                                                </optgroup>
+                                                                                            )}
                                                                                         </select>
                                                                                     </div>
                                                                                 </div>
@@ -18624,19 +18817,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     className="w-8 h-6 p-0 border-0 cursor-pointer rounded"
                                                                 />
                                                             </div>
-                                                            <div className="flex items-center justify-between">
-                                                                <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura ({selectedElement.style.plannerDayBox?.strokeWidth || 0.5})</label>
-                                                                <input 
-                                                                    type="range" 
-                                                                    min="0.1" 
-                                                                    max="3" 
-                                                                    step="0.1" 
-                                                                    value={selectedElement.style.plannerDayBox?.strokeWidth || 0.5} 
-                                                                    onChange={(e) => updateElementStyle(selectedElement.id, { 
-                                                                        plannerDayBox: { ...selectedElement.style.plannerDayBox, strokeWidth: parseFloat(e.target.value) } 
-                                                                    })} 
-                                                                    className="w-24" 
-                                                                />
+                                                            <div className="space-y-1">
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura das Linhas</label>
+                                                                    <span className="text-[9.5px] font-mono text-indigo-600 font-bold">
+                                                                        {formatStrokeReadout(selectedElement.style.plannerDayBox?.strokeWidth ?? 0.5, PAGE_WIDTH_MM)}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <input 
+                                                                        type="range" 
+                                                                        min="0" 
+                                                                        max="3" 
+                                                                        step="0.05" 
+                                                                        value={selectedElement.style.plannerDayBox?.strokeWidth ?? 0.5} 
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            updateElementStyle(selectedElement.id, { 
+                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, strokeWidth: Number.isFinite(val) ? Math.max(0, val) : 0 } 
+                                                                            });
+                                                                        }} 
+                                                                        className="flex-1" 
+                                                                    />
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="5"
+                                                                        step="0.05"
+                                                                        value={selectedElement.style.plannerDayBox?.strokeWidth ?? 0.5}
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            updateElementStyle(selectedElement.id, {
+                                                                                plannerDayBox: { ...selectedElement.style.plannerDayBox, strokeWidth: Number.isFinite(val) ? Math.max(0, val) : 0 }
+                                                                            });
+                                                                        }}
+                                                                        className="w-14 text-xs p-1 border rounded text-center font-mono"
+                                                                    />
+                                                                </div>
                                                             </div>
                                                             <div className="space-y-1">
                                                                 <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo do Traço</label>
@@ -18761,18 +18978,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 />
                                                             </div>
                                                             <div>
-                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Espessura Marcador</label>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-0.5 uppercase">Espessura Marcador</label>
+                                                                <span className="block text-[9px] font-mono text-indigo-600 mb-1">
+                                                                    {formatStrokeReadout(selectedElement.style.habitMarkerStroke ?? 1.5, PAGE_WIDTH_MM)}
+                                                                </span>
                                                                 <input 
                                                                     type="number" 
                                                                     min="0" 
                                                                     max="10" 
-                                                                    step="0.1" 
+                                                                    step="0.05" 
                                                                     value={selectedElement.style.habitMarkerStroke ?? 1.5} 
                                                                     onChange={(e) => {
                                                                         const val = parseFloat(e.target.value);
                                                                         updateElementStyle(selectedElement.id, { habitMarkerStroke: Number.isFinite(val) ? Math.max(0, val) : 0 });
                                                                     }} 
-                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded" 
+                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded font-mono" 
                                                                 />
                                                             </div>
                                                         </div>
@@ -18793,18 +19013,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 />
                                                             </div>
                                                             <div>
-                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Espessura Linha</label>
+                                                                <label className="block text-[10px] font-bold text-gray-500 mb-0.5 uppercase">Espessura Linha</label>
+                                                                <span className="block text-[9px] font-mono text-indigo-600 mb-1">
+                                                                    {formatStrokeReadout(selectedElement.style.habitLineWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                </span>
                                                                 <input 
                                                                     type="number" 
                                                                     min="0" 
                                                                     max="10" 
-                                                                    step="0.1" 
+                                                                    step="0.05" 
                                                                     value={selectedElement.style.habitLineWidth ?? 1} 
                                                                     onChange={(e) => {
                                                                         const val = parseFloat(e.target.value);
                                                                         updateElementStyle(selectedElement.id, { habitLineWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
                                                                     }} 
-                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded" 
+                                                                    className="w-full text-xs p-1.5 border border-gray-200 rounded font-mono" 
                                                                 />
                                                             </div>
                                                         </div>
@@ -19146,15 +19369,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                     />
                                                                 </div>
                                                                 <div>
-                                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Traço (px)</label>
+                                                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Traço (ícones/linha)</label>
                                                                     <input
                                                                         type="number"
-                                                                        min="0.5"
+                                                                        min="0"
                                                                         max="4"
-                                                                        step="0.2"
-                                                                        value={ft.strokeWidth || 1.2}
-                                                                        onChange={(e) => updateTracker({ strokeWidth: parseFloat(e.target.value) || 1.2 })}
-                                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded"
+                                                                        step="0.05"
+                                                                        value={ft.strokeWidth ?? 1.2}
+                                                                        onChange={(e) => {
+                                                                            const val = parseFloat(e.target.value);
+                                                                            updateTracker({ strokeWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                        }}
+                                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded font-mono"
                                                                     />
                                                                 </div>
                                                             </div>
@@ -19276,40 +19502,102 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                                 </div>
 
                                                                 {ft.showBox && (
-                                                                    <div className="grid grid-cols-3 gap-2">
-                                                                        <div>
-                                                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Fundo</label>
-                                                                            <div className="flex h-7 border border-gray-200 rounded overflow-hidden">
+                                                                    <div className="space-y-2">
+                                                                        <div className="grid grid-cols-3 gap-2">
+                                                                            <div>
+                                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Fundo</label>
+                                                                                <div className="flex h-7 border border-gray-200 rounded overflow-hidden">
+                                                                                    <input
+                                                                                        type="color"
+                                                                                        value={ft.boxBackgroundColor || '#f8fafc'}
+                                                                                        onChange={(e) => updateTracker({ boxBackgroundColor: e.target.value })}
+                                                                                        className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                                    />
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Borda</label>
+                                                                                <div className="flex h-7 border border-gray-200 rounded overflow-hidden">
+                                                                                    <input
+                                                                                        type="color"
+                                                                                        value={ft.boxBorderColor || '#e2e8f0'}
+                                                                                        onChange={(e) => updateTracker({ boxBorderColor: e.target.value })}
+                                                                                        className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                                    />
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Raio (px)</label>
                                                                                 <input
-                                                                                    type="color"
-                                                                                    value={ft.boxBackgroundColor || '#f8fafc'}
-                                                                                    onChange={(e) => updateTracker({ boxBackgroundColor: e.target.value })}
-                                                                                    className="w-full h-full p-0 border-0 cursor-pointer"
+                                                                                    type="number"
+                                                                                    min="0"
+                                                                                    max="20"
+                                                                                    value={ft.boxBorderRadius !== undefined ? ft.boxBorderRadius : 6}
+                                                                                    onChange={(e) => updateTracker({ boxBorderRadius: parseInt(e.target.value) || 0 })}
+                                                                                    className="w-full text-xs p-1 border border-gray-200 rounded"
                                                                                 />
                                                                             </div>
                                                                         </div>
-                                                                        <div>
-                                                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Borda</label>
-                                                                            <div className="flex h-7 border border-gray-200 rounded overflow-hidden">
-                                                                                <input
-                                                                                    type="color"
-                                                                                    value={ft.boxBorderColor || '#e2e8f0'}
-                                                                                    onChange={(e) => updateTracker({ boxBorderColor: e.target.value })}
-                                                                                    className="w-full h-full p-0 border-0 cursor-pointer"
-                                                                                />
+                                                                        <div className="flex items-center justify-between gap-2">
+                                                                            <div>
+                                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase">Espessura Borda</label>
+                                                                                <span className="text-[9px] font-mono text-indigo-600 font-bold">
+                                                                                    {formatStrokeReadout(ft.boxBorderWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                                </span>
                                                                             </div>
-                                                                        </div>
-                                                                        <div>
-                                                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Raio (px)</label>
                                                                             <input
                                                                                 type="number"
                                                                                 min="0"
-                                                                                max="20"
-                                                                                value={ft.boxBorderRadius !== undefined ? ft.boxBorderRadius : 6}
-                                                                                onChange={(e) => updateTracker({ boxBorderRadius: parseInt(e.target.value) || 0 })}
-                                                                                className="w-full text-xs p-1 border border-gray-200 rounded"
+                                                                                max="10"
+                                                                                step="0.05"
+                                                                                value={ft.boxBorderWidth ?? 1}
+                                                                                onChange={(e) => {
+                                                                                    const val = parseFloat(e.target.value);
+                                                                                    updateTracker({ boxBorderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                                }}
+                                                                                className="w-20 text-xs p-1 border border-gray-200 rounded text-center font-mono"
                                                                             />
                                                                         </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Linha Divisória Superior */}
+                                                            <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                                <div className="flex items-center justify-between">
+                                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Linha Superior</label>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => updateTracker({ showTopDivider: !ft.showTopDivider })}
+                                                                        className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition-colors ${
+                                                                            ft.showTopDivider
+                                                                                ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
+                                                                                : 'bg-white border-gray-200 text-gray-500'
+                                                                        }`}
+                                                                    >
+                                                                        {ft.showTopDivider ? 'Ativada' : 'Desativada'}
+                                                                    </button>
+                                                                </div>
+                                                                {ft.showTopDivider && (
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <div>
+                                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Espessura Linha</label>
+                                                                            <span className="text-[9px] font-mono text-indigo-600 font-bold">
+                                                                                {formatStrokeReadout(ft.topDividerWidth ?? 1, PAGE_WIDTH_MM)}
+                                                                            </span>
+                                                                        </div>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            max="10"
+                                                                            step="0.05"
+                                                                            value={ft.topDividerWidth ?? 1}
+                                                                            onChange={(e) => {
+                                                                                const val = parseFloat(e.target.value);
+                                                                                updateTracker({ topDividerWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                            }}
+                                                                            className="w-20 text-xs p-1 border border-gray-200 rounded text-center font-mono"
+                                                                        />
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -21383,6 +21671,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                             {selectedElement.type === 'note_grid' && (
                                                 <div className="space-y-3 pt-3 border-t border-gray-100">
                                                     <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Configuração do Grid de Notas</h4>
+                                                    <div className="bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-100 space-y-1.5">
+                                                        <label className="block text-[10px] font-bold text-indigo-900 uppercase">Área de Cobertura</label>
+                                                        <div className="grid grid-cols-1 gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const isEvenGridPage = Boolean(config.mirrorEvenPages && (getCurrentEditorPageNumber() % 2 === 0));
+                                                                    const bounds = getFullPageBoundsForParity(isEvenGridPage);
+                                                                    updateActiveElements(getActiveElements().map(item =>
+                                                                        item.id === selectedElement.id
+                                                                            ? { ...item, ...bounds, style: { ...item.style, coverFullPage: true } }
+                                                                            : item
+                                                                    ));
+                                                                }}
+                                                                className={`w-full py-1.5 px-2 rounded-md border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                                                    selectedElement.style?.coverFullPage
+                                                                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                                                                        : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+                                                                }`}
+                                                            >
+                                                                <Maximize2 className="w-3 h-3" />
+                                                                <span>Cobrir Página Inteira (Sem Margens)</span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    updateActiveElements(getActiveElements().map(item =>
+                                                                        item.id === selectedElement.id
+                                                                            ? { ...item, x: 0, y: 0, w: 100, h: 100, style: { ...item.style, coverFullPage: false } }
+                                                                            : item
+                                                                    ));
+                                                                }}
+                                                                className={`w-full py-1.5 px-2 rounded-md border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                                                    !selectedElement.style?.coverFullPage && Math.abs(selectedElement.x) < 0.2 && Math.abs(selectedElement.y) < 0.2 && Math.abs(selectedElement.w - 100) < 0.2 && Math.abs(selectedElement.h - 100) < 0.2
+                                                                        ? 'bg-slate-700 text-white border-slate-800 shadow-2xs'
+                                                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                                                }`}
+                                                            >
+                                                                <Minimize2 className="w-3 h-3" />
+                                                                <span>Ajustar às Margens Úteis</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                     <div className="space-y-1">
                                                         <label className="block text-[10px] font-bold text-gray-500 uppercase">Estilo</label>
                                                         <select 
@@ -21408,19 +21739,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-mono" 
                                                         />
                                                     </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <label className="text-[10px] font-bold text-gray-500 uppercase">
-                                                            {selectedElement.style.variant === 'squared' ? 'Espessura da Linha' : 'Tamanho do Ponto'}
-                                                        </label>
-                                                        <input 
-                                                            type="number" 
-                                                            min="0.2" 
-                                                            max="10" 
-                                                            step="0.2" 
-                                                            value={selectedElement.style.borderWidth !== undefined && selectedElement.style.borderWidth > 0 ? selectedElement.style.borderWidth : 1} 
-                                                            onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 1 })} 
-                                                            className="w-16 text-xs p-1 border border-gray-200 rounded text-center font-mono" 
-                                                        />
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">
+                                                                {selectedElement.style.variant === 'squared' ? 'Espessura da Linha' : 'Diâmetro do Ponto'}
+                                                            </label>
+                                                            <span className="text-[9.5px] font-mono text-indigo-600 font-bold">
+                                                                {formatStrokeReadout(selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 0.75, PAGE_WIDTH_MM)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center justify-end">
+                                                            <input 
+                                                                type="number" 
+                                                                min="0" 
+                                                                max="10" 
+                                                                step="0.05" 
+                                                                value={selectedElement.style.borderWidth !== undefined ? selectedElement.style.borderWidth : 0.75} 
+                                                                onChange={(e) => {
+                                                                    const val = parseFloat(e.target.value);
+                                                                    updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                }} 
+                                                                className="w-20 text-xs p-1 border border-gray-200 rounded text-center font-mono" 
+                                                            />
+                                                        </div>
                                                     </div>
                                                     {selectedElement.style.variant === 'squared' && (
                                                         <div className="flex items-center justify-between">
@@ -22129,30 +22470,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, initialConfig, onLog
                                                             <input type="color" value={selectedElement.style.borderColor || '#000000'} onChange={(e) => updateElementStyle(selectedElement.id, { borderColor: e.target.value })} className="w-8 h-full p-0 border-0 cursor-pointer" />
                                                         </div>
                                                     </div>
-                                                    <div className="space-y-1">
-                                                        <div className="flex items-center justify-between">
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex items-center justify-between gap-1">
                                                             <label className="text-[10px] font-bold text-gray-500 uppercase">Espessura da Borda</label>
-                                                            <span className="text-[10px] font-mono text-gray-400">{(selectedElement.style.borderWidth ?? 1)}px</span>
+                                                            <span className="text-[10px] font-mono text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
+                                                                {formatStrokeReadout(selectedElement.style.borderWidth ?? 1, PAGE_WIDTH_MM)}
+                                                            </span>
                                                         </div>
                                                         <div className="flex items-center gap-2">
                                                             <input 
                                                                 type="range" 
                                                                 min="0" 
                                                                 max="10" 
-                                                                step="0.1" 
+                                                                step="0.05" 
                                                                 value={selectedElement.style.borderWidth ?? 1} 
-                                                                onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
+                                                                onChange={(e) => {
+                                                                    const val = parseFloat(e.target.value);
+                                                                    updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                }} 
                                                                 className="flex-1 accent-indigo-600 h-1.5 bg-gray-200 rounded cursor-pointer" 
                                                             />
                                                             <input 
                                                                 type="number" 
                                                                 min="0" 
                                                                 max="10" 
-                                                                step="0.1" 
+                                                                step="0.05" 
                                                                 value={selectedElement.style.borderWidth ?? 1} 
-                                                                onChange={(e) => updateElementStyle(selectedElement.id, { borderWidth: parseFloat(e.target.value) || 0 })} 
-                                                                className="w-12 text-xs p-1 border rounded text-center font-mono" 
+                                                                onChange={(e) => {
+                                                                    const val = parseFloat(e.target.value);
+                                                                    updateElementStyle(selectedElement.id, { borderWidth: Number.isFinite(val) ? Math.max(0, val) : 0 });
+                                                                }} 
+                                                                className="w-16 text-xs p-1 border rounded text-center font-mono" 
                                                             />
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {STROKE_PT_PRESETS.map(p => (
+                                                                <button
+                                                                    key={`vec-${p.label}`}
+                                                                    type="button"
+                                                                    onClick={() => updateElementStyle(selectedElement.id, { borderWidth: ptToUnit(p.pt, PAGE_WIDTH_MM) })}
+                                                                    className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-300 text-gray-600 hover:text-indigo-700 cursor-pointer"
+                                                                >
+                                                                    {p.label}
+                                                                </button>
+                                                            ))}
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center justify-between font-mono">

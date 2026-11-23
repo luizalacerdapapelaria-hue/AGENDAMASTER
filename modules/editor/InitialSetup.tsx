@@ -3,6 +3,7 @@ import { localStorage } from '../../services/safeStorage';
 import { AgendaConfig, PageSize, PageOrientation, PageMargins, PageLayoutType, Holiday, LayoutElement, ProjectType, CustomTemplateItem, IntroPage } from '../../types';
 import { FileText, BookOpen, BookMarked, ArrowRight, ArrowLeft, Settings, Grid, Columns, Upload, Plus, Trash2, Calendar, ClipboardList, PenTool, LogOut, Lock, Zap, Sparkles, DollarSign, Clock, Wallet, Heart, CheckSquare, Grid3X3, ListTodo, Square, Check, RotateCcw, Star } from 'lucide-react';
 import { importProjectOrTemplates, normalizeImportedProjectConfig } from '../../core/logic/fileSystem';
+import { CURRENT_PROJECT_SCHEMA_VERSION, migrateProjectConfig } from '../../core/logic/projectMigration';
 import { ImageManager } from './utils/imageManager';
 import { isProjectYearRestricted, generateHolidayListFullText, HolidayDateFormat } from '../../core/backend/calendar';
 import { WEEKLY_VERTICAL_LEFT, WEEKLY_VERTICAL_RIGHT, WEEKLY_HORIZONTAL_LEFT, WEEKLY_HORIZONTAL_RIGHT, WEEKLY_ONE_PAGE_VERTICAL, WEEKLY_ONE_PAGE_HORIZONTAL } from './templates/plannerTemplates';
@@ -221,39 +222,48 @@ export const renderObjectiveIcon = (iconName: ObjectiveModelOption['iconName']) 
 };
 
 export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmail, defaultValues, onLogout, userPlan = 'pro' }) => {
-  const [step, setStep] = useState<'type' | 'library' | 'template' | 'config'>(defaultValues ? 'config' : 'type');
-  const [projectType, setProjectType] = useState<ProjectType | null>(defaultValues?.projectType || null);
+  const migratedDefaults = React.useMemo<AgendaConfig | undefined>(() => {
+    if (!defaultValues) return undefined;
+    try {
+      return migrateProjectConfig(defaultValues);
+    } catch (_) {
+      return defaultValues as AgendaConfig;
+    }
+  }, [defaultValues]);
+
+  const [step, setStep] = useState<'type' | 'library' | 'template' | 'config'>(migratedDefaults ? 'config' : 'type');
+  const [projectType, setProjectType] = useState<ProjectType | null>(migratedDefaults?.projectType || null);
   const [templateCategory, setTemplateCategory] = useState<'intro' | 'planner'>('intro');
   const [plannerStyle, setPlannerStyle] = useState<'blank' | 'lines' | 'dots' | 'grid' | 'timetable'>('lines');
   const [selectedIntroTemplate, setSelectedIntroTemplate] = useState<string | null>(null);
   const [selectedTemplateElements, setSelectedTemplateElements] = useState<LayoutElement[] | null>(null);
-  const [useStandardAgendaModel, setUseStandardAgendaModel] = useState<boolean>(!defaultValues);
+  const [useStandardAgendaModel, setUseStandardAgendaModel] = useState<boolean>(!migratedDefaults);
   const [selectedLibraryItemId, setSelectedLibraryItemId] = useState<string>('agenda-padrao-completa');
   const [variationCategoryFilter, setVariationCategoryFilter] = useState<string>('all');
   const [isSelectionExplicit, setIsSelectionExplicit] = useState(false);
-  const [projectName, setProjectName] = useState(defaultValues?.name || 'Meu Novo Projeto');
-  const [year, setYear] = useState(defaultValues?.year || new Date().getFullYear() + 1);
-  const [pageSize, setPageSize] = useState<PageSize>(defaultValues?.pageSize || 'A5');
-  const [customWidth, setCustomWidth] = useState(defaultValues?.customPageSize?.width || 148);
-  const [customHeight, setCustomHeight] = useState(defaultValues?.customPageSize?.height || 210);
-  const [orientation, setOrientation] = useState<PageOrientation>(defaultValues?.orientation || 'portrait');
-  const [margins, setMargins] = useState<PageMargins>(defaultValues?.margins || { top: 15, bottom: 15, inside: 15, outside: 15 });
-  const [mirrorEvenPages, setMirrorEvenPages] = useState(defaultValues?.mirrorEvenPages ?? true);
-  const [mirrorContentOnVerso, setMirrorContentOnVerso] = useState<boolean>(defaultValues?.mirrorContentOnVerso ?? false);
-  const [customVerso, setCustomVerso] = useState(defaultValues?.customVerso ?? false);
-  const [versoAdvancesSequence, setVersoAdvancesSequence] = useState<boolean>(defaultValues?.versoAdvancesSequence ?? true);
-  const [layoutType, setLayoutType] = useState<PageLayoutType>(defaultValues?.layoutType || '1_per_page');
-  const [municipalHolidays, setMunicipalHolidays] = useState<Holiday[]>(defaultValues?.municipalHolidays || []);
-  const [startMonth, setStartMonth] = useState<number>(defaultValues?.startMonth ?? 0);
-  const [durationMonths, setDurationMonths] = useState<number>(defaultValues?.durationMonths ?? 12);
+  const [projectName, setProjectName] = useState(migratedDefaults?.name || 'Meu Novo Projeto');
+  const [year, setYear] = useState(migratedDefaults?.year || new Date().getFullYear() + 1);
+  const [pageSize, setPageSize] = useState<PageSize>(migratedDefaults?.pageSize || 'A5');
+  const [customWidth, setCustomWidth] = useState(migratedDefaults?.customPageSize?.width || 148);
+  const [customHeight, setCustomHeight] = useState(migratedDefaults?.customPageSize?.height || 210);
+  const [orientation, setOrientation] = useState<PageOrientation>(migratedDefaults?.orientation || 'portrait');
+  const [margins, setMargins] = useState<PageMargins>(migratedDefaults?.margins || { top: 15, bottom: 15, inside: 15, outside: 15 });
+  const [mirrorEvenPages, setMirrorEvenPages] = useState(migratedDefaults?.mirrorEvenPages ?? true);
+  const [mirrorContentOnVerso, setMirrorContentOnVerso] = useState<boolean>(migratedDefaults?.mirrorContentOnVerso ?? false);
+  const [customVerso, setCustomVerso] = useState(migratedDefaults?.customVerso ?? false);
+  const [versoAdvancesSequence, setVersoAdvancesSequence] = useState<boolean>(migratedDefaults?.versoAdvancesSequence ?? true);
+  const [layoutType, setLayoutType] = useState<PageLayoutType>(migratedDefaults?.layoutType || '1_per_page');
+  const [municipalHolidays, setMunicipalHolidays] = useState<Holiday[]>(migratedDefaults?.municipalHolidays || []);
+  const [startMonth, setStartMonth] = useState<number>(migratedDefaults?.startMonth ?? 0);
+  const [durationMonths, setDurationMonths] = useState<number>(migratedDefaults?.durationMonths ?? 12);
 
-  const [isPermanent, setIsPermanent] = useState<boolean>(defaultValues?.isPermanent ?? false);
-  const [permanentPageCount, setPermanentPageCount] = useState<number>(defaultValues?.pageCount || 365);
-  const [startMonthOnRightPage, setStartMonthOnRightPage] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.startMonthOnRightPage ?? false) : (defaultValues?.startMonthOnRightPage ?? true));
-  const [includeMonthlyDividers, setIncludeMonthlyDividers] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.includeMonthlyDividers ?? false) : (defaultValues?.includeMonthlyDividers ?? true));
-  const [includeMonthlyIntroPages, setIncludeMonthlyIntroPages] = useState<boolean>(defaultValues?.isPermanent ? (defaultValues?.includeMonthlyIntroPages ?? false) : (defaultValues?.includeMonthlyIntroPages ?? true));
-  const [fillerPageContent, setFillerPageContent] = useState<string>(defaultValues?.fillerPageContent ?? 'blank');
-  const [monthlyDividerVersoContent, setMonthlyDividerVersoContent] = useState<string>(defaultValues?.monthlyDividerVersoContent ?? 'blank');
+  const [isPermanent, setIsPermanent] = useState<boolean>(migratedDefaults?.isPermanent ?? false);
+  const [permanentPageCount, setPermanentPageCount] = useState<number>(migratedDefaults?.pageCount || 365);
+  const [startMonthOnRightPage, setStartMonthOnRightPage] = useState<boolean>(migratedDefaults ? (migratedDefaults.startMonthOnRightPage ?? true) : true);
+  const [includeMonthlyDividers, setIncludeMonthlyDividers] = useState<boolean>(migratedDefaults ? (migratedDefaults.includeMonthlyDividers ?? true) : true);
+  const [includeMonthlyIntroPages, setIncludeMonthlyIntroPages] = useState<boolean>(migratedDefaults ? (migratedDefaults.includeMonthlyIntroPages ?? true) : true);
+  const [fillerPageContent, setFillerPageContent] = useState<string>(migratedDefaults?.fillerPageContent ?? 'blank');
+  const [monthlyDividerVersoContent, setMonthlyDividerVersoContent] = useState<string>(migratedDefaults?.monthlyDividerVersoContent ?? 'blank');
 
   const storedCustomQuotes = React.useMemo<string[]>(() => {
     try {
@@ -269,53 +279,53 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
   }, []);
 
   useEffect(() => {
-      if (defaultValues) {
-          if (defaultValues.name) setProjectName(defaultValues.name);
-          if (defaultValues.year) setYear(defaultValues.year);
-          if (defaultValues.isPermanent !== undefined) {
-              setIsPermanent(defaultValues.isPermanent);
-              if (defaultValues.isPermanent) {
+      if (migratedDefaults) {
+          if (migratedDefaults.name) setProjectName(migratedDefaults.name);
+          if (migratedDefaults.year) setYear(migratedDefaults.year);
+          if (migratedDefaults.isPermanent !== undefined) {
+              setIsPermanent(migratedDefaults.isPermanent);
+              if (migratedDefaults.isPermanent) {
                   setSelectedLibraryItemId('agenda-permanente');
               }
           }
-          if (defaultValues.pageCount !== undefined && defaultValues.pageCount > 0) {
-              setPermanentPageCount(defaultValues.pageCount);
+          if (migratedDefaults.pageCount !== undefined && migratedDefaults.pageCount > 0) {
+              setPermanentPageCount(migratedDefaults.pageCount);
           }
-          if (defaultValues.startMonth !== undefined) setStartMonth(defaultValues.startMonth);
-          if (defaultValues.durationMonths !== undefined) setDurationMonths(defaultValues.durationMonths);
-          if (defaultValues.pageSize) setPageSize(defaultValues.pageSize);
-          if (defaultValues.customPageSize) {
-              setCustomWidth(defaultValues.customPageSize.width);
-              setCustomHeight(defaultValues.customPageSize.height);
+          if (migratedDefaults.startMonth !== undefined) setStartMonth(migratedDefaults.startMonth);
+          if (migratedDefaults.durationMonths !== undefined) setDurationMonths(migratedDefaults.durationMonths);
+          if (migratedDefaults.pageSize) setPageSize(migratedDefaults.pageSize);
+          if (migratedDefaults.customPageSize) {
+              setCustomWidth(migratedDefaults.customPageSize.width);
+              setCustomHeight(migratedDefaults.customPageSize.height);
           }
-          if (defaultValues.orientation) setOrientation(defaultValues.orientation);
-          if (defaultValues.margins) setMargins(defaultValues.margins);
-          if (defaultValues.mirrorEvenPages !== undefined) setMirrorEvenPages(defaultValues.mirrorEvenPages);
-          if (defaultValues.mirrorContentOnVerso !== undefined) setMirrorContentOnVerso(defaultValues.mirrorContentOnVerso);
-          if (defaultValues.customVerso !== undefined) setCustomVerso(defaultValues.customVerso);
-          if (defaultValues.versoAdvancesSequence !== undefined) setVersoAdvancesSequence(defaultValues.versoAdvancesSequence);
-          if (defaultValues.startMonthOnRightPage !== undefined) setStartMonthOnRightPage(defaultValues.startMonthOnRightPage);
-          if (defaultValues.includeMonthlyDividers !== undefined) setIncludeMonthlyDividers(defaultValues.includeMonthlyDividers);
-          if (defaultValues.includeMonthlyIntroPages !== undefined) setIncludeMonthlyIntroPages(defaultValues.includeMonthlyIntroPages);
-          if (defaultValues.fillerPageContent !== undefined) setFillerPageContent(defaultValues.fillerPageContent);
-          if (defaultValues.monthlyDividerVersoContent !== undefined) setMonthlyDividerVersoContent(defaultValues.monthlyDividerVersoContent);
-          if (defaultValues.layoutType) {
-              setLayoutType(defaultValues.layoutType);
-              if (['weekly_vertical', 'weekly_horizontal', 'weekly_one_page_vertical', 'weekly_one_page_horizontal'].includes(defaultValues.layoutType)) {
+          if (migratedDefaults.orientation) setOrientation(migratedDefaults.orientation);
+          if (migratedDefaults.margins) setMargins(migratedDefaults.margins);
+          if (migratedDefaults.mirrorEvenPages !== undefined) setMirrorEvenPages(migratedDefaults.mirrorEvenPages);
+          if (migratedDefaults.mirrorContentOnVerso !== undefined) setMirrorContentOnVerso(migratedDefaults.mirrorContentOnVerso);
+          if (migratedDefaults.customVerso !== undefined) setCustomVerso(migratedDefaults.customVerso);
+          if (migratedDefaults.versoAdvancesSequence !== undefined) setVersoAdvancesSequence(migratedDefaults.versoAdvancesSequence);
+          if (migratedDefaults.startMonthOnRightPage !== undefined) setStartMonthOnRightPage(migratedDefaults.startMonthOnRightPage);
+          if (migratedDefaults.includeMonthlyDividers !== undefined) setIncludeMonthlyDividers(migratedDefaults.includeMonthlyDividers);
+          if (migratedDefaults.includeMonthlyIntroPages !== undefined) setIncludeMonthlyIntroPages(migratedDefaults.includeMonthlyIntroPages);
+          if (migratedDefaults.fillerPageContent !== undefined) setFillerPageContent(migratedDefaults.fillerPageContent);
+          if (migratedDefaults.monthlyDividerVersoContent !== undefined) setMonthlyDividerVersoContent(migratedDefaults.monthlyDividerVersoContent);
+          if (migratedDefaults.layoutType) {
+              setLayoutType(migratedDefaults.layoutType);
+              if (['weekly_vertical', 'weekly_horizontal', 'weekly_one_page_vertical', 'weekly_one_page_horizontal'].includes(migratedDefaults.layoutType)) {
                   setProjectType('planner');
-              } else if (defaultValues.layoutType === 'notebook') {
+              } else if (migratedDefaults.layoutType === 'notebook') {
                   setProjectType('notebook');
-              } else if (defaultValues.layoutType === 'devotional') {
+              } else if (migratedDefaults.layoutType === 'devotional') {
                   setProjectType('devotional');
               } else {
                   setProjectType('agenda');
               }
           }
-          if (defaultValues.projectType) setProjectType(defaultValues.projectType);
-          if (defaultValues.municipalHolidays) setMunicipalHolidays(defaultValues.municipalHolidays);
+          if (migratedDefaults.projectType) setProjectType(migratedDefaults.projectType);
+          if (migratedDefaults.municipalHolidays) setMunicipalHolidays(migratedDefaults.municipalHolidays);
           setStep('config');
       }
-  }, [defaultValues]);
+  }, [migratedDefaults]);
 
   const handleProjectTypeSelect = (type: ProjectType) => {
       setImportedTemplatesPack(null);
@@ -657,13 +667,13 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
       const isImportedYearRestricted = isProjectYearRestricted(
         importedConfig.projectType, 
         importedConfig.year || 2027, 
-        importedConfig.startMonth || 0, 
-        importedConfig.durationMonths || 12, 
+        importedConfig.startMonth ?? 0, 
+        importedConfig.durationMonths ?? 12, 
         userPlan,
         Boolean(importedConfig.isPermanent)
       );
 
-      if (isImportedYearRestricted) {
+      if (isImportedYearRestricted && importedConfig.year >= 2028) {
           importedConfig.year = 2027;
           importedConfig.startMonth = 0;
           importedConfig.durationMonths = 12;
@@ -729,6 +739,7 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               : undefined;
 
           onComplete({
+              schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
               name: projectName,
               projectType: finalProjectType,
               year,
@@ -782,9 +793,10 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           return;
       }
       
-      let elements = defaultValues?.elements ? [...defaultValues.elements] : [];
-      let elementsWeeklyLeft: LayoutElement[] | undefined = defaultValues?.elementsWeeklyLeft ? [...defaultValues.elementsWeeklyLeft] : undefined;
-      let elementsWeeklyRight: LayoutElement[] | undefined = defaultValues?.elementsWeeklyRight ? [...defaultValues.elementsWeeklyRight] : undefined;
+      const baseDefaults = migratedDefaults || (defaultValues as Partial<AgendaConfig> | undefined);
+      let elements = baseDefaults?.elements ? [...baseDefaults.elements] : [];
+      let elementsWeeklyLeft: LayoutElement[] | undefined = baseDefaults?.elementsWeeklyLeft ? [...baseDefaults.elementsWeeklyLeft] : undefined;
+      let elementsWeeklyRight: LayoutElement[] | undefined = baseDefaults?.elementsWeeklyRight ? [...baseDefaults.elementsWeeklyRight] : undefined;
 
       const projectTypeChanged = defaultValues && defaultValues.projectType !== projectType;
       const layoutTypeChanged = defaultValues && defaultValues.layoutType !== layoutType;
@@ -916,6 +928,8 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
 
           const finalProjectType = projectType || (layoutType.startsWith('weekly') ? 'planner' : 'agenda');
           onComplete({
+              ...(baseDefaults || {}),
+              schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
               name: projectName,
               projectType: finalProjectType,
               isPermanent: isPermanentAgenda,
@@ -937,27 +951,27 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
                 ? (finalElements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) })))
                 : undefined,
               layoutType: isPermanentAgenda && layoutType === '1_per_page_weekend_shared' ? '1_per_page' : layoutType,
-              weeklyStartMode: defaultValues?.weeklyStartMode ?? 'full_week',
-              showPaddingDaysNumbers: defaultValues?.showPaddingDaysNumbers ?? true,
+              weeklyStartMode: baseDefaults?.weeklyStartMode ?? 'full_week',
+              showPaddingDaysNumbers: baseDefaults?.showPaddingDaysNumbers ?? true,
               includeHolidays: isPermanentAgenda ? false : true,
-              includeMoonPhases: isPermanentAgenda ? false : (defaultValues?.includeMoonPhases ?? true),
+              includeMoonPhases: isPermanentAgenda ? false : (baseDefaults?.includeMoonPhases ?? true),
               includeQuotes: true,
-              quoteCategory: defaultValues?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
-              quoteCustomList: defaultValues?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
+              quoteCategory: baseDefaults?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
+              quoteCustomList: baseDefaults?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
               includeVerses: true,
               municipalHolidays: isPermanentAgenda ? [] : municipalHolidays,
               elements: finalElements,
               elementsSaturday: isPureBlankSelected || isPermanentAgenda ? [] : stdConfig.elementsSaturday,
               elementsSunday: isPureBlankSelected || isPermanentAgenda ? [] : stdConfig.elementsSunday,
-              weekendTransitionConfig: defaultValues?.weekendTransitionConfig ?? stdConfig.weekendTransitionConfig ?? DEFAULT_WEEKEND_TRANSITION_CONFIG,
-              splitWeekendAcrossMonths: defaultValues?.splitWeekendAcrossMonths ?? true,
+              weekendTransitionConfig: baseDefaults?.weekendTransitionConfig ?? stdConfig.weekendTransitionConfig ?? DEFAULT_WEEKEND_TRANSITION_CONFIG,
+              splitWeekendAcrossMonths: baseDefaults?.splitWeekendAcrossMonths ?? true,
               elementsTop: isPureBlankSelected ? [] : stdConfig.elementsTop,
               elementsBottom: isPureBlankSelected ? [] : stdConfig.elementsBottom,
               elementsWeeklyLeft: finalWeeklyLeft,
               elementsWeeklyRight: finalWeeklyRight,
               elementsWeeklyVersoLeft: customVerso ? (finalWeeklyLeft?.map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
               elementsWeeklyVersoRight: customVerso ? (finalWeeklyRight?.map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
-              startMonthOnRightPage: isPermanentAgenda ? startMonthOnRightPage : startMonthOnRightPage,
+              startMonthOnRightPage,
               includeMonthlyDividers: isPureBlankSelected ? false : includeMonthlyDividers,
               includeMonthlyIntroPages: isPureBlankSelected ? false : includeMonthlyIntroPages,
               fillerPageContent,
@@ -965,9 +979,9 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
               monthlyDividerStyle: isPureBlankSelected ? undefined : stdConfig.monthlyDividerStyle,
               monthlyIntroPages: isPureBlankSelected ? [] : stdConfig.monthlyIntroPages,
               introPages: isPureBlankSelected ? [] : (stdConfig.introPages || []),
-              background: defaultValues?.background,
-              backgrounds: defaultValues?.backgrounds,
-              backgroundRules: defaultValues?.backgroundRules
+              background: baseDefaults?.background,
+              backgrounds: baseDefaults?.backgrounds,
+              backgroundRules: baseDefaults?.backgroundRules
           });
           return;
       }
@@ -984,7 +998,21 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           }
       }
 
+      const hasNonZeroMargins =
+        (margins.inside || 0) > 0 ||
+        (margins.outside || 0) > 0 ||
+        (margins.top || 0) > 0 ||
+        (margins.bottom || 0) > 0;
+      const preservedInitialMargins = hasNonZeroMargins
+        ? margins
+        : (baseDefaults?.initialMargins || margins);
+      const preservedBindingMargins = hasNonZeroMargins
+        ? margins
+        : (baseDefaults?.bindingMargins || preservedInitialMargins);
+
       onComplete({
+          ...(baseDefaults || {}),
+          schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
           name: projectName,
           projectType: projectType || 'agenda',
           isPermanent,
@@ -992,65 +1020,73 @@ export const InitialSetup: React.FC<InitialSetupProps> = ({ onComplete, userEmai
           startMonth,
           durationMonths,
           pageCount: (projectType === 'notebook' || projectType === 'devotional')
-              ? (defaultValues?.pageCount || 100)
+              ? (baseDefaults?.pageCount || 100)
               : (isPermanent ? Math.max(10, permanentPageCount || (layoutType === '2_per_page' ? 366 : 365)) : undefined),
           pageSize,
           customPageSize: pageSize === 'Custom' ? { width: Math.max(20, customWidth || 148), height: Math.max(20, customHeight || 210) } : undefined,
           orientation,
           margins,
-          initialMargins: margins,
-          bindingMargins: margins,
+          initialMargins: preservedInitialMargins,
+          bindingMargins: preservedBindingMargins,
           mirrorEvenPages,
           mirrorContentOnVerso,
           customVerso,
           versoAdvancesSequence,
           elementsVerso: customVerso
-            ? ((defaultValues?.elementsVerso && defaultValues.elementsVerso.length > 0 && !layoutTypeChanged)
-                ? defaultValues.elementsVerso
+            ? ((baseDefaults?.elementsVerso && baseDefaults.elementsVerso.length > 0 && !layoutTypeChanged)
+                ? baseDefaults.elementsVerso
                 : elements.map(el => ({ ...el, id: 'verso_' + Math.random().toString(36).substring(2, 9) })))
             : undefined,
           layoutType: isPermanent && layoutType === '1_per_page_weekend_shared' ? '1_per_page' : layoutType,
-          weeklyStartMode: defaultValues?.weeklyStartMode ?? 'full_week',
-          showPaddingDaysNumbers: defaultValues?.showPaddingDaysNumbers ?? true,
-          includeHolidays: isPermanent ? false : (defaultValues?.includeHolidays ?? true),
-          includeMoonPhases: isPermanent ? false : (defaultValues?.includeMoonPhases ?? true),
-          includeQuotes: defaultValues?.includeQuotes ?? true,
-          quoteCategory: defaultValues?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
-          quoteCustomList: defaultValues?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
-          includeVerses: defaultValues?.includeVerses ?? true,
+          weeklyStartMode: baseDefaults?.weeklyStartMode ?? 'full_week',
+          showPaddingDaysNumbers: baseDefaults?.showPaddingDaysNumbers ?? true,
+          includeHolidays: isPermanent ? false : (baseDefaults?.includeHolidays ?? true),
+          includeMoonPhases: isPermanent ? false : (baseDefaults?.includeMoonPhases ?? true),
+          includeQuotes: baseDefaults?.includeQuotes ?? true,
+          quoteCategory: baseDefaults?.quoteCategory || (storedCustomQuotes.length > 0 ? 'custom' : 'feminine_strength'),
+          quoteCustomList: baseDefaults?.quoteCustomList || (storedCustomQuotes.length > 0 ? storedCustomQuotes : undefined),
+          includeVerses: baseDefaults?.includeVerses ?? true,
           municipalHolidays: isPermanent ? [] : municipalHolidays,
           elements,
           elementsTop: isPermanent
-              ? (defaultValues?.elementsTop && defaultValues.elementsTop.length > 0
-                  ? defaultValues.elementsTop
+              ? (baseDefaults?.elementsTop && baseDefaults.elementsTop.length > 0
+                  ? baseDefaults.elementsTop
                   : PERMANENT_2DPP_TOP.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })))
-              : (defaultValues?.elementsTop && defaultValues.elementsTop.length > 0
-                  ? defaultValues.elementsTop
+              : (baseDefaults?.elementsTop && baseDefaults.elementsTop.length > 0
+                  ? baseDefaults.elementsTop
                   : (layoutType === '2_per_page' ? STANDARD_HALF_PAGE_TOP_ELEMENTS.map(el => cloneElementWithNewId(el, year)) : undefined)),
           elementsBottom: isPermanent
-              ? (defaultValues?.elementsBottom && defaultValues.elementsBottom.length > 0
-                  ? defaultValues.elementsBottom
+              ? (baseDefaults?.elementsBottom && baseDefaults.elementsBottom.length > 0
+                  ? baseDefaults.elementsBottom
                   : PERMANENT_2DPP_BOTTOM.map(el => ({ ...el, id: Math.random().toString(36).substr(2, 9) })))
-              : (defaultValues?.elementsBottom && defaultValues.elementsBottom.length > 0
-                  ? defaultValues.elementsBottom
+              : (baseDefaults?.elementsBottom && baseDefaults.elementsBottom.length > 0
+                  ? baseDefaults.elementsBottom
                   : (layoutType === '2_per_page' ? STANDARD_HALF_PAGE_BOTTOM_ELEMENTS.map(el => cloneElementWithNewId(el, year)) : undefined)),
           elementsWeeklyLeft,
           elementsWeeklyRight,
-          elementsWeeklyVersoLeft: customVerso ? (elementsWeeklyLeft?.map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
-          elementsWeeklyVersoRight: customVerso ? (elementsWeeklyRight?.map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) })) || []) : undefined,
+          elementsWeeklyVersoLeft: customVerso
+              ? ((baseDefaults?.elementsWeeklyVersoLeft && baseDefaults.elementsWeeklyVersoLeft.length > 0 && !layoutTypeChanged)
+                  ? baseDefaults.elementsWeeklyVersoLeft
+                  : (elementsWeeklyLeft?.map(el => ({ ...el, id: 'wvl_' + Math.random().toString(36).substring(2, 9) })) || []))
+              : undefined,
+          elementsWeeklyVersoRight: customVerso
+              ? ((baseDefaults?.elementsWeeklyVersoRight && baseDefaults.elementsWeeklyVersoRight.length > 0 && !layoutTypeChanged)
+                  ? baseDefaults.elementsWeeklyVersoRight
+                  : (elementsWeeklyRight?.map(el => ({ ...el, id: 'wvr_' + Math.random().toString(36).substring(2, 9) })) || []))
+              : undefined,
           startMonthOnRightPage,
           includeMonthlyDividers,
           includeMonthlyIntroPages,
           fillerPageContent,
           monthlyDividerVersoContent: monthlyDividerVersoContent as any,
-          monthlyDividerStyle: defaultValues?.monthlyDividerStyle,
-          monthlyIntroPages: defaultValues?.monthlyIntroPages,
-          introPages: defaultValues?.introPages ?? [],
-          weekendTransitionConfig: defaultValues?.weekendTransitionConfig ?? DEFAULT_WEEKEND_TRANSITION_CONFIG,
-          splitWeekendAcrossMonths: defaultValues?.splitWeekendAcrossMonths ?? true,
-          background: defaultValues?.background,
-          backgrounds: defaultValues?.backgrounds,
-          backgroundRules: defaultValues?.backgroundRules
+          monthlyDividerStyle: baseDefaults?.monthlyDividerStyle,
+          monthlyIntroPages: baseDefaults?.monthlyIntroPages,
+          introPages: baseDefaults?.introPages ?? [],
+          weekendTransitionConfig: baseDefaults?.weekendTransitionConfig ?? DEFAULT_WEEKEND_TRANSITION_CONFIG,
+          splitWeekendAcrossMonths: baseDefaults?.splitWeekendAcrossMonths ?? true,
+          background: baseDefaults?.background,
+          backgrounds: baseDefaults?.backgrounds,
+          backgroundRules: baseDefaults?.backgroundRules
       });
   };
 

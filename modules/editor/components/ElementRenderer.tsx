@@ -33,6 +33,7 @@ interface ElementRendererProps {
   municipalHolidays?: Holiday[];
   calendarIndex?: number;
   isWeekly?: boolean;
+  fontRefreshVersion?: number;
 }
 
 const getShiftedDayData = (baseDay: DayData, offset: number, municipalHolidays: Holiday[] = []): DayData => {
@@ -61,7 +62,7 @@ const getShiftedDayData = (baseDay: DayData, offset: number, municipalHolidays: 
     };
 };
 
-const scaleStyle = (style: any, scaleFactor: number) => {
+const scaleStyle = (style: any, scaleFactor: number, elementType?: string) => {
     if (!style) return style;
     const scaled = { ...style };
     
@@ -79,7 +80,8 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     if (typeof style.textStrokeWidth === 'number') {
         scaled.textStrokeWidth = style.textStrokeWidth * scaleFactor;
     }
-    if (typeof style.borderWidth === 'number') {
+    // Lucide icon SVGs use fixed viewBox="0 0 24 24" with size="100%", so container width already scales strokeWidth
+    if (typeof style.borderWidth === 'number' && elementType !== 'icon') {
         scaled.borderWidth = style.borderWidth * scaleFactor;
     }
     if (typeof style.borderRadius === 'number') {
@@ -106,11 +108,16 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     if (typeof style.gridSize === 'number') {
         scaled.gridSize = style.gridSize * scaleFactor;
     }
+    if (typeof style.gridSpacing === 'number') {
+        scaled.gridSpacing = style.gridSpacing * scaleFactor;
+    }
     
     // Scale plannerDayBox configurations
     if (style.plannerDayBox) {
         scaled.plannerDayBox = {
             ...style.plannerDayBox,
+            lineSpacing: typeof style.plannerDayBox.lineSpacing === 'number' ? style.plannerDayBox.lineSpacing * scaleFactor : style.plannerDayBox.lineSpacing,
+            gridSpacing: typeof style.plannerDayBox.gridSpacing === 'number' ? style.plannerDayBox.gridSpacing * scaleFactor : style.plannerDayBox.gridSpacing,
             headerBorderWidth: typeof style.plannerDayBox.headerBorderWidth === 'number' ? style.plannerDayBox.headerBorderWidth * scaleFactor : style.plannerDayBox.headerBorderWidth,
             strokeWidth: typeof style.plannerDayBox.strokeWidth === 'number' ? style.plannerDayBox.strokeWidth * scaleFactor : style.plannerDayBox.strokeWidth,
             textStrokeWidth: typeof style.plannerDayBox.textStrokeWidth === 'number' ? style.plannerDayBox.textStrokeWidth * scaleFactor : style.plannerDayBox.textStrokeWidth,
@@ -119,14 +126,16 @@ const scaleStyle = (style: any, scaleFactor: number) => {
     }
 
     // Scale footerTracker configurations
+    // Note: footerTracker.strokeWidth is defined for 24x24 SVG icons which already scale via itemSize;
+    // FooterTrackers.tsx multiplies by scaleFactor only for direct CSS pixel lines (sleep circles, gratitude line).
     if (style.footerTracker) {
         scaled.footerTracker = {
             ...style.footerTracker,
             itemSize: typeof style.footerTracker.itemSize === 'number' ? style.footerTracker.itemSize * scaleFactor : style.footerTracker.itemSize,
             spacing: typeof style.footerTracker.spacing === 'number' ? style.footerTracker.spacing * scaleFactor : style.footerTracker.spacing,
-            strokeWidth: typeof style.footerTracker.strokeWidth === 'number' ? style.footerTracker.strokeWidth * scaleFactor : style.footerTracker.strokeWidth,
-            boxPadding: typeof style.footerTracker.boxPadding === style.footerTracker.boxPadding && typeof style.footerTracker.boxPadding === 'number' ? style.footerTracker.boxPadding * scaleFactor : style.footerTracker.boxPadding,
+            boxPadding: typeof style.footerTracker.boxPadding === 'number' ? style.footerTracker.boxPadding * scaleFactor : style.footerTracker.boxPadding,
             boxBorderWidth: typeof style.footerTracker.boxBorderWidth === 'number' ? style.footerTracker.boxBorderWidth * scaleFactor : style.footerTracker.boxBorderWidth,
+            topDividerWidth: typeof style.footerTracker.topDividerWidth === 'number' ? style.footerTracker.topDividerWidth * scaleFactor : style.footerTracker.topDividerWidth,
             boxBorderRadius: typeof style.footerTracker.boxBorderRadius === 'number' ? style.footerTracker.boxBorderRadius * scaleFactor : style.footerTracker.boxBorderRadius,
         };
     }
@@ -264,6 +273,7 @@ const scaleStyle = (style: any, scaleFactor: number) => {
 const areEqual = (prevProps: any, nextProps: any) => {
   if (prevProps.isEditor !== nextProps.isEditor) return false;
   if (prevProps.isSelected !== nextProps.isSelected) return false;
+  if (prevProps.fontRefreshVersion !== nextProps.fontRefreshVersion) return false;
   if (prevProps.pageWidth !== nextProps.pageWidth) return false;
   if (prevProps.pageHeight !== nextProps.pageHeight) return false;
   if (prevProps.quote !== nextProps.quote) return false;
@@ -315,7 +325,7 @@ export const ElementRenderer: React.FC<ElementRendererProps & { pageHeight: numb
 
   const scaledElement = {
       ...element,
-      style: scaleStyle(element.style, scaleFactor)
+      style: scaleStyle(element.style, scaleFactor, element.type)
   };
 
   const scaledGlobalCalendarStyle = props.globalCalendarStyle 

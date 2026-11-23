@@ -1,10 +1,43 @@
 
-import React from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { BaseElementProps } from './types';
 import { getVectorShapeById, getSvgPathBounds } from './vectorShapesData';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { ensureFontLoaded, getSafeFontFamily } from '../../../../core/logic/fontDetector';
+import { getDashArray, transformSvgPathToBox } from '../../../../core/logic/strokeScale';
 
 export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, style, pageHeight, pageWidth }) => {
+    const reactId = useId();
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [measuredSize, setMeasuredSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+    useLayoutEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const measure = () => {
+            const w = el.clientWidth;
+            const h = el.clientHeight;
+            if (w > 0 && h > 0) {
+                setMeasuredSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+            }
+        };
+        measure();
+        const obs = new ResizeObserver(measure);
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [element.w, element.h, pageWidth, pageHeight, element.type]);
+
+    useEffect(() => {
+        if (style?.fontFamily) {
+            ensureFontLoaded(style.fontFamily);
+        }
+    }, [style?.fontFamily]);
+
+    const scaleFactor = (pageWidth || 400) / 400;
+    const fallbackW = Math.max(1, ((element.w || 10) / 100) * (pageWidth || 400));
+    const fallbackH = Math.max(1, ((element.h || 10) / 100) * (pageHeight || 567));
+    const boxW = measuredSize.w > 0 ? measuredSize.w : fallbackW;
+    const boxH = measuredSize.h > 0 ? measuredSize.h : fallbackH;
     
     const getBackgroundStyle = () => {
         if (style.backgroundType === 'gradient' && style.gradientColors) {
@@ -29,55 +62,38 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
     };
 
     if (element.type === 'lines') {
-        const scaleFactor = (pageWidth || 400) / 400;
         const rawBorderW = style.borderWidth !== undefined ? Number(style.borderWidth) : (1 * scaleFactor);
-        const borderWidthVal = Number.isFinite(rawBorderW) && rawBorderW >= 0 ? (rawBorderW <= 0 ? 0 : Math.round(rawBorderW * 100) / 100) : (1 * scaleFactor);
+        const borderWidthVal = Number.isFinite(rawBorderW) && rawBorderW >= 0 ? (rawBorderW <= 0 ? 0 : Math.round(rawBorderW * 1000) / 1000) : (1 * scaleFactor);
         const borderStyleVal = style.borderStyle || 'solid';
         const isVertical = element.w < element.h && element.w < 2;
-        const isSingleLine = !style.showTimes && (isVertical || element.h < 3 || (style.lineSpacing && element.h / 100 * pageHeight <= style.lineSpacing));
-        const isSolid = borderStyleVal === 'solid' || !borderStyleVal;
-        const dashArray = borderStyleVal === 'dashed' ? '5,5' : (borderStyleVal === 'dotted' ? `${borderWidthVal},${borderWidthVal * 2}` : 'none');
+        const isSingleLine = !style.showTimes && (isVertical || element.h < 3 || (style.lineSpacing && (element.h / 100) * pageHeight <= style.lineSpacing));
+        const dashArray = getDashArray(borderStyleVal, borderWidthVal, scaleFactor);
         const strokeColor = style.hideLines ? 'transparent' : (style.borderColor || style.color || '#d1d5db');
         
         if (isSingleLine) {
-            if (isSolid) {
-                return (
-                    <div className="w-full h-full flex items-center justify-center">
-                        <div 
-                            style={isVertical ? {
-                                width: `${borderWidthVal}px`,
-                                height: '100%',
-                                backgroundColor: strokeColor
-                            } : {
-                                width: '100%',
-                                height: `${borderWidthVal}px`,
-                                backgroundColor: strokeColor
-                            }}
-                        />
-                    </div>
-                );
+            if (borderWidthVal <= 0) {
+                return <div ref={containerRef} className="w-full h-full" />;
             }
             return (
-                <div className="w-full h-full flex items-center justify-center">
-                    <svg className="w-full h-full overflow-visible" style={{ shapeRendering: 'crispEdges' }}>
+                <div ref={containerRef} className="w-full h-full flex items-center justify-center">
+                    <svg className="w-full h-full overflow-visible">
                         <line 
-                            x1={isVertical ? "50%" : "0"} 
-                            y1={isVertical ? "0" : "50%"} 
-                            x2={isVertical ? "50%" : "100%"} 
-                            y2={isVertical ? "100%" : "50%"} 
+                            x1={isVertical ? '50%' : '0'} 
+                            y1={isVertical ? '0' : '50%'} 
+                            x2={isVertical ? '50%' : '100%'} 
+                            y2={isVertical ? '100%' : '50%'} 
                             stroke={strokeColor} 
                             strokeWidth={borderWidthVal} 
                             strokeDasharray={dashArray} 
-                            shapeRendering="crispEdges"
                         />
                     </svg>
                 </div>
             );
         }
         
-        const heightPx = (element.h / 100 * pageHeight);
+        const heightPx = measuredSize.h > 0 ? measuredSize.h : ((element.h / 100) * pageHeight);
         let lineCount = 0;
-        let finalLineSpacing = Math.round(style.lineSpacing || 24);
+        let finalLineSpacing = style.lineSpacing || (24 * scaleFactor);
         const timesList: string[] = [];
 
         if (style.showTimes) {
@@ -99,38 +115,35 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             }
             lineCount = timesList.length;
             if (lineCount > 0 && heightPx > 0) {
-                finalLineSpacing = Math.max(16, Math.round(heightPx / lineCount));
+                finalLineSpacing = Math.max(8 * scaleFactor, heightPx / lineCount);
             }
         } else if (style.rowCount && style.rowCount > 0) {
             lineCount = style.rowCount;
-            finalLineSpacing = Math.max(16, Math.round(heightPx / lineCount));
+            finalLineSpacing = Math.max(8 * scaleFactor, heightPx / lineCount);
         } else {
-            // Ensure lines have at least 16px integer spacing so lines are crisp and uniform
-            finalLineSpacing = Math.max(16, finalLineSpacing);
-            lineCount = Math.floor((heightPx - 1) / finalLineSpacing);
+            finalLineSpacing = Math.max(8 * scaleFactor, finalLineSpacing);
+            lineCount = Math.floor((heightPx - 0.5) / finalLineSpacing);
         }
 
         const textAlign = style.textAlign || 'left';
         const verticalAlign = style.verticalAlign || 'middle';
         const timePosition = style.timePosition || 'left';
-        const timeWidthPx = (style as any).timeColumnWidth || style.timeWidth || 30;
-        const rawTimeFontSize = (style as any).timeFontSize || style.fontSize || 7.5;
-        const timeFontSizeVal = Math.min(rawTimeFontSize, Math.max(5.5, finalLineSpacing * 0.58));
+        const rawTimeW = (style as any).timeColumnWidth || style.timeWidth;
+        const timeWidthPx = rawTimeW !== undefined ? Number(rawTimeW) * scaleFactor : (30 * scaleFactor);
+        const rawTimeFontSize = (style as any).timeFontSize ? Number((style as any).timeFontSize) * scaleFactor : (style.fontSize || (7.5 * scaleFactor));
+        const timeFontSizeVal = Math.min(rawTimeFontSize, Math.max(4.5 * scaleFactor, finalLineSpacing * 0.58));
         const timeColorVal = (style as any).timeColor || style.color || '#6b7280';
         const timeFontWeightVal = (style as any).timeFontWeight || style.fontWeight || 'bold';
         const showCheckboxes = Boolean((style as any).showCheckboxes);
         const checkboxStyle = (style as any).checkboxStyle || 'circle';
 
-        let flexVerticalAlign = 'items-center';
         let selfVerticalAlign = 'self-center';
         let verticalOffset = '0px';
 
         if (verticalAlign === 'top') {
-            flexVerticalAlign = 'items-start';
             selfVerticalAlign = 'self-start';
-            verticalOffset = '2px';
+            verticalOffset = `${2 * scaleFactor}px`;
         } else if (verticalAlign === 'bottom') {
-            flexVerticalAlign = 'items-end';
             selfVerticalAlign = 'self-end';
             verticalOffset = `-${borderWidthVal / 2}px`;
         }
@@ -142,10 +155,11 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             flexHorizontalAlign = 'justify-end';
         }
 
-        const cbSize = Math.max(7, Math.min(11, finalLineSpacing * 0.55));
+        const cbSize = Math.max(5 * scaleFactor, Math.min(11 * scaleFactor, finalLineSpacing * 0.55));
+        const cbStrokeW = borderWidthVal;
 
         return (
-            <>
+            <div ref={containerRef} className="w-full h-full">
                 {Array(lineCount).fill(0).map((_, i) => {
                     const rawTimeText = style.showTimes ? (timesList[i] ?? '') : '';
                     const displayTime = rawTimeText || '\u00A0';
@@ -156,8 +170,8 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                             style={{ 
                                 width: `${timeWidthPx}px`,
                                 minWidth: `${timeWidthPx}px`,
-                                paddingRight: timePosition === 'left' ? '6px' : '0px',
-                                paddingLeft: timePosition === 'right' ? '6px' : '0px',
+                                paddingRight: timePosition === 'left' ? `${6 * scaleFactor}px` : '0px',
+                                paddingLeft: timePosition === 'right' ? `${6 * scaleFactor}px` : '0px',
                                 marginBottom: verticalAlign === 'bottom' ? verticalOffset : undefined,
                                 marginTop: verticalAlign === 'top' ? verticalOffset : undefined,
                                 justifyContent: textAlign === 'center' ? 'center' : (textAlign === 'right' ? 'flex-end' : 'flex-start'),
@@ -166,7 +180,7 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         >
                             <span 
                                 style={{ 
-                                    fontFamily: style.fontFamily || 'Montserrat, monospace',
+                                    fontFamily: style.fontFamily ? getSafeFontFamily(style.fontFamily) : 'Montserrat, monospace',
                                     fontSize: timeFontSizeVal,
                                     fontWeight: timeFontWeightVal,
                                     fontStyle: style.fontStyle || 'normal',
@@ -188,22 +202,42 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                     ) : null;
 
                     const checkboxNode = (!style.showTimes && showCheckboxes) ? (
-                        <div
-                            className="shrink-0 select-none flex items-center justify-center mr-2 self-center"
-                            style={{
-                                width: `${cbSize}px`,
-                                height: `${cbSize}px`,
-                                borderRadius: checkboxStyle === 'circle' ? '9999px' : '2.5px',
-                                border: `${Math.max(1, borderWidthVal * 1.4)}px solid ${strokeColor}`,
-                                backgroundColor: '#ffffff'
-                            }}
-                        />
+                        <svg
+                            width={cbSize}
+                            height={cbSize}
+                            viewBox={`0 0 ${cbSize} ${cbSize}`}
+                            className="shrink-0 select-none self-center"
+                            style={{ marginRight: `${8 * scaleFactor}px` }}
+                        >
+                            {checkboxStyle === 'circle' ? (
+                                <circle
+                                    cx={cbSize / 2}
+                                    cy={cbSize / 2}
+                                    r={Math.max(0.5, (cbSize - cbStrokeW) / 2)}
+                                    fill="#ffffff"
+                                    stroke={cbStrokeW > 0 ? strokeColor : 'none'}
+                                    strokeWidth={cbStrokeW}
+                                />
+                            ) : (
+                                <rect
+                                    x={cbStrokeW / 2}
+                                    y={cbStrokeW / 2}
+                                    width={Math.max(0.5, cbSize - cbStrokeW)}
+                                    height={Math.max(0.5, cbSize - cbStrokeW)}
+                                    rx={2.2 * scaleFactor}
+                                    ry={2.2 * scaleFactor}
+                                    fill="#ffffff"
+                                    stroke={cbStrokeW > 0 ? strokeColor : 'none'}
+                                    strokeWidth={cbStrokeW}
+                                />
+                            )}
+                        </svg>
                     ) : null;
 
                     return (
                         <div 
                             key={i} 
-                            className={`w-full flex relative`} 
+                            className="w-full flex relative" 
                             style={{ 
                                 height: finalLineSpacing,
                                 alignItems: verticalAlign === 'top' ? 'flex-start' : (verticalAlign === 'bottom' ? 'flex-end' : 'center')
@@ -211,17 +245,9 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         >
                             {timeNode && timePosition === 'left' && timeNode}
                             {checkboxNode}
-                            <div className="flex-1 self-end relative w-full flex items-center" style={{ height: `${borderWidthVal}px` }}>
-                                {isSolid ? (
-                                    <div 
-                                        style={{ 
-                                            width: '100%', 
-                                            height: `${borderWidthVal}px`, 
-                                            backgroundColor: strokeColor 
-                                        }} 
-                                    />
-                                ) : (
-                                    <svg className="w-full h-full overflow-visible" style={{ shapeRendering: 'crispEdges' }}>
+                            <div className="flex-1 self-end relative w-full flex items-center" style={{ height: `${Math.max(1, borderWidthVal)}px` }}>
+                                {borderWidthVal > 0 && (
+                                    <svg className="w-full h-full overflow-visible">
                                         <line 
                                             x1="0" 
                                             y1="50%" 
@@ -230,7 +256,6 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                                             stroke={strokeColor} 
                                             strokeWidth={borderWidthVal} 
                                             strokeDasharray={dashArray} 
-                                            shapeRendering="crispEdges"
                                         />
                                     </svg>
                                 )}
@@ -239,38 +264,66 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                         </div>
                     );
                 })}
-            </>
+            </div>
         );
     }
 
     if (element.type === 'box') {
-        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : 0;
+        const strokeWidth = style.borderWidth !== undefined ? Math.max(0, Number(style.borderWidth)) : 0;
         const strokeColor = style.borderColor || '#000000';
         const borderRadius = style.borderRadius || 0;
         const borderStyle = style.borderStyle || 'solid';
-        const dashArray = borderStyle === 'dashed' ? '5,5' : (borderStyle === 'dotted' ? `${Math.max(1, strokeWidth)},${Math.max(2, strokeWidth * 2)}` : 'none');
+        const dashArray = getDashArray(borderStyle, strokeWidth, scaleFactor);
+        const isDouble = borderStyle === 'double' && strokeWidth > 0;
 
         return (
-            <div className="w-full h-full relative" style={{ 
+            <div ref={containerRef} className="w-full h-full relative" style={{ 
                 background: getBackgroundStyle(),
                 borderRadius: `${borderRadius}px`,
                 boxShadow: getBoxShadow(),
                 opacity: style.opacity ?? 1
             }}>
                 {strokeWidth > 0 && (
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                        <rect 
-                            x="0" 
-                            y="0" 
-                            width="100%" 
-                            height="100%" 
-                            rx={borderRadius} 
-                            ry={borderRadius} 
-                            fill="none" 
-                            stroke={strokeColor} 
-                            strokeWidth={strokeWidth} 
-                            strokeDasharray={dashArray} 
-                        />
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox={`0 0 ${boxW} ${boxH}`}>
+                        {isDouble ? (
+                            <>
+                                <rect
+                                    x={strokeWidth / 6}
+                                    y={strokeWidth / 6}
+                                    width={Math.max(0, boxW - strokeWidth / 3)}
+                                    height={Math.max(0, boxH - strokeWidth / 3)}
+                                    rx={Math.max(0, borderRadius)}
+                                    ry={Math.max(0, borderRadius)}
+                                    fill="none"
+                                    stroke={strokeColor}
+                                    strokeWidth={strokeWidth / 3}
+                                />
+                                <rect
+                                    x={(5 * strokeWidth) / 6}
+                                    y={(5 * strokeWidth) / 6}
+                                    width={Math.max(0, boxW - (5 * strokeWidth) / 3)}
+                                    height={Math.max(0, boxH - (5 * strokeWidth) / 3)}
+                                    rx={Math.max(0, borderRadius - (2 * strokeWidth) / 3)}
+                                    ry={Math.max(0, borderRadius - (2 * strokeWidth) / 3)}
+                                    fill="none"
+                                    stroke={strokeColor}
+                                    strokeWidth={strokeWidth / 3}
+                                />
+                            </>
+                        ) : (
+                            <rect 
+                                x="0" 
+                                y="0" 
+                                width={boxW} 
+                                height={boxH} 
+                                rx={borderRadius} 
+                                ry={borderRadius} 
+                                fill="none" 
+                                stroke={strokeColor} 
+                                strokeWidth={strokeWidth} 
+                                strokeDasharray={dashArray} 
+                            />
+                        )}
                     </svg>
                 )}
             </div>
@@ -278,29 +331,53 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
     }
 
     if (element.type === 'circle') {
-        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : 0;
+        const strokeWidth = style.borderWidth !== undefined ? Math.max(0, Number(style.borderWidth)) : 0;
         const strokeColor = style.borderColor || '#000000';
         const borderStyle = style.borderStyle || 'solid';
-        const dashArray = borderStyle === 'dashed' ? '5,5' : (borderStyle === 'dotted' ? `${Math.max(1, strokeWidth)},${Math.max(2, strokeWidth * 2)}` : 'none');
+        const dashArray = getDashArray(borderStyle, strokeWidth, scaleFactor);
+        const isDouble = borderStyle === 'double' && strokeWidth > 0;
 
         return (
-            <div className="w-full h-full rounded-full relative" style={{ 
+            <div ref={containerRef} className="w-full h-full rounded-full relative" style={{ 
                 background: getBackgroundStyle(),
                 boxShadow: getBoxShadow(),
                 opacity: style.opacity ?? 1
             }}>
                 {strokeWidth > 0 && (
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                        <ellipse 
-                            cx="50%" 
-                            cy="50%" 
-                            rx="50%" 
-                            ry="50%" 
-                            fill="none" 
-                            stroke={strokeColor} 
-                            strokeWidth={strokeWidth} 
-                            strokeDasharray={dashArray} 
-                        />
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox={`0 0 ${boxW} ${boxH}`}>
+                        {isDouble ? (
+                            <>
+                                <ellipse 
+                                    cx={boxW / 2} 
+                                    cy={boxH / 2} 
+                                    rx={Math.max(0.5, boxW / 2 - strokeWidth / 6)} 
+                                    ry={Math.max(0.5, boxH / 2 - strokeWidth / 6)} 
+                                    fill="none" 
+                                    stroke={strokeColor} 
+                                    strokeWidth={strokeWidth / 3} 
+                                />
+                                <ellipse 
+                                    cx={boxW / 2} 
+                                    cy={boxH / 2} 
+                                    rx={Math.max(0.5, boxW / 2 - (5 * strokeWidth) / 6)} 
+                                    ry={Math.max(0.5, boxH / 2 - (5 * strokeWidth) / 6)} 
+                                    fill="none" 
+                                    stroke={strokeColor} 
+                                    strokeWidth={strokeWidth / 3} 
+                                />
+                            </>
+                        ) : (
+                            <ellipse 
+                                cx={boxW / 2} 
+                                cy={boxH / 2} 
+                                rx={boxW / 2} 
+                                ry={boxH / 2} 
+                                fill="none" 
+                                stroke={strokeColor} 
+                                strokeWidth={strokeWidth} 
+                                strokeDasharray={dashArray} 
+                            />
+                        )}
                     </svg>
                 )}
             </div>
@@ -311,16 +388,17 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         const shapeType = style.shapeType || 'frame_thin_notched';
         const shapeDef = getVectorShapeById(shapeType);
         const strokeColor = style.borderColor || shapeDef.defaultStroke || '#000000';
-        const strokeWidth = style.borderWidth !== undefined ? style.borderWidth : (shapeDef.defaultBorderWidth || 1.2);
+        const strokeWidth = style.borderWidth !== undefined
+            ? Math.max(0, Number(style.borderWidth))
+            : ((shapeDef.defaultBorderWidth ?? 1.2) * scaleFactor);
         const opacity = style.opacity ?? 1;
         const borderRadius = style.borderRadius || 0;
+        const dashArray = getDashArray(style.borderStyle || 'solid', strokeWidth, scaleFactor);
         
-        // Ajuste exato às extremidades do elemento (como Caixa e Círculo)
         const bounds = getSvgPathBounds(shapeDef.path);
-        const tightViewBox = `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`;
 
         const isGradient = style.backgroundType === 'gradient';
-        const gradientId = `grad-${element.id}`;
+        const gradientId = `grad-${reactId.replace(/:/g, '')}`;
         const fillColor = isGradient ? `url(#${gradientId})` : (style.backgroundColor || shapeDef.defaultFill || 'transparent');
         const fillOpacity = style.fillOpacity ?? 1;
         const strokeOpacity = style.strokeOpacity ?? 1;
@@ -363,12 +441,17 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
         const isRepeated = s.repeatMode && s.repeatMode !== 'none' && (s.repeatCount ?? 1) > 1;
         const repeatCount = Math.max(1, Math.min(30, s.repeatCount || 1));
         const isRepeatY = s.repeatMode === 'repeat-y';
-        const repeatSpacing = s.repeatSpacing !== undefined ? s.repeatSpacing : 2;
+        const repeatSpacing = s.repeatSpacing !== undefined ? Number(s.repeatSpacing) * scaleFactor : (2 * scaleFactor);
 
         if (isRepeated) {
             const items = Array.from({ length: repeatCount });
+            const itemW = isRepeatY ? boxW : Math.max(1, (boxW - repeatSpacing * (repeatCount - 1)) / repeatCount);
+            const itemH = isRepeatY ? Math.max(1, (boxH - repeatSpacing * (repeatCount - 1)) / repeatCount) : boxH;
+            const mappedItemPath = transformSvgPathToBox(shapeDef.path, bounds, itemW, itemH, 0);
+
             return (
                 <div 
+                    ref={containerRef}
                     className={`w-full h-full flex ${isRepeatY ? 'flex-col' : 'flex-row'} items-center justify-between overflow-visible`} 
                     style={{ 
                         opacity, 
@@ -379,25 +462,21 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                     {items.map((_, idx) => (
                         <div key={idx} className="flex-1 w-full h-full flex items-center justify-center min-w-0 min-h-0 overflow-visible">
                             <svg 
-                                viewBox={tightViewBox} 
-                                preserveAspectRatio="none" 
+                                viewBox={`0 0 ${itemW} ${itemH}`}
                                 className="w-full h-full overflow-visible"
                             >
-                                <defs>
-                                    {renderGradient()}
-                                </defs>
+                                {idx === 0 && <defs>{renderGradient()}</defs>}
                                 <path 
-                                    d={shapeDef.path} 
+                                    d={mappedItemPath} 
                                     fillRule={shapeDef.fillRule || 'nonzero'}
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
                                     fill={fillColor} 
                                     fillOpacity={fillOpacity}
-                                    stroke={strokeColor} 
+                                    stroke={strokeWidth > 0 ? strokeColor : 'none'} 
                                     strokeOpacity={strokeOpacity}
                                     strokeWidth={strokeWidth} 
-                                    strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
-                                    vectorEffect="non-scaling-stroke"
+                                    strokeDasharray={dashArray}
                                 />
                             </svg>
                         </div>
@@ -406,11 +485,12 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
             );
         }
 
+        const mappedPath = shapeType === 'rectangle' ? '' : transformSvgPathToBox(shapeDef.path, bounds, boxW, boxH, 0);
+
         return (
-            <div className="w-full h-full" style={{ opacity, filter: dropShadowFilter !== 'none' ? dropShadowFilter : undefined }}>
+            <div ref={containerRef} className="w-full h-full" style={{ opacity, filter: dropShadowFilter !== 'none' ? dropShadowFilter : undefined }}>
                 <svg 
-                    viewBox={shapeType === 'rectangle' ? "0 0 100 100" : tightViewBox} 
-                    preserveAspectRatio="none" 
+                    viewBox={`0 0 ${boxW} ${boxH}`}
                     className="w-full h-full overflow-visible"
                 >
                     <defs>
@@ -418,29 +498,27 @@ export const ShapeElement: React.FC<BaseElementProps> = ({ element, isEditor, st
                     </defs>
                     {shapeType === 'rectangle' ? (
                         <rect 
-                            x="0" y="0" width="100%" height="100%"
+                            x="0" y="0" width={boxW} height={boxH}
                             rx={borderRadius} ry={borderRadius}
                             fill={fillColor} 
                             fillOpacity={fillOpacity}
-                            stroke={strokeColor} 
+                            stroke={strokeWidth > 0 ? strokeColor : 'none'} 
                             strokeOpacity={strokeOpacity}
                             strokeWidth={strokeWidth} 
-                            strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
-                            vectorEffect="non-scaling-stroke"
+                            strokeDasharray={dashArray}
                         />
                     ) : (
                         <path 
-                            d={shapeDef.path} 
+                            d={mappedPath} 
                             fillRule={shapeDef.fillRule || 'nonzero'}
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             fill={fillColor} 
                             fillOpacity={fillOpacity}
-                            stroke={strokeColor} 
+                            stroke={strokeWidth > 0 ? strokeColor : 'none'} 
                             strokeOpacity={strokeOpacity}
                             strokeWidth={strokeWidth} 
-                            strokeDasharray={style.borderStyle === 'dashed' ? '5,5' : style.borderStyle === 'dotted' ? '2,2' : 'none'}
-                            vectorEffect="non-scaling-stroke"
+                            strokeDasharray={dashArray}
                         />
                     )}
                 </svg>

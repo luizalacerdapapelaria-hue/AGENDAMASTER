@@ -1002,7 +1002,7 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                                 type="range"
                                 min="0"
                                 max="10"
-                                step="0.5"
+                                step="0.05"
                                 value={objStyle.borderWidth ?? 1}
                                 onChange={e =>
                                   handleUpdateObjectStyle(objStyle.id, {
@@ -1015,14 +1015,14 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                                 type="number"
                                 min="0"
                                 max="20"
-                                step="0.5"
+                                step="0.05"
                                 value={objStyle.borderWidth ?? 1}
                                 onChange={e =>
                                   handleUpdateObjectStyle(objStyle.id, {
                                     borderWidth: parseFloat(e.target.value) || 0,
                                   })
                                 }
-                                className="w-12 text-xs p-1 border rounded text-center font-bold"
+                                className="w-14 text-xs p-1 border rounded text-center font-bold"
                               />
                             </div>
                           </div>
@@ -1532,6 +1532,23 @@ export const StylesManagerPanel: React.FC<StylesManagerPanelProps> = ({
                             }}
                             className="w-full text-xs p-1.5 bg-white border border-gray-200 rounded-lg"
                           >
+                            {(() => {
+                              const currentFont = chStyle.fontFamily;
+                              const normalizedCurrent = currentFont?.trim().toLowerCase();
+                              const isListed =
+                                !normalizedCurrent ||
+                                availableFonts.some(f => f.toLowerCase() === normalizedCurrent) ||
+                                systemFonts.some(f => f.toLowerCase() === normalizedCurrent) ||
+                                customFonts.some(f => f.toLowerCase() === normalizedCurrent);
+                              if (isListed || !currentFont) return null;
+                              return (
+                                <optgroup label="Fonte do Projeto">
+                                  <option value={currentFont} style={{ fontFamily: getSafeFontFamily(currentFont) }}>
+                                    {currentFont}
+                                  </option>
+                                </optgroup>
+                              );
+                            })()}
                             <optgroup label="Fontes Padrão">
                               {availableFonts.map(f => (
                                 <option key={f} value={f} style={{ fontFamily: getSafeFontFamily(f) }}>

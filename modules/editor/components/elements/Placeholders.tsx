@@ -1,9 +1,10 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BaseElementProps } from './types';
 import { DayData } from '../../../../types';
 import { getMonthName, getDayName } from '../../../../core/backend/calendar';
 import { getTextStrokeCss } from '../../../../core/logic/textStroke';
+import { ensureFontLoaded, getSafeFontFamily } from '../../../../core/logic/fontDetector';
 
 const applyTextTransform = (text: string | number, transform?: string) => {
     const str = String(text);
@@ -41,6 +42,12 @@ const getAlignmentStyles = (style: any): React.CSSProperties => {
 };
 
 export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayData, style, isEditor, pageHeight, pageWidth }) => {
+    useEffect(() => {
+        if (style?.fontFamily) {
+            ensureFontLoaded(style.fontFamily);
+        }
+    }, [style?.fontFamily]);
+
     const currentYear = new Date().getFullYear();
     let d: DayData = {
         date: new Date(currentYear, 0, 1),
@@ -108,6 +115,7 @@ export const PlaceholderElement: React.FC<BaseElementProps> = ({ element, dayDat
                 style={{
                     color: '#111827',
                     ...style, 
+                    fontFamily: getSafeFontFamily(style?.fontFamily),
                     ...alignmentStyles, 
                     display: 'flex', 
                     width: '100%', 
